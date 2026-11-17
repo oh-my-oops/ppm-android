@@ -2,6 +2,7 @@ package com.hienlh.ppm.app
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.util.Log
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.foundation.text.input.clearText
@@ -3120,7 +3121,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         // Asked at each change, as the web asks `useIsMobile`: a phone opens every tab in the first panel.
         // A new chat tab is resolved from this device's cache before its first frame, as `openTab` resolves it.
         val chatCache = newChatCache
-        val store = WorkspaceStore(cache, isMobile = { !wide }, windows = windowStore) { project ->
+        val store = WorkspaceStore(cache, isMobile = { !wide }, windows = windowStore, warn = { Log.w("PPM", "workspace: $it") }) { project ->
             project?.let { NewChatDefaults(chatCache.settings(), chatCache.providers(it)?.map(ProviderInfo::id)) }
         }
         workspaceCache = cache
@@ -3234,8 +3235,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      * a terminal and a host's file open there as they do on the web.
      */
     private fun withWorkspace(open: (WorkspaceStore) -> Unit) {
-        val store = workspace ?: return
-        if (store.state.value.currentProject == selectedProject) open(store) else waitingForWorkspace += open
+        val store = workspace ?: run {
+            Log.w("PPM", "workspace: no layout open, dropped a tab request (project $selectedProject)")
+            return
+        }
+        if (store.state.value.currentProject == selectedProject) open(store) else {
+            Log.i("PPM", "workspace: tab request waits for $selectedProject (layout shows ${store.state.value.currentProject}, ${waitingForWorkspace.size} waiting)")
+            waitingForWorkspace += open
+        }
     }
 
     /** Back in front: another device may have changed this project's tabs meanwhile (the web reads them on every load). */
@@ -3663,7 +3670,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      * when given, else in the focused panel (a phone's first).
      */
     fun openTab(session: SessionInfo, panelId: String? = null) {
-        val project = selectedProject ?: return
+        val project = selectedProject ?: run {
+            Log.w("PPM", "workspace: no project selected, session ${session.id} not opened")
+            return
+        }
         withWorkspace { store ->
             store.openTab(
                 NewTab(

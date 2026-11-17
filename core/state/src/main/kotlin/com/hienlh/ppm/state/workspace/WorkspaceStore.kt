@@ -84,6 +84,8 @@ class WorkspaceStore(
     private val randomId: () -> String = ::webRandomId,
     /** The floating windows a tab can be detached into; none, none can. */
     private val windows: WindowStore? = null,
+    /** Where a request the store had to redirect or refuse is reported (logcat on Android). */
+    private val warn: (String) -> Unit = {},
     /** What a new chat tab is resolved from before its first paint, by project; none, each waits for its preparation. */
     private val newChatDefaults: (project: String?) -> NewChatDefaults? = { null },
 ) {
@@ -136,15 +138,28 @@ class WorkspaceStore(
         }
 
         // Already in memory: restore the snapshot, pointing the shared dock at this project's tab.
-        grids[projectName]?.let { restoredGrid ->
-            val dockPanel = st.panels[DOCK_PANEL_ID]
-            val panels = if (dockPanel == null) st.panels
-            else st.panels + (DOCK_PANEL_ID to dockPanel.copy(activeTabId = pickDockActiveTab(dockPanel, projectName)))
+        grids[projectName]?.let { kept ->
+            // Never a grid naming a panel that went while the project was out of sight, nor focus on one:
+            // a tab asked for would open nowhere.
+            var restoredGrid = kept.map { row -> row.filter { it in st.panels } }.filter { it.isNotEmpty() }
+            var held = st.panels
+            if (restoredGrid.isEmpty()) {
+                val panel = createPanel(newPanelId())
+                held = held + (panel.id to panel)
+                restoredGrid = listOf(listOf(panel.id))
+            }
+            if (restoredGrid != kept) {
+                warn("switchProject($projectName): its kept grid $kept named panels that are gone; showing $restoredGrid")
+                grids[projectName] = restoredGrid
+            }
+            val dockPanel = held[DOCK_PANEL_ID]
+            val panels = if (dockPanel == null) held
+            else held + (DOCK_PANEL_ID to dockPanel.copy(activeTabId = pickDockActiveTab(dockPanel, projectName)))
             commit(st.copy(
                 currentProject = projectName,
                 panels = panels,
                 grid = restoredGrid,
-                focusedPanelId = focused[projectName] ?: restoredGrid.firstOrNull()?.firstOrNull().orEmpty(),
+                focusedPanelId = focused[projectName]?.takeIf { it in restoredGrid.flatten() } ?: restoredGrid.first().first(),
                 projectGrids = grids,
                 projectFocused = focused,
                 dock = docks[projectName] ?: DEFAULT_DOCK,
@@ -262,7 +277,10 @@ class WorkspaceStore(
     fun reloadProject(projectName: String) {
         hydrateWindowPanels()
         val st = s
-        val oldIds = st.projectGrids[projectName]?.flatten()?.toSet().orEmpty()
+        // The open project's grid is the live one: its entry in projectGrids is the snapshot taken
+        // when it was loaded, without the panels split off since. Left behind, those would stay in
+        // memory with their tabs, on no grid, and a chat found in one would be "shown" there.
+        val oldIds = (st.projectGrids[projectName].orEmpty().flatten() + if (st.currentProject == projectName) st.grid.flatten() else emptyList()).toSet()
         // The dock panel is shared: only this project's tabs leave it.
         val panels = LinkedHashMap(st.panels)
         for (id in oldIds) if (id != DOCK_PANEL_ID) panels.remove(id)
@@ -306,8 +324,11 @@ class WorkspaceStore(
     fun openTab(def: NewTab, panelId: String? = null): String {
         val mobile = isMobile()
         // A phone has one merged tab bar: everything opens in the first panel.
-        val pid = (if (mobile) s.grid.firstOrNull()?.firstOrNull() else null) ?: panelId ?: s.focusedPanelId
-        if (s.panels[pid] == null) return ""
+        val asked = (if (mobile) s.grid.firstOrNull()?.firstOrNull() else null) ?: panelId ?: s.focusedPanelId
+        val pid = openTarget(asked) ?: run {
+            warn("openTab(${def.type}): no panel to open in (asked $asked, grid ${s.grid}, project ${s.currentProject})")
+            return ""
+        }
 
         var tabDef = def
         // A new chat opens with a provider and mode already, when this device's copy of the
@@ -332,9 +353,10 @@ class WorkspaceStore(
         // the id it was minted with after it gets a session. A design tab hosts its session too.
         if (tabDef.type == "chat") {
             tabDef.metadata["sessionId"].string?.takeIf { it.isNotEmpty() }?.let { sid ->
-                for (panel in s.panels.values) {
+                for (panel in panelsOnScreenFirst()) {
                     val existing = panel.tabs.firstOrNull { tabSessionId(it) == sid } ?: continue
                     rememberChatProvider(existing)
+                    if (bringIntoView(existing, panel.id, pid)) return existing.id
                     activateIn(panel.id, existing.id, focus = focusAfterActivate(panel.id))
                     raiseWindowOf(panel.id)
                     return existing.id
@@ -346,10 +368,11 @@ class WorkspaceStore(
         if (tabDef.type == "design") {
             val slug = tabDef.metadata["designSlug"]
             val project = tabDef.projectId ?: tabDef.metadata["projectName"].string
-            for (panel in s.panels.values) {
+            for (panel in panelsOnScreenFirst()) {
                 val existing = panel.tabs.firstOrNull {
                     it.type == "design" && it.metadata["designSlug"] == slug && (it.projectId ?: it.metadata["projectName"].string) == project
                 } ?: continue
+                if (bringIntoView(existing, panel.id, pid)) return existing.id
                 activateIn(panel.id, existing.id, focus = focusAfterActivate(panel.id))
                 raiseWindowOf(panel.id)
                 return existing.id
@@ -401,7 +424,9 @@ class WorkspaceStore(
     }
 
     fun closeTab(tabId: String, panelId: String? = null) {
-        val panel = (if (panelId != null) s.panels[panelId] else s.panelOf(tabId)) ?: return
+        // With no panel named, the one on screen: another project's kept panel can hold a tab of the
+        // same id (a file both projects have, a design slug, the remote desktop).
+        val panel = (if (panelId != null) s.panels[panelId] else panelsOnScreenFirst().firstOrNull { it.tab(tabId) != null }) ?: return
         val pid = panel.id
         val st = s
         val tabs = panel.tabs.filter { it.id != tabId }
@@ -411,18 +436,8 @@ class WorkspaceStore(
             val previous = history.lastOrNull()
             active = previous?.takeIf { id -> tabs.any { it.id == id } } ?: tabs.lastOrNull()?.id
         }
-        // An emptied panel goes unless it is the grid's last. The dock never goes: it outlives its
-        // tabs, only its visibility follows them. A window's panel always goes with its last tab.
-        val removable = isWindowPanelId(pid) || (st.gridPanelIds.size > 1 && pid != DOCK_PANEL_ID)
-        if (tabs.isEmpty() && removable) {
-            val rest = st.panels - pid
-            val grid = gridRemovePanel(st.grid, pid)
-            // Focus lands on a panel still in the grid, not on another project's keep-alive panel.
-            val focusedId = if (st.focusedPanelId == pid) grid.flatten().firstOrNull() ?: rest.keys.first() else st.focusedPanelId
-            commit(st.copy(panels = rest, grid = grid, focusedPanelId = focusedId))
-        } else {
-            commit(st.copy(panels = st.panels + (pid to panel.copy(tabs = tabs, activeTabId = active, tabHistory = history))))
-        }
+        val closed = st.copy(panels = st.panels + (pid to panel.copy(tabs = tabs, activeTabId = active, tabHistory = history)))
+        commit(if (tabs.isEmpty()) withoutEmptiedPanel(closed, pid) ?: closed else closed)
         persist()
         // The dock has no empty state: its last tab closing hides it.
         if (pid == DOCK_PANEL_ID && activeProjectDockTabCount() == 0) setDockVisible(false)
@@ -757,6 +772,100 @@ class WorkspaceStore(
     private fun gridFocusTarget(grid: List<List<String>>, preferred: String?): String? {
         val flat = grid.flatten()
         return preferred?.takeIf { it in flat } ?: flat.firstOrNull()
+    }
+
+    /**
+     * Whether [panelId] is on screen: in the open project's grid, the dock while it shows, or (off
+     * a phone) the panel of a window that is open. Another project's kept panels, a window panel
+     * whose window went, and a panel no grid holds any more are in memory but nowhere to be seen.
+     */
+    private fun onScreen(panelId: String): Boolean {
+        if (panelId !in s.panels) return false
+        if (panelId in s.gridPanelIds) return true
+        if (panelId == DOCK_PANEL_ID) return s.dock.visible
+        val windowId = windowIdFromPanelId(panelId) ?: return false
+        if (isMobile()) return false
+        val windows = windows ?: return true
+        return windowId in windows.state.value.windows
+    }
+
+    /** Every panel, those on screen first: what a search for an open tab should find first. */
+    private fun panelsOnScreenFirst(): List<WorkspacePanel> = s.panels.values.sortedBy { !onScreen(it.id) }
+
+    /**
+     * Where a tab asked for in [asked] opens: there, while it is on screen (or the dock, named on
+     * purpose); else in a grid panel, which takes focus — a tab opened anywhere else would never be
+     * seen, and neither would every one after it. Null when the grid has no panel.
+     */
+    private fun openTarget(asked: String): String? {
+        if (asked == DOCK_PANEL_ID && asked in s.panels || onScreen(asked)) return asked
+        val fallback = gridFocusTarget(s.grid, s.focusedPanelId)?.takeIf { it in s.panels }
+            ?: s.gridPanelIds.firstOrNull { it in s.panels } ?: return null
+        warn("openTab: panel $asked is not on screen (grid ${s.grid}, focus ${s.focusedPanelId}); opening in $fallback")
+        if (s.focusedPanelId != fallback) commit(s.copy(focusedPanelId = fallback))
+        return fallback
+    }
+
+    /**
+     * A tab found open in [fromId], a panel nobody sees, is moved to the front of a grid panel
+     * ([intoId] when that is one, else the focused one), which takes focus: activated where it was,
+     * opening it would do nothing at all. False when it is on screen already, or no grid panel is there.
+     */
+    private fun bringIntoView(tab: WorkspaceTab, fromId: String, intoId: String): Boolean {
+        if (onScreen(fromId)) return false
+        val st = s
+        val target = intoId.takeIf { it in st.gridPanelIds } ?: gridFocusTarget(st.grid, st.focusedPanelId) ?: return false
+        val from = st.panels[fromId] ?: return false
+        val into = st.panels[target] ?: return false
+        warn("openTab: ${tab.id} was in $fromId, which is not on screen; moving it to $target")
+        val fromTabs = from.tabs.filter { it.id != tab.id }
+        val fromHistory = from.tabHistory.filter { it != tab.id }
+        val left = from.copy(
+            tabs = fromTabs,
+            tabHistory = fromHistory,
+            activeTabId = from.activeTabId?.takeIf { it != tab.id } ?: fromHistory.lastOrNull() ?: fromTabs.lastOrNull()?.id,
+        )
+        val moved = stampActive(listOf(tab), tab.id)
+        val arrived = into.copy(
+            tabs = pinnedFirst(into.tabs.filter { it.id != tab.id } + moved),
+            activeTabId = tab.id,
+            tabHistory = pushHistory(into.tabHistory, tab.id),
+        )
+        val next = st.copy(focusedPanelId = target, panels = st.panels + (fromId to left) + (target to arrived))
+        commit(if (fromTabs.isEmpty()) withoutEmptiedPanel(next, fromId) ?: next else next)
+        persist()
+        if (fromTabs.isEmpty() && isWindowPanelId(fromId)) windowIdFromPanelId(fromId)?.let { windows?.close(it) }
+        return true
+    }
+
+    /**
+     * [st] without the panel [pid], just emptied, wherever it is: off the open grid unless it is
+     * its last, off another project's kept grid unless it is that one's last (and that project's
+     * focus moved off it, or switching back would focus a panel that is gone), a window's panel or
+     * one no grid holds always. Null when it stays: the dock outlives its tabs.
+     */
+    private fun withoutEmptiedPanel(st: WorkspaceState, pid: String): WorkspaceState? {
+        if (pid == DOCK_PANEL_ID) return null
+        if (pid in st.gridPanelIds) {
+            if (st.gridPanelIds.size <= 1) return null
+            val grid = gridRemovePanel(st.grid, pid)
+            val focusedId = if (st.focusedPanelId == pid) grid.flatten().first() else st.focusedPanelId
+            return st.copy(panels = st.panels - pid, grid = grid, focusedPanelId = focusedId)
+        }
+        // The open project's own entry is a snapshot from its load; its grid was handled above.
+        val owner = st.projectGrids.entries.firstOrNull { (project, grid) -> project != st.currentProject && grid.any { pid in it } }
+        if (owner != null) {
+            val (project, kept) = owner
+            if (kept.flatten().size <= 1) return null
+            val grid = gridRemovePanel(kept, pid)
+            val focusedId = st.projectFocused[project]?.takeIf { it != pid } ?: grid.flatten().first()
+            return st.copy(
+                panels = st.panels - pid,
+                projectGrids = st.projectGrids + (project to grid),
+                projectFocused = st.projectFocused + (project to focusedId),
+            )
+        }
+        return st.copy(panels = st.panels - pid)
     }
 
     // -----------------------------------------------------------------------------------------
