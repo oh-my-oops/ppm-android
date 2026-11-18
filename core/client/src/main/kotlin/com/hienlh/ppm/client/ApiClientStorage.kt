@@ -69,15 +69,29 @@ suspend fun ApiClient.storageOverview(): StorageOverview {
                 o["dbStem"].string?.let { StorageOtherBackups(it, o["count"].wholeNumber ?: 0, o["totalBytes"].wholeNumber ?: 0) }
             },
         ),
-        sessionTrace = StorageSessionTrace(
-            path = trace["path"].string.orEmpty(),
-            sizeBytes = trace["sizeBytes"].wholeNumber ?: 0,
-            oldestTs = trace["oldestTs"].wholeNumber,
-            retentionDays = trace["retention_days"].wholeNumber ?: 0,
-            maxSizeMb = trace["max_size_mb"].wholeNumber ?: 0,
-        ),
+        sessionTrace = sessionTrace(trace),
     )
 }
+
+private fun sessionTrace(trace: JsonElement?) = StorageSessionTrace(
+    path = trace["path"].string.orEmpty(),
+    sizeBytes = trace["sizeBytes"].wholeNumber ?: 0,
+    oldestTs = trace["oldestTs"].wholeNumber,
+    retentionDays = trace["retention_days"].wholeNumber ?: 0,
+    maxSizeMb = trace["max_size_mb"].wholeNumber ?: 0,
+)
+
+/** `PUT /api/settings/session-trace` (`updateSessionTraceLimits`): saves both limits and answers the trace as it now stands. */
+suspend fun ApiClient.updateSessionTraceLimits(retentionDays: Long, maxSizeMb: Long): StorageSessionTrace = sessionTrace(
+    call(
+        "PUT",
+        "/api/settings/session-trace",
+        body = kotlinx.serialization.json.buildJsonObject {
+            put("retention_days", kotlinx.serialization.json.JsonPrimitive(retentionDays))
+            put("max_size_mb", kotlinx.serialization.json.JsonPrimitive(maxSizeMb))
+        },
+    ),
+)
 
 /** The Query Audit block's read (`getQueryAuditSettings`). */
 suspend fun ApiClient.queryAuditUsage(): QueryAuditUsage {

@@ -234,7 +234,7 @@ enum class SettingsCategory(
     Schedules("schedules", "Schedules", "Cron prompt & script tasks, logs & templates", ProductIcon.CalendarClock, SettingsGroup.Integrations, minimalSafe = false),
 
     // Advanced
-    QueryAudit("query-audit", "Query Audit Log", "SQL history retention & size cap", ProductIcon.ScrollText, SettingsGroup.Advanced, minimalSafe = false),
+    QueryAudit("query-audit", "Storage", "Databases, backups and logs on disk", ProductIcon.ScrollText, SettingsGroup.Advanced, minimalSafe = false),
     LanguageServers("language-servers", "Language Servers", "Editor code intelligence", ProductIcon.Code, SettingsGroup.Advanced, minimalSafe = false),
     DatabaseDrivers("database-drivers", "Database Drivers", "On-demand database engines", ProductIcon.Database, SettingsGroup.Advanced, minimalSafe = false),
     RemoteDesktop("remote-desktop", "Remote Desktop", "MediaMTX WebRTC relay", ProductIcon.Monitor, SettingsGroup.Advanced, minimalSafe = false),
@@ -557,7 +557,10 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                     SettingsCategory.Extensions -> ExtensionsSettingsSection(model)
                     SettingsCategory.Jira -> JiraSettingsSection(model)
                     SettingsCategory.Schedules -> SchedulesSettingsSection(model)
-                    SettingsCategory.QueryAudit -> QueryAuditSection(model)
+                    SettingsCategory.QueryAudit -> {
+                        com.hienlh.ppm.app.ui.settings.StorageOverviewSection(model)
+                        QueryAuditSection(model)
+                    }
                     SettingsCategory.LanguageServers -> LanguageServersSection(model)
                     SettingsCategory.DatabaseDrivers -> DatabaseDriversSection(model)
                     SettingsCategory.RemoteDesktop -> RemoteDesktopSettingsSection(model)

@@ -15,7 +15,7 @@ internal fun settingsSectionsShown(category: SettingsCategory): List<String> = w
     SettingsCategory.Mcp, SettingsCategory.AiResources -> listOf("mcp")
     SettingsCategory.Accounts -> listOf("accounts")
     SettingsCategory.Proxy -> listOf("proxy")
-    SettingsCategory.QueryAudit -> listOf("query-audit")
+    SettingsCategory.QueryAudit -> listOf("query-audit", "session-trace")
     SettingsCategory.Shortcuts -> listOf("keybindings")
     else -> emptyList()
 }
