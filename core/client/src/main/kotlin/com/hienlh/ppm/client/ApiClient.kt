@@ -179,8 +179,12 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
     suspend fun unreadSessions(project: String): Map<String, SessionUnread> =
         SessionUnread.list(call("GET", "${chatPath(project)}/sessions/unread"))
 
-    fun chatSocketUrl(project: String, sessionId: String, providerId: String): String =
-        socketUrl("/ws/project/${escape(project)}/chat/${escape(sessionId)}", listOf("providerId" to providerId))
+    /** [clientId] names this app to the server (`?clientId=`), so it can tell which device sent a message. */
+    fun chatSocketUrl(project: String, sessionId: String, providerId: String, clientId: String? = null): String =
+        socketUrl(
+            "/ws/project/${escape(project)}/chat/${escape(sessionId)}",
+            listOfNotNull("providerId" to providerId, clientId?.takeIf(ChatClientId::valid)?.let { "clientId" to it }),
+        )
 
     /** The app-wide socket: running and unread sessions, file changes, and other broadcasts. */
     fun globalSocketUrl(): String = socketUrl("/ws/global", emptyList())

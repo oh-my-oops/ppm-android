@@ -1,6 +1,7 @@
 package com.hienlh.ppm.state
 
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.ChatClientId
 import com.hienlh.ppm.client.SocketConnection
 import com.hienlh.ppm.client.teamMessages
 import com.hienlh.ppm.client.teams
@@ -18,7 +19,10 @@ import com.hienlh.ppm.protocol.QueuedMessage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.AssistantUiRequest
+import com.hienlh.ppm.protocol.AssistantUiResult
 import com.hienlh.ppm.protocol.TabOpenAnswer
+import com.hienlh.ppm.protocol.isAssistantProject
 import com.hienlh.ppm.protocol.TabOpenRequest
 import com.hienlh.ppm.protocol.TaskItem
 import com.hienlh.ppm.protocol.TurnOptions
@@ -38,6 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import java.time.Instant
 
 /** Everything one chat shows, as one value the UI collects. */
@@ -143,6 +148,16 @@ class ChatController(
      * either way, so none is ever left unanswered.
      */
     var tabOpener: (suspend (TabOpenRequest) -> TabOpenAnswer)? = null
+
+    /**
+     * Answers the PPM Assistant's screen tools (`assistant_ui`) with what the result carries; the
+     * app sets it for an Assistant session. Without one, or for a chat outside the Assistant's
+     * project, every request is refused at once, as the web's device refuses it.
+     */
+    var assistantUi: (suspend (AssistantUiRequest) -> AssistantUiResult)? = null
+
+    /** An Assistant session's picture of this device's screen, read for every message it sends (`uiSummary`). */
+    var uiSummary: (() -> JsonObject?)? = null
 
     /**
      * The AI settings' default model and effort for a provider. A chat with no session has had no
@@ -255,7 +270,8 @@ class ChatController(
         val content = text.trim()
         if ((content.isEmpty() && images.isEmpty()) || sessionId == null || stopped) return
         val reply = replyTo?.takeIf { it.sessionId == sessionId && it.providerId == providerId }
-        transmit(transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths, sendNow))
+        val message = transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths, sendNow)
+        transmit(uiSummary?.invoke()?.let { message.copy(uiSummary = it) } ?: message)
         onAttention?.invoke(ChatAttention.Answered)
         publish()
     }
@@ -403,7 +419,7 @@ class ChatController(
     private fun connect() {
         val session = sessionId ?: return
         if (stopped) return
-        val socket = SocketConnection(api.chatSocketUrl(project, session, providerId))
+        val socket = SocketConnection(api.chatSocketUrl(project, session, providerId, ChatClientId.value))
         this.socket = socket
         closeReason = null
         lastFrameAt = clock()
@@ -510,6 +526,7 @@ class ChatController(
                 }
                 is ChatEffect.TeamMessages -> team = team.received(effect.messages)
                 is ChatEffect.OpenTab -> openTab(effect.request)
+                is ChatEffect.AssistantUi -> answerAssistantUi(effect.request)
                 is ChatEffect.Attention -> onAttention?.invoke(effect.attention)
             }
         }
@@ -532,6 +549,22 @@ class ChatController(
                 TabOpenAnswer(opened = false, error = describe(e))
             }
             answer(result)
+        }
+    }
+
+    /** Answers a screen tool on this socket (`answerAssistantUi`); off the frame loop, as [openTab]. */
+    private fun answerAssistantUi(request: AssistantUiRequest) {
+        val handler = assistantUi?.takeIf { isAssistantProject(project) }
+            ?: return transmit(AssistantUiResult(request.requestId, null, ASSISTANT_UI_NOT_ASSISTANT))
+        scope.launch {
+            val result = try {
+                handler(request)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AssistantUiResult(request.requestId, null, e.message?.takeIf { it.isNotBlank() } ?: "The device could not do this.")
+            }
+            transmit(result)
         }
     }
 
@@ -707,6 +740,10 @@ class ChatController(
 
         const val TAB_OPEN_UNSUPPORTED =
             "The PPM app on this device cannot open tabs yet. Open this chat in the PPM web app to see it."
+
+        /** The web's refusal for a chat that is no Assistant session (`answer-assistant-ui.ts`). */
+        const val ASSISTANT_UI_NOT_ASSISTANT =
+            "This chat is not a PPM Assistant session; its device does not take Assistant requests."
 
         internal fun describe(error: Exception): String = error.message ?: error.toString()
     }

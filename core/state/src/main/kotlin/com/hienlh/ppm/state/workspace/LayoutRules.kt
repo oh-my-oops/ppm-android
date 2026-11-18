@@ -41,7 +41,7 @@ fun maxColumns(isMobile: Boolean): Int = if (isMobile) 1 else 3
 val DEFAULT_DOCK = DockState(visible = false, height = 30.0)
 
 /** One instance per project. */
-internal val SINGLETON_TYPES = setOf("settings", "git-log")
+internal val SINGLETON_TYPES = setOf("settings", "git-log", "assistant")
 
 /** One tab per table's data, structure and object SQL across the grid and the windows, as DBGate keys them. */
 internal val ONE_PER_WORKSPACE_TYPES = setOf("database", "db-structure", "db-sql")
@@ -50,7 +50,7 @@ internal val ONE_PER_WORKSPACE_TYPES = setOf("database", "db-structure", "db-sql
 internal val OBSOLETE_TAB_TYPES = setOf("projects", "git-status", "git-graph")
 
 /** Tab types that host a chat session (`tabSessionId`, src/web/lib/tab-session-id.ts). */
-private val SESSION_TAB_TYPES = setOf("chat", "design")
+private val SESSION_TAB_TYPES = setOf("chat", "design", "assistant")
 
 /** `ports` (≤0.17.7) became `tunnels` in the dock, which then moved to the sidebar: neither is a tab any more. */
 private val LEGACY_TUNNEL_TAB_TYPES = setOf("ports", "tunnels")
@@ -132,7 +132,7 @@ fun deriveTabId(type: String, metadata: JsonObject, randomId: () -> String = ::w
         "session-review" -> "session-review:${m("projectName") ?: "unknown"}:${m("sessionId") ?: "unknown"}"
         "git-review" -> "git-review:${m("projectName") ?: "unknown"}"
         "conflict-editor" -> "conflict-editor:${m("filePath") ?: "unknown"}"
-        "settings", "problems", "system-monitor", "logs" -> type
+        "settings", "problems", "system-monitor", "logs", "assistant" -> type
         "group" -> "group:${m("groupId") ?: "unknown"}"
         "design" -> "design:${m("designSlug") ?: "unknown"}"
         "web-preview" -> "web-preview:${m("url") ?: "unknown"}"
