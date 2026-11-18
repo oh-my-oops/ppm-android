@@ -45,6 +45,11 @@ import java.io.IOException
  * `data` or throws the error as a [PpmError].
  */
 class ApiClient(val baseUrl: HttpUrl, val token: String) {
+    // A token the app sends never reaches a trace entry, raw or as a socket URL carries it.
+    init {
+        TraceRedactor.Global.remember(token)
+    }
+
     // Routes
 
     suspend fun info(): ServerInfo {

@@ -26,8 +26,34 @@ object PpmHttp {
     /** How long a GET may wait with nothing arriving, as the web's api-client allows for headers. */
     const val GET_TIMEOUT_SECONDS = 30L
 
+    /**
+     * The app's `User-Agent` ([androidUserAgent]), sent on every request once the app sets it:
+     * the server names a client by it, in Logs ("PPM app·Android") and in its audit rows.
+     */
+    @Volatile
+    var userAgent: String? = null
+
+    /**
+     * `PPM-Android/<version> (Android <release>; <model>; tablet|phone)`, the form
+     * `src/shared/user-agent-label.ts` reads. The model is kept to printable ASCII (OkHttp refuses
+     * anything else in a header) without the characters that would end its field.
+     */
+    fun androidUserAgent(version: String, release: String, model: String, tablet: Boolean): String {
+        fun clean(text: String) = text.filter { it in ' '..'~' && it !in ";()" }.trim().replace(Regex("\\s+"), " ")
+        val device = clean(model).ifEmpty { "Android device" }
+        val app = clean(version).ifEmpty { "0" }
+        val android = clean(release).ifEmpty { "?" }
+        val kind = if (tablet) "tablet" else "phone"
+        return "PPM-Android/$app (Android $android; $device; $kind)"
+    }
+
     /** A POST may take as long as the work behind it (the web gives one no timeout at all). */
     val client: OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val agent = userAgent
+            chain.proceed(if (agent == null || request.header("User-Agent") != null) request else request.newBuilder().header("User-Agent", agent).build())
+        }
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(600, TimeUnit.SECONDS)
         .writeTimeout(600, TimeUnit.SECONDS)
