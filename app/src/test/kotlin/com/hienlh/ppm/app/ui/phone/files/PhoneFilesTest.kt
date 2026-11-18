@@ -109,19 +109,57 @@ class PhoneFilesTest {
         assertEquals("R", resolveFolderGitPriority(listOf("C", "R", "U")))
         assertEquals("1,284", formatFolderEntryCount(1284))
 
-        // Overflow menus & long-press actions omit tablet-only items
+        // The overflow menu: the web Explorer header's New File / New Folder, Upload Files… and, with something
+        // cut or copied, Paste; none of them while the tree may not change files.
         assertEquals(
-            listOf("Reveal Active File", "Collapse All", "Refresh"),
+            listOf("New File", "New Folder", "Upload Files…", "Reveal Active File", "Collapse All", "Refresh"),
             PhoneFilesOverflowAction.phoneMenu().map { it.label },
         )
         assertEquals(
-            listOf("Open", "Copy Path", "Copy Full Path", "Download"),
+            listOf("New File", "New Folder", "Upload Files…", "Paste", "Reveal Active File", "Collapse All", "Refresh"),
+            PhoneFilesOverflowAction.phoneMenu(canWrite = true, canPaste = true).map { it.label },
+        )
+        assertEquals(
+            listOf("Reveal Active File", "Collapse All", "Refresh"),
+            PhoneFilesOverflowAction.phoneMenu(canWrite = false, canPaste = true).map { it.label },
+        )
+        // The long-press sheet: the web's tree menu, in its groups.
+        assertEquals(
+            listOf(
+                listOf("Open"),
+                listOf("Cut", "Copy"),
+                listOf("Rename", "Delete"),
+                listOf("Copy Path", "Copy Full Path"),
+                listOf("Download"),
+                listOf("Select for Compare", "Compare with Selected"),
+            ),
+            PhoneTreeLongPressAction.groupsFor(isDirectory = false, canWrite = true, canCompareWithSelected = true)
+                .map { group -> group.map { it.label } },
+        )
+        assertEquals(
+            listOf(
+                listOf("New File", "New Folder", "Upload Files…"),
+                listOf("Open in File Explorer", "Open in Terminal"),
+                listOf("Cut", "Copy", "Paste"),
+                listOf("Rename", "Delete"),
+                listOf("Copy Path", "Copy Full Path"),
+                listOf("Download"),
+            ),
+            PhoneTreeLongPressAction.groupsFor(isDirectory = true, canWrite = true, canPaste = true, canOpenInExplorer = true)
+                .map { group -> group.map { it.label } },
+        )
+        // While the tree may not change files only the reading rows are left.
+        assertEquals(
+            listOf("Open", "Copy Path", "Copy Full Path", "Download", "Select for Compare"),
             PhoneTreeLongPressAction.actionsFor(isDirectory = false).map { it.label },
         )
         assertEquals(
-            listOf("Open in Terminal", "Copy Path", "Copy Full Path"),
+            listOf("Open in Terminal", "Copy Path", "Copy Full Path", "Download"),
             PhoneTreeLongPressAction.actionsFor(isDirectory = true).map { it.label },
         )
+        assertEquals("Download as Zip", PhoneTreeLongPressAction.DOWNLOAD.labelFor(isDirectory = true))
+        assertEquals("Compare with Selected (a.ts)", PhoneTreeLongPressAction.COMPARE_WITH_SELECTED.labelFor(false, "a.ts"))
+        assertTrue(PhoneTreeLongPressAction.DELETE.destructive)
         assertEquals(
             listOf("Word wrap", "Reload from disk", "Download", "Copy Path"),
             PhoneEditorOverflowAction.phoneMenu().map { it.label },
@@ -182,9 +220,15 @@ class PhoneFilesTest {
         assertEquals(PhoneFileViewKind.IMAGE, classifyPhoneFileView("public/logo.png"))
         assertEquals(PhoneFileViewKind.PDF, classifyPhoneFileView("docs/architecture.pdf"))
         assertEquals(PhoneFileViewKind.MARKDOWN, classifyPhoneFileView("README.md"))
-        assertEquals(PhoneFileViewKind.TABLET_ONLY_VIEWER, classifyPhoneFileView("data/sales-q3.xlsx"))
-        assertEquals(PhoneFileViewKind.TABLET_ONLY_VIEWER, classifyPhoneFileView("data/users.csv"))
-        assertEquals(PhoneFileViewKind.TABLET_ONLY_VIEWER, classifyPhoneFileView("notes/spec.docx"))
+        // What the tablet shows in a viewer of its own, the phone shows in the same one.
+        for (path in listOf("data/sales-q3.xlsx", "data/users.csv", "notes/spec.docx", "media/clip.mp4", "media/song.mp3",
+            "data/app.db", "data/app.sqlite", "site/index.html")) {
+            assertEquals(path, PhoneFileViewKind.FILE_VIEWER, classifyPhoneFileView(path))
+        }
+        // A file of no known kind is read as text, and the server says whether it is binary.
+        assertEquals(PhoneFileViewKind.CODE, classifyPhoneFileView("data/users.tsv"))
+        assertEquals(PhoneFileViewKind.CODE, classifyPhoneFileView("notes/old.doc"))
+        assertEquals(PhoneFileViewKind.BINARY_UNREADABLE, classifyPhoneFileView("notes/old.doc", cannotDisplayBinary = true))
         assertEquals(PhoneFileViewKind.BINARY_UNREADABLE, classifyPhoneFileView("dist/ppm.bin"))
     }
 
@@ -331,28 +375,17 @@ class PhoneFilesTest {
     }
 
     @Test
-    fun `phone unsupported file screen shows tablet notice and download button`() {
-        var downloads = 0
-        var canDownload by androidx.compose.runtime.mutableStateOf(true)
+    fun `a file the tablet shows in a viewer of its own shows in that viewer, with no tablet notice`() {
         compose.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
                 PhoneFileTabScreen(
-                    filePath = "data/sales-q3.xlsx",
-                    sizeBytes = 100_761L,
-                    onDownload = if (canDownload) ({ downloads++ }) else null,
+                    filePath = "data/users.csv",
+                    fileViewerContent = { androidx.compose.foundation.text.BasicText("the viewer") },
                 )
             }
         }
-
-        compose.onNode(hasTestTag("phone-unsupported-file-screen")).assertExists()
-        compose.onNodeWithText("sales-q3.xlsx").assertExists()
-        compose.onNodeWithText(PHONE_UNSUPPORTED_FILE_LINE).assertExists()
-        compose.onNodeWithText("Download").performClick()
-        assertEquals(1, downloads)
-
-        // Nothing to download with (no project file): no dead button.
-        canDownload = false
-        compose.waitForIdle()
-        assertTrue(compose.onAllNodesWithText("Download").fetchSemanticsNodes().isEmpty())
+        compose.onNode(hasTestTag("phone-file-viewer")).assertExists()
+        compose.onNodeWithText("the viewer").assertExists()
+        assertTrue(compose.onAllNodesWithText("on a tablet", substring = true).fetchSemanticsNodes().isEmpty())
     }
 }

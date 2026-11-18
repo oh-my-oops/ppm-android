@@ -762,110 +762,7 @@ fun PhoneMarkdownViewerScreen(
     }
 }
 
-// ───────────────────────── V9 · Phone Unsupported / Binary Viewers ─────────────────────────
-
-/**
- * Stateless Phone 3 · `V9 · A file the phone does not open` (`designs/ppm-mobile-tablet-redesign/phone/3-files/index.html`,
- * Note 41 & Section 9):
- * Spreadsheets (`csv`, `tsv`, `xls`, `xlsx`), Word (`doc`, `docx`), audio, video, SQLite, or HTML
- * preview show what the file is, `"Open on a tablet to view or edit it."`, and `Download`.
- */
-@Composable
-fun PhoneUnsupportedFileScreen(
-    filePath: String,
-    modifier: Modifier = Modifier,
-    sizeBytes: Long? = null,
-    onDownload: (() -> Unit)? = null,
-) {
-    val tokens = LocalPpmTokens.current
-    val fileName = remember(filePath) {
-        filePath.substringAfterLast('/').substringAfterLast('\\').ifBlank { filePath }
-    }
-    val kindLabel = remember(filePath) { describePhoneFileKind(filePath) }
-    val subtitle = remember(kindLabel, sizeBytes) {
-        if (sizeBytes != null && sizeBytes > 0) {
-            "$kindLabel · ${formatPhoneFileSize(sizeBytes)}"
-        } else {
-            kindLabel
-        }
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(tokens.panel2.color)
-            .padding(horizontal = 24.dp, vertical = 28.dp)
-            .testTag("phone-unsupported-file-screen"),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val iconShape = RoundedCornerShape(14.dp)
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(iconShape)
-                    .background(tokens.panel.color, iconShape)
-                    .cssBorder(tokens.borderSoft.color, iconShape, width = 1.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                PpmIcon(ProductIcon.Table, 20.dp, tokens.text2.color)
-            }
-            BasicText(
-                text = fileName,
-                style = ppmText(14f, FontWeight.SemiBold, lineHeight = 19f).copy(
-                    color = tokens.text.color,
-                    textAlign = TextAlign.Center,
-                ),
-            )
-            BasicText(
-                text = subtitle,
-                style = ppmText(12.5f, FontWeight.Normal, lineHeight = 18f).copy(
-                    color = tokens.text2.color,
-                    textAlign = TextAlign.Center,
-                ),
-            )
-            BasicText(
-                text = PHONE_UNSUPPORTED_FILE_LINE,
-                style = ppmText(12.5f, FontWeight.Normal, lineHeight = 18f).copy(
-                    color = tokens.text2.color,
-                    textAlign = TextAlign.Center,
-                ),
-            )
-            if (onDownload != null) Row(
-                modifier = Modifier.padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val btnShape = RoundedCornerShape(12.dp)
-                Row(
-                    modifier = Modifier
-                        .height(40.dp)
-                        .clip(btnShape)
-                        .background(tokens.accent.color, btnShape)
-                        .ppmClickable(
-                            shape = btnShape,
-                            onClickLabel = "Download",
-                            onClick = onDownload,
-                        )
-                        .padding(horizontal = 16.dp)
-                        .testTag("phone-unsupported-download-button"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    PpmIcon(ProductIcon.Download, 16.dp, tokens.accentFg.color)
-                    BasicText(
-                        text = "Download",
-                        style = ppmText(13f, FontWeight.SemiBold, lineHeight = 16f)
-                            .copy(color = tokens.accentFg.color),
-                    )
-                }
-            }
-        }
-    }
-}
+// ───────────────────────── Binary Viewer ─────────────────────────
 
 /**
  * Stateless Phone 3 · `Viewers — states: Binary — cannot display` screen:
@@ -943,8 +840,9 @@ fun PhoneViewerOverflowSheet(
 /**
  * Top-level Phone File Tab router (`Phone 3 · Sections 2 & 4`, Requirements 8.1 & 8.2):
  * routes [filePath] via [classifyPhoneFileView] to the phone code editor, image viewer (`V1`),
- * page-by-page PDF viewer (`V2`), Markdown viewer (`V3`), tablet-only file screen (`V9`), or
- * binary unreadable screen.
+ * page-by-page PDF viewer (`V2`), Markdown viewer (`V3`), the tablet's viewer for the file
+ * ([fileViewerContent]: CSV table, Word, audio, video, SQLite, HTML preview), or the binary
+ * unreadable screen.
  */
 @Composable
 fun PhoneFileTabScreen(
@@ -978,6 +876,7 @@ fun PhoneFileTabScreen(
     onCloseTab: (() -> Unit)? = null,
     onBreadcrumbSegmentClick: (PhonePathCrumb) -> Unit = {},
     editorBodyContent: (@Composable () -> Unit)? = null,
+    fileViewerContent: (@Composable () -> Unit)? = null,
 ) {
     var editMarkdownAsCode by remember(filePath) { mutableStateOf(false) }
     val kind = remember(filePath, forceCode, editMarkdownAsCode, cannotDisplayBinary) {
@@ -1044,12 +943,17 @@ fun PhoneFileTabScreen(
             onRetry = onRetry,
             modifier = modifier,
         )
-        PhoneFileViewKind.TABLET_ONLY_VIEWER -> PhoneUnsupportedFileScreen(
-            filePath = filePath,
-            sizeBytes = sizeBytes,
-            onDownload = onDownload,
-            modifier = modifier,
-        )
+        PhoneFileViewKind.FILE_VIEWER -> if (fileViewerContent != null) {
+            Box(modifier.fillMaxSize().testTag("phone-file-viewer")) { fileViewerContent() }
+        } else {
+            // Nothing to show the file with: what it is, and Download.
+            PhoneBinaryUnreadableScreen(
+                filePath = filePath,
+                sizeBytes = sizeBytes,
+                onDownload = onDownload,
+                modifier = modifier,
+            )
+        }
         PhoneFileViewKind.BINARY_UNREADABLE -> PhoneBinaryUnreadableScreen(
             filePath = filePath,
             sizeBytes = sizeBytes,

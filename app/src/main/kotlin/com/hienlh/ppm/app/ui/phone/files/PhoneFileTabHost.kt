@@ -21,6 +21,7 @@ import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.ui.editor.EditableFileCodeView
 import com.hienlh.ppm.app.ui.editor.EditableFileHandle
 import com.hienlh.ppm.app.ui.files.CreateExplorerDocument
+import com.hienlh.ppm.app.ui.files.FileBody
 import com.hienlh.ppm.app.ui.files.explorerDownloadMime
 import com.hienlh.ppm.app.ui.files.explorerDownloadName
 import com.hienlh.ppm.app.ui.files.fileBufferContent
@@ -58,6 +59,13 @@ fun PhoneFileTabHost(model: AppModel, tab: WorkspaceTab, modifier: Modifier = Mo
         return
     }
     val isUntitled = tab.metadata["isUntitled"].bool == true
+    // A CSV table, a Word document, audio, video, a SQLite database or an HTML page: the tablet's viewer, in its
+    // phone layout (the web's editor below `md` previews the same files). It reads the file itself, so no
+    // document is read here.
+    if (buffer == null && !isUntitled && phoneUsesFileViewer(path)) {
+        PhoneFileTabScreen(filePath = path, modifier = modifier, fileViewerContent = { FileBody(model, tab) })
+        return
+    }
     val api = model.api
     val controller = if (buffer == null) remember(model, api, tab.id, path, project) { model.fileDocument(tab) } else null
     DisposableEffect(controller) {

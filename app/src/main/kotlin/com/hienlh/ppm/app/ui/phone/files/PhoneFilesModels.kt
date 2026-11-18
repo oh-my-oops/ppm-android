@@ -1,5 +1,7 @@
 package com.hienlh.ppm.app.ui.phone.files
 
+import com.hienlh.ppm.state.files.FileDocumentClassifier
+import com.hienlh.ppm.state.files.FileDocumentViewer
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -7,61 +9,120 @@ import java.util.Locale
  * Pure models, rules, and classifiers for `Phone 3 · Files, editor, viewers, search`
  * (`designs/ppm-mobile-tablet-redesign/phone/3-files/index.html`, Requirements 8.1, 8.2).
  *
- * Implements the phone rule (Section 0, 1–4, 8, 9):
- * - A phone (< 600 dp) offers basic features only: browse the tree, open a file to view it
- *   (code, image, Markdown, PDF), make a small edit and Save, see a file's inline diff, and
- *   download any other file.
- * - Tablet-only actions (New File, New Folder, Upload, Rename, Delete, Cut/Copy/Paste, Multi-select,
- *   Drag to move, Compare, Find/Replace, Go to line, LSP, Blame, Merge conflict resolution, CSV/Excel/
- *   Word/Audio/Video/HTML viewers, Project Search, OS File Explorer) are omitted on a phone or show
- *   the design's single-line tablet notice.
+ * The phone does what the tablet does with a project's files, laid out as the web does below `md`:
+ * browse the tree and change it (New File, New Folder, Upload Files…, Cut/Copy/Paste, Rename, Delete,
+ * Select for Compare), open a file in the editor or in the viewer the tablet uses for it (CSV table,
+ * Word, audio, video, SQLite, HTML preview), see a file's inline diff, search and replace across the
+ * project, and download any file.
  */
 
 // ───────────────────────── Section 1 · Files (Project Tree) ─────────────────────────
 
 /**
- * Overflow (`⋮`) menu items in the phone Files app bar (`Phone 3 · Section 0 & F1`, Note 3 & 65).
- * New File, New Folder, Upload, and Select are tablet-only and not offered on a phone.
+ * Overflow (`⋮`) menu items in the phone Files app bar: the web's Explorer header (`file-tree.tsx`: New File,
+ * New Folder, Reveal Active File, Collapse All, Refresh), plus Upload Files…, which a phone cannot do by
+ * dropping files on the tree, and Paste into the project folder, which the web does with Ctrl+V.
  */
 enum class PhoneFilesOverflowAction(
     val id: String,
     val label: String,
 ) {
+    NEW_FILE("new_file", "New File"),
+    NEW_FOLDER("new_folder", "New Folder"),
+    UPLOAD("upload", "Upload Files…"),
+    PASTE("paste", "Paste"),
     REVEAL_ACTIVE_FILE("reveal_active_file", "Reveal Active File"),
     COLLAPSE_ALL("collapse_all", "Collapse All"),
     REFRESH("refresh", "Refresh"),
     ;
 
     companion object {
-        fun phoneMenu(): List<PhoneFilesOverflowAction> = entries
+        /** [canWrite]: the tree may change the project now; [canPaste]: something was cut or copied. */
+        fun phoneMenu(canWrite: Boolean = true, canPaste: Boolean = false): List<PhoneFilesOverflowAction> = buildList {
+            if (canWrite) {
+                add(NEW_FILE)
+                add(NEW_FOLDER)
+                add(UPLOAD)
+                if (canPaste) add(PASTE)
+            }
+            add(REVEAL_ACTIVE_FILE)
+            add(COLLAPSE_ALL)
+            add(REFRESH)
+        }
     }
 }
 
 /**
- * Long-press sheet actions for a file or folder in the phone project tree (`Phone 3 · Section 1`, Note 66).
+ * Long-press sheet actions for a file or folder in the phone project tree: the rows of the web's
+ * `tree-node-context-menu.tsx`, which its adaptive menu shows as a bottom sheet below `md`, plus Open on a
+ * file and Upload Files… on a folder.
  */
 enum class PhoneTreeLongPressAction(
     val id: String,
     val label: String,
+    val destructive: Boolean = false,
 ) {
     OPEN("open", "Open"),
+    NEW_FILE("new_file", "New File"),
+    NEW_FOLDER("new_folder", "New Folder"),
+    UPLOAD("upload", "Upload Files…"),
+    OPEN_IN_FILE_EXPLORER("open_in_file_explorer", "Open in File Explorer"),
     OPEN_IN_TERMINAL("open_in_terminal", "Open in Terminal"),
+    CUT("cut", "Cut"),
+    COPY("copy", "Copy"),
+    PASTE("paste", "Paste"),
+    RENAME("rename", "Rename"),
+    DELETE("delete", "Delete", destructive = true),
     COPY_PATH("copy_path", "Copy Path"),
     COPY_FULL_PATH("copy_full_path", "Copy Full Path"),
     DOWNLOAD("download", "Download"),
+    SELECT_FOR_COMPARE("select_for_compare", "Select for Compare"),
+    COMPARE_WITH_SELECTED("compare_with_selected", "Compare with Selected"),
     ;
 
-    companion object {
-        const val TABLET_ONLY_FOOTER: String =
-            "Rename, delete, move and compare: open on a tablet."
+    /** The row's text: a folder downloads as a zip, and a compare names the file picked first (`label`). */
+    fun labelFor(isDirectory: Boolean, compareLabel: String? = null): String = when (this) {
+        DOWNLOAD -> if (isDirectory) "Download as Zip" else label
+        COMPARE_WITH_SELECTED -> if (compareLabel != null) "$label ($compareLabel)" else label
+        else -> label
+    }
 
-        /** Actions offered when long-pressing a file or folder on a phone (Note 66). */
-        fun actionsFor(isDirectory: Boolean): List<PhoneTreeLongPressAction> =
+    companion object {
+        /**
+         * The sheet's groups, a divider between each two (the web's `ContextMenuSeparator`s). [canWrite]: the
+         * tree may change files now; [canPaste]: something is cut or copied; [canOpenInExplorer]: the host's
+         * File Explorer can be opened; [canCompareWithSelected]: another file of this project was selected
+         * for compare.
+         */
+        fun groupsFor(
+            isDirectory: Boolean,
+            canWrite: Boolean = false,
+            canPaste: Boolean = false,
+            canOpenInExplorer: Boolean = false,
+            canCompareWithSelected: Boolean = false,
+        ): List<List<PhoneTreeLongPressAction>> = listOf(
             if (isDirectory) {
-                listOf(OPEN_IN_TERMINAL, COPY_PATH, COPY_FULL_PATH)
+                if (canWrite) listOf(NEW_FILE, NEW_FOLDER, UPLOAD) else emptyList()
             } else {
-                listOf(OPEN, COPY_PATH, COPY_FULL_PATH, DOWNLOAD)
-            }
+                listOf(OPEN)
+            },
+            if (isDirectory) listOfNotNull(OPEN_IN_FILE_EXPLORER.takeIf { canOpenInExplorer }, OPEN_IN_TERMINAL) else emptyList(),
+            if (canWrite) listOfNotNull(CUT, COPY, PASTE.takeIf { isDirectory && canPaste }) else emptyList(),
+            if (canWrite) listOf(RENAME, DELETE) else emptyList(),
+            listOf(COPY_PATH, COPY_FULL_PATH),
+            listOf(DOWNLOAD),
+            if (isDirectory) emptyList() else listOfNotNull(SELECT_FOR_COMPARE, COMPARE_WITH_SELECTED.takeIf { canCompareWithSelected }),
+        ).filter { it.isNotEmpty() }
+
+        /** [groupsFor] as one list. */
+        fun actionsFor(
+            isDirectory: Boolean,
+            canWrite: Boolean = false,
+            canPaste: Boolean = false,
+            canOpenInExplorer: Boolean = false,
+            canCompareWithSelected: Boolean = false,
+        ): List<PhoneTreeLongPressAction> =
+            groupsFor(isDirectory, canWrite, canPaste, canOpenInExplorer, canCompareWithSelected).flatten()
     }
 }
 
@@ -180,7 +241,6 @@ sealed interface PhoneFilesScreenState {
 
     data object Empty : PhoneFilesScreenState {
         const val TITLE: String = "Empty project."
-        const val SUBTITLE: String = "Open on a tablet to add files."
     }
 
     data class Error(
@@ -566,14 +626,14 @@ enum class PhoneViewerOverflowAction(
 
 /**
  * How a file is presented on a phone (`Phone 3 · Sections 2, 4, 8, 9`, Requirement 8.1, 8.2):
- * - [CODE]: Code editor (`E1`, `E2`, `E9`, `E11`)
+ * - [CODE]: Code editor (`E1`, `E2`, `E9`, `E11`); a file of no known kind is read as text, and the server's
+ *   answer decides whether it is [BINARY_UNREADABLE] (`code-editor.tsx` does the same)
  * - [IMAGE]: Image viewer (`V1`)
  * - [PDF]: Page-by-page PDF viewer (`V2`, Requirement 8.2)
  * - [MARKDOWN]: Markdown Preview / Code viewer (`V3`)
- * - [TABLET_ONLY_VIEWER]: Spreadsheets (`csv, tsv, xls`; `xlsx`/`xlsm` tabs are taken first by
- *   [PhoneFileTabHost] to the read-only preview, `PhoneXlsxViewer`), Word (`doc, docx`), Audio, Video,
- *   SQLite, or HTML preview — shows what the file is, `Download`, and
- *   `"Open on a tablet to view or edit it."` (`V9`, Note 41)
+ * - [FILE_VIEWER]: the viewer the tablet shows the file in, in its phone layout (the web's editor below `md`):
+ *   a CSV table, a Word document, audio, video, a SQLite database or an HTML preview ([phoneUsesFileViewer]).
+ *   `xlsx`/`xlsm` tabs are taken first by [PhoneFileTabHost] to the read-only preview, `PhoneXlsxViewer`.
  * - [BINARY_UNREADABLE]: Raw binary that no device displays — shows
  *   `"This file is a binary format and cannot be displayed."` and `Download` (`Viewers — states`).
  */
@@ -582,7 +642,7 @@ enum class PhoneFileViewKind {
     IMAGE,
     PDF,
     MARKDOWN,
-    TABLET_ONLY_VIEWER,
+    FILE_VIEWER,
     BINARY_UNREADABLE,
 }
 
@@ -594,34 +654,32 @@ private val PHONE_MARKDOWN_EXTENSIONS: Set<String> = setOf(
     "md", "markdown", "mdx",
 )
 
-private val TABLET_ONLY_VIEWER_EXTENSIONS: Map<String, String> = mapOf(
-    "csv" to "CSV table",
-    "tsv" to "TSV table",
-    "xls" to "Excel spreadsheet",
-    "xlsx" to "Excel spreadsheet",
-    "doc" to "Word document",
-    "docx" to "Word document",
-    "mp3" to "Audio file",
-    "wav" to "Audio file",
-    "ogg" to "Audio file",
-    "flac" to "Audio file",
-    "m4a" to "Audio file",
-    "aac" to "Audio file",
-    "mp4" to "Video file",
-    "webm" to "Video file",
-    "mov" to "Video file",
-    "mkv" to "Video file",
-    "avi" to "Video file",
-    "sqlite" to "SQLite database",
-    "sqlite3" to "SQLite database",
-    "db" to "SQLite database",
-)
-
 private val RAW_BINARY_EXTENSIONS: Set<String> = setOf(
     "exe", "dll", "so", "dylib", "bin", "o", "a", "class", "jar", "war",
     "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "zst",
     "woff", "woff2", "ttf", "otf", "eot",
 )
+
+/** The tablet viewers a phone file tab shows through `FileBody` (`FileDocumentClassifier`'s kinds). */
+private val PHONE_FILE_VIEWERS: Set<FileDocumentViewer> = setOf(
+    FileDocumentViewer.CSV,
+    FileDocumentViewer.DOCX,
+    FileDocumentViewer.AUDIO,
+    FileDocumentViewer.VIDEO,
+    FileDocumentViewer.SQLITE,
+    FileDocumentViewer.HTML,
+)
+
+/**
+ * Whether [path] opens in the viewer the tablet uses for it ([PhoneFileViewKind.FILE_VIEWER]): the kinds
+ * `code-editor.tsx` previews rather than edits, the same below `md` as above it, and a workbook.
+ */
+fun phoneUsesFileViewer(path: String?): Boolean {
+    val name = path.orEmpty()
+    if (name.isBlank()) return false
+    val ext = name.substringAfterLast('/').substringAfterLast('\\').substringAfterLast('.', "").lowercase(Locale.ROOT)
+    return ext == "xlsx" || ext == "xlsm" || FileDocumentClassifier.classify(name) in PHONE_FILE_VIEWERS
+}
 
 /**
  * Classifies how [path] should open on a phone according to the phone rule
@@ -641,18 +699,10 @@ fun classifyPhoneFileView(
         ext == "pdf" -> PhoneFileViewKind.PDF
         ext in PHONE_IMAGE_EXTENSIONS -> PhoneFileViewKind.IMAGE
         ext in PHONE_MARKDOWN_EXTENSIONS -> PhoneFileViewKind.MARKDOWN
-        ext in TABLET_ONLY_VIEWER_EXTENSIONS -> PhoneFileViewKind.TABLET_ONLY_VIEWER
+        phoneUsesFileViewer(path) -> PhoneFileViewKind.FILE_VIEWER
         ext in RAW_BINARY_EXTENSIONS -> PhoneFileViewKind.BINARY_UNREADABLE
         else -> PhoneFileViewKind.CODE
     }
-}
-
-/** Human-readable file kind label for `V9 · A file the phone does not open` (Note 41). */
-fun describePhoneFileKind(path: String?): String {
-    val fileName = path.orEmpty().substringAfterLast('/').substringAfterLast('\\')
-    val ext = fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
-    return TABLET_ONLY_VIEWER_EXTENSIONS[ext]
-        ?: if (ext.isNotEmpty()) "${ext.uppercase(Locale.ROOT)} file" else "Binary file"
 }
 
 /** Formats a byte count into a compact human-readable label (`24.1 KB`, `98.4 MB`). */
@@ -671,5 +721,4 @@ fun formatPhoneFileSize(bytes: Long): String {
     return String.format(Locale.US, "%.1f GB", gb)
 }
 
-const val PHONE_UNSUPPORTED_FILE_LINE: String = "Open on a tablet to view or edit it."
 const val PHONE_BINARY_FILE_TITLE: String = "This file is a binary format and cannot be displayed."

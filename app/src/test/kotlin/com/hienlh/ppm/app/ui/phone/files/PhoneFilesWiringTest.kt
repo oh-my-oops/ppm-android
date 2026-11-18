@@ -1,6 +1,19 @@
 package com.hienlh.ppm.app.ui.phone.files
 
 import android.app.Application
+import android.app.Activity
+import android.net.Uri
+import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.test.performImeAction
+import com.hienlh.ppm.app.ui.editor.SharedCompareStore
+import com.hienlh.ppm.state.workspace.LayoutStorage
+import com.hienlh.ppm.state.workspace.PanelLayout
+import com.hienlh.ppm.state.workspace.WorkspaceStore
+import java.io.ByteArrayInputStream
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -95,7 +108,11 @@ class PhoneFilesWiringTest {
                     path.endsWith("/files/search") -> MockResponse.Builder().addHeader("Content-Type", "application/json")
                         .body("""{"results":[{"file":"src/Main.kt","matches":[{"line":1,"column":0,"length":3,"before":"","cutBefore":false,"text":"fun","after":" main() {}"}]}],"total":1,"files":1,"limitHit":false,"engine":"rg"}""")
                         .build()
+                    path.endsWith("/files/read") && request.url.queryParameter("path") == "data/users.csv" ->
+                        ok("""{"content":"name,score\nalpha,1\nbeta,2\n","path":"data/users.csv"}""")
                     path.endsWith("/files/read") -> ok("""{"content":"fun main() {}\n","path":"src/Main.kt"}""")
+                    path.endsWith("/files/move") -> ok("""{"moved":{"from":"README.md","to":"src/README.md"}}""")
+                    path.endsWith("/files/upload") -> ok("""{"uploaded":[{"name":"notes.txt","path":"src/notes.txt","size":5}]}""")
                     path.endsWith("/files/list-batch") -> ok("""[{"path":"","entries":$ROOT_LISTING},{"path":"src","entries":$SRC_LISTING}]""")
                     path.endsWith("/files/list") ->
                         ok(if (request.url.queryParameter("path").orEmpty() == "src") SRC_LISTING else ROOT_LISTING)
@@ -230,16 +247,32 @@ class PhoneFilesWiringTest {
         assertTrue(synchronized(requests) { requests.any { it.path.endsWith("/files/list") && it.query == "path=" } })
     }
 
-    @Test
-    fun tree_overflowRefreshesTheTree_longPressDownloads_andFileOperationsStayOnTheTablet() {
+    private fun treeScreen(onActivity: (ComponentActivity) -> Unit = {}) {
         val tree = ProjectFileTree(FileTreeBackend.api(api), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
         composeRule.setContent {
             remember(tree) { stateOf<ProjectFileTree?>("fileTree").value = tree }
+            val activity = LocalContext.current as ComponentActivity
+            remember(activity) { onActivity(activity) }
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
                 PhoneFilesTreeScreen(model = model)
             }
         }
         composeRule.waitUntil(5_000) { shown("phone-tree-row-README.md") }
+    }
+
+    private fun longPress(path: String) {
+        composeRule.onNodeWithTag("phone-tree-row-$path").performSemanticsAction(SemanticsActions.OnLongClick)
+        composeRule.waitUntil(5_000) { shown("phone-tree-long-press-sheet") }
+    }
+
+    private fun sheetAction(id: String) {
+        composeRule.onNodeWithTag("phone-tree-action-$id", useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.waitUntil(5_000) { !shown("phone-tree-long-press-sheet") }
+    }
+
+    @Test
+    fun tree_overflowRefreshesTheTree_andLongPressDownloads() {
+        treeScreen()
         assertFalse("No recent files, no Recent chip", shown("phone-files-recent-chip"))
         assertTrue("Go to file is offered", shown("phone-files-go-to-file"))
 
@@ -247,28 +280,207 @@ class PhoneFilesWiringTest {
         val listsBefore = synchronized(requests) { requests.count { it.path.contains("/files/list") } }
         composeRule.onNodeWithTag("phone-breadcrumb-more", useUnmergedTree = true).performClick()
         composeRule.waitUntil(5_000) { shown("phone-files-overflow-sheet") }
-        assertFalse("no New File on a phone", shown("phone-files-overflow-new_file"))
         composeRule.onNodeWithTag("phone-files-overflow-refresh", useUnmergedTree = true).performClick()
         composeRule.waitUntil(5_000) { synchronized(requests) { requests.count { it.path.contains("/files/list") } } > listsBefore }
 
-        // Rename, delete, move and create stay on the tablet, as the design says: the sheet offers none and says so.
-        composeRule.onNodeWithTag("phone-tree-row-src").performSemanticsAction(SemanticsActions.OnLongClick)
-        composeRule.waitUntil(5_000) { shown("phone-tree-long-press-sheet") }
-        for (id in listOf("new_file", "new_folder", "rename", "cut", "paste", "delete")) {
-            assertFalse("no $id on a phone", shown("phone-tree-action-$id"))
-        }
-        composeRule.onNodeWithText(PhoneTreeLongPressAction.TABLET_ONLY_FOOTER, useUnmergedTree = true).assertExists()
-        composeRule.onNodeWithTag("phone-tree-action-copy_path", useUnmergedTree = true).performClick()
-        composeRule.waitUntil(5_000) { !shown("phone-tree-long-press-sheet") }
-
         // Long-press a file → Download goes to the system's Create Document screen, not to the editor.
-        composeRule.onNodeWithTag("phone-tree-row-README.md").performSemanticsAction(SemanticsActions.OnLongClick)
-        composeRule.waitUntil(5_000) { shown("phone-tree-long-press-sheet") }
-        composeRule.onNodeWithTag("phone-tree-action-download", useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
+        longPress("README.md")
+        sheetAction("download")
         composeRule.waitForIdle()
         val started = shadowOf(app).nextStartedActivity
         assertEquals(Intent.ACTION_CREATE_DOCUMENT, started?.action)
         assertEquals("README.md", started?.getStringExtra(Intent.EXTRA_TITLE))
+    }
+
+    @Test
+    fun tree_newFileFromTheOverflow_renameAndDeleteFromTheLongPressSheet_reachTheServer() {
+        treeScreen()
+
+        // ⋮ → New File: a name typed in the tree, sent as the web's tree sends it.
+        composeRule.onNodeWithTag("phone-breadcrumb-more", useUnmergedTree = true).performClick()
+        composeRule.waitUntil(5_000) { shown("phone-files-overflow-sheet") }
+        assertTrue(shown("phone-files-overflow-new_folder"))
+        assertTrue(shown("phone-files-overflow-upload"))
+        assertFalse("nothing cut or copied, no Paste", shown("phone-files-overflow-paste"))
+        composeRule.onNodeWithTag("phone-files-overflow-new_file", useUnmergedTree = true).performClick()
+        composeRule.waitUntil(5_000) { shown("phone-tree-inline-input") }
+        composeRule.onNodeWithContentDescription("New name").performTextInput("notes.md")
+        composeRule.onNodeWithContentDescription("New name").performImeAction()
+        composeRule.waitUntil(5_000) { recorded("POST", "/files/create").isNotEmpty() && !shown("phone-tree-inline-input") }
+        val create = recorded("POST", "/files/create").single()
+        assertEquals("/api/project/ppm/files/create", create.path)
+        assertTrue(create.body, create.body.contains("\"path\":\"notes.md\"") && create.body.contains("\"type\":\"file\""))
+
+        // The sheet offers what the web's tree menu does, and says nothing about a tablet.
+        longPress("README.md")
+        for (id in listOf("open", "cut", "copy", "rename", "delete", "copy_path", "copy_full_path", "download", "select_for_compare")) {
+            assertTrue("$id on a file", shown("phone-tree-action-$id"))
+        }
+        assertFalse(textShown("on a tablet"))
+        sheetAction("rename")
+        composeRule.waitUntil(5_000) { shown("phone-tree-inline-input") }
+        composeRule.onNodeWithContentDescription("Rename README.md").performTextReplacement("GUIDE.md")
+        composeRule.onNodeWithContentDescription("Rename README.md").performImeAction()
+        composeRule.waitUntil(5_000) { recorded("POST", "/files/rename").isNotEmpty() && !shown("phone-tree-inline-input") }
+        val rename = recorded("POST", "/files/rename").single()
+        assertTrue(rename.body, rename.body.contains("\"oldPath\":\"README.md\"") && rename.body.contains("\"newPath\":\"GUIDE.md\""))
+
+        // Delete asks first, as the tablet's tree does.
+        longPress("src")
+        for (id in listOf("new_file", "new_folder", "upload", "open_in_file_explorer", "open_in_terminal", "cut", "copy", "rename", "delete")) {
+            assertTrue("$id on a folder", shown("phone-tree-action-$id"))
+        }
+        assertTrue(textShown("Download as Zip"))
+        sheetAction("delete")
+        composeRule.waitUntil(5_000) { textShown("Delete Folder") }
+        assertTrue(recorded("DELETE", "/files/delete").isEmpty())
+        composeRule.onNodeWithText("Delete", useUnmergedTree = true).performClick()
+        composeRule.waitUntil(5_000) { recorded("DELETE", "/files/delete").isNotEmpty() && !textShown("Delete Folder") }
+        assertTrue(recorded("DELETE", "/files/delete").single().body.contains("\"path\":\"src\""))
+    }
+
+    @Test
+    fun tree_cutAndPasteMovesAFile_andCompareOpensADiffOfTheTwoFiles() {
+        val store = WorkspaceStore(object : LayoutStorage {
+            override fun load(project: String): PanelLayout? = null
+            override fun save(project: String, layout: PanelLayout) = Unit
+        }, isMobile = { true })
+        store.switchProject("ppm")
+        ReflectionHelpers.setField(model, "workspace", store)
+        SharedCompareStore.store.clearSelection()
+        treeScreen()
+
+        // Cut README.md, then Paste on src: a move into the folder.
+        longPress("README.md")
+        sheetAction("cut")
+        longPress("src")
+        sheetAction("paste")
+        composeRule.waitUntil(5_000) { recorded("POST", "/files/move").isNotEmpty() }
+        val move = recorded("POST", "/files/move").single()
+        assertTrue(move.body, move.body.contains("\"source\":\"README.md\"") && move.body.contains("\"destination\":\"src/README.md\""))
+
+        // Select README.md for compare, then compare src/Main.kt with it.
+        longPress("README.md")
+        assertFalse("nothing selected yet", shown("phone-tree-action-compare_with_selected"))
+        sheetAction("select_for_compare")
+        composeRule.waitUntil(5_000) { shown("phone-tree-row-src/Main.kt") }
+        longPress("src/Main.kt")
+        assertTrue(textShown("Compare with Selected (README.md)"))
+        sheetAction("compare_with_selected")
+        val diff = store.state.value.panels.values.flatMap { it.tabs }.single { it.type == "git-diff" }
+        assertEquals("README.md", diff.metaString("file1"))
+        assertEquals("src/Main.kt", diff.metaString("file2"))
+        assertEquals("README.md ↔ Main.kt", diff.title)
+        assertEquals(null, SharedCompareStore.store.selection)
+    }
+
+    @Test
+    fun tree_uploadFilesPicksDocuments_andUploadsThemIntoTheFolder() {
+        var activity: ComponentActivity? = null
+        treeScreen { activity = it }
+        longPress("src")
+        sheetAction("upload")
+        composeRule.waitForIdle()
+        val shadow = shadowOf(activity!!)
+        val picker = shadow.nextStartedActivityForResult
+        assertNotNull("Upload Files… opens the system's document picker", picker)
+        assertEquals(Intent.ACTION_OPEN_DOCUMENT, picker.intent.action)
+        assertTrue(picker.intent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false))
+
+        val picked = Uri.parse("content://picked/notes.txt")
+        shadowOf(app.contentResolver).registerInputStream(picked, ByteArrayInputStream("hello".toByteArray()))
+        shadow.receiveResult(picker.intent, Activity.RESULT_OK, Intent().setData(picked))
+        composeRule.waitUntil(5_000) { recorded("POST", "/files/upload").isNotEmpty() && textShown("Uploaded notes.txt.") }
+        val upload = recorded("POST", "/files/upload").single()
+        assertEquals("/api/project/ppm/files/upload", upload.path)
+        assertTrue(upload.body, upload.body.contains("notes.txt") && upload.body.contains("hello"))
+        assertTrue(upload.body, upload.body.contains("name=\"targetDir\"") && upload.body.contains("\r\n\r\nsrc\r\n"))
+    }
+
+    @Test
+    fun tree_emptyProjectOffersNewFileAndNewFolder() {
+        val empty = MockWebServer()
+        empty.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                synchronized(requests) {
+                    requests += Recorded(request.method ?: "GET", request.url.encodedPath, request.url.encodedQuery, request.body?.utf8().orEmpty())
+                }
+                return when {
+                    request.url.encodedPath.endsWith("/files/list-batch") -> ok("""[{"path":"","entries":[]}]""")
+                    request.url.encodedPath.endsWith("/files/list") -> ok("[]")
+                    else -> ok("{}")
+                }
+            }
+        }
+        empty.start()
+        try {
+            api = ApiClient(empty.url("/"), "secret")
+            model.api = api
+            stateOf<FileMutations?>("fileMutations").value = FileMutations(api)
+            val tree = ProjectFileTree(FileTreeBackend.api(api), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
+            composeRule.setContent {
+                remember(tree) { stateOf<ProjectFileTree?>("fileTree").value = tree }
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                    PhoneFilesTreeScreen(model = model)
+                }
+            }
+            composeRule.waitUntil(5_000) { shown("phone-files-empty") }
+            assertTrue(textShown("Empty project."))
+            assertFalse(textShown("on a tablet"))
+            composeRule.onNodeWithText("New Folder", useUnmergedTree = true).performClick()
+            composeRule.waitUntil(5_000) { shown("phone-tree-inline-input") }
+            composeRule.onNodeWithContentDescription("New name").performTextInput("docs")
+            composeRule.onNodeWithContentDescription("New name").performImeAction()
+            composeRule.waitUntil(5_000) { recorded("POST", "/files/create").isNotEmpty() }
+            assertTrue(recorded("POST", "/files/create").single().body.contains("\"type\":\"directory\""))
+        } finally {
+            empty.close()
+        }
+    }
+
+    @Test
+    fun fileTab_aCsvShowsInTheTabletsTableViewer() {
+        val csvTab = WorkspaceTab(
+            id = "editor:data/users.csv",
+            type = "editor",
+            title = "users.csv",
+            projectId = "ppm",
+            metadata = buildJsonObject {
+                put("filePath", JsonPrimitive("data/users.csv"))
+                put("projectName", JsonPrimitive("ppm"))
+            },
+        )
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                PhoneFileTabHost(model = model, tab = csvTab)
+            }
+        }
+        composeRule.waitUntil(5_000) { textShown("beta") }
+        assertTrue(shown("phone-file-viewer"))
+        assertFalse("not the code editor", shown("phone-editor-save-button"))
+        assertFalse(textShown("on a tablet"))
+    }
+
+    @Test
+    fun filesArea_problemsAndAFileExplorerTabShowInPlaceOfAFile_andASearchTabOpensSearch() {
+        com.hienlh.ppm.app.ui.files.installBlankFileIcons()
+        var tab by mutableStateOf<WorkspaceTab?>(WorkspaceTab(id = "problems", type = "problems", title = "Problems"))
+        val tree = ProjectFileTree(FileTreeBackend.api(api), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
+        composeRule.setContent {
+            remember(tree) { stateOf<ProjectFileTree?>("fileTree").value = tree }
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                com.hienlh.ppm.app.ui.phone.PhoneFilesAreaHost(model = model, tab = tab, nav = com.hienlh.ppm.app.ui.phone.PhoneNav())
+            }
+        }
+        composeRule.waitUntil(5_000) { shown("phone-files-panel-problems") }
+        assertTrue(textShown("No problems have been detected in the open files."))
+
+        composeRule.runOnIdle { tab = WorkspaceTab(id = "explorer", type = "os-explorer", title = "Home") }
+        composeRule.waitUntil(5_000) { shown("phone-files-panel-os-explorer") }
+
+        composeRule.runOnIdle { tab = WorkspaceTab(id = "search", type = "search", title = "Search") }
+        composeRule.waitUntil(5_000) { shown("phone-search-screen") }
+        assertFalse(textShown("on a tablet"))
     }
 
     @Test
