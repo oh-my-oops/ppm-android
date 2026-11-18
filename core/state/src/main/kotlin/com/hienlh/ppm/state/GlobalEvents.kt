@@ -133,6 +133,7 @@ class GlobalEvents(
     /** `presence:input`, throttled: call on real input (a tap, a key, typing). */
     val presence = PresenceInput(::sendIfOpen)
     private val assistantListeners = LinkedHashSet<(type: String, frame: JsonElement) -> Unit>()
+    private val jiraListeners = LinkedHashSet<(type: String, frame: JsonElement) -> Unit>()
     private var socket: SocketConnection? = null
 
     /** Persisted notification feed (`/api/notifications/feed`), with fallback to [unread] on older servers. */
@@ -325,6 +326,15 @@ class GlobalEvents(
         return { assistantListeners -= listener }
     }
 
+    /**
+     * Every Jira event (`jira:config_changed`, `jira:watchers_changed`, `jira:status_change`), with its
+     * type: the Jira panel reads the affected lists again.
+     */
+    fun onJiraEvent(listener: (type: String, frame: JsonElement) -> Unit): () -> Unit {
+        jiraListeners += listener
+        return { jiraListeners -= listener }
+    }
+
     /** The local embedding model's install moved (`memory:embed-install`): its `status` object. */
     fun onMemoryEmbedInstall(listener: (status: JsonElement) -> Unit): () -> Unit {
         memoryInstallListeners += listener
@@ -360,6 +370,7 @@ class GlobalEvents(
 
     internal fun handle(frame: JsonElement) {
         frame["type"].string?.takeIf { it.startsWith("assistant:") }?.let { type -> assistantListeners.toList().forEach { it(type, frame) } }
+        frame["type"].string?.takeIf { it.startsWith("jira:") }?.let { type -> jiraListeners.toList().forEach { it(type, frame) } }
         when (frame["type"].string) {
             "global_ready" -> {
                 failures = 0

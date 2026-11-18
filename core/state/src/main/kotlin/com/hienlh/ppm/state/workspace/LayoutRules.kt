@@ -132,7 +132,7 @@ fun deriveTabId(type: String, metadata: JsonObject, randomId: () -> String = ::w
         "session-review" -> "session-review:${m("projectName") ?: "unknown"}:${m("sessionId") ?: "unknown"}"
         "git-review" -> "git-review:${m("projectName") ?: "unknown"}"
         "conflict-editor" -> "conflict-editor:${m("filePath") ?: "unknown"}"
-        "settings", "problems", "system-monitor", "logs", "assistant" -> type
+        "settings", "problems", "system-monitor", "logs", "schedules", "assistant" -> type
         "group" -> "group:${m("groupId") ?: "unknown"}"
         "design" -> "design:${m("designSlug") ?: "unknown"}"
         "web-preview" -> "web-preview:${m("url") ?: "unknown"}"

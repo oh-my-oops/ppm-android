@@ -2671,6 +2671,7 @@ internal fun JiraSettingsSection(model: AppModel) {
                 reloadAll()
             }
         },
+        resultsPanel = { com.hienlh.ppm.app.ui.jira.JiraResultsPanel(model, watchers) },
     )
 }
 
@@ -2697,6 +2698,8 @@ internal fun JiraSettingsContent(
     onCancelResult: (Int) -> Unit,
     onMarkResultRead: (Int) -> Unit,
     onDeleteResult: (Int) -> Unit,
+    /** The web's results panel (filters, ticket detail) in place of the plain list, where the caller has one. */
+    resultsPanel: (@Composable () -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     var selectedProjectId by remember(projects, configs) {
@@ -2895,7 +2898,9 @@ internal fun JiraSettingsContent(
         }
 
         // Results
-        if (results.isNotEmpty()) {
+        if (resultsPanel != null && configs.isNotEmpty()) {
+            IntegrationCard { resultsPanel() }
+        } else if (results.isNotEmpty()) {
             IntegrationCard {
                 SettingsSectionTitle("Recent Watcher Results (${results.size})")
                 for (r in results.take(10)) {

@@ -87,7 +87,6 @@ fun tabletOnlyNoticeForType(type: String, title: String = ""): String = when (ty
     "extension", "extensions" -> "Extensions open on a tablet."
     "design", "designs" -> "Designs open on a tablet."
     "group", "teams" -> "Teams opens on a tablet."
-    "jira" -> "Jira opens on a tablet."
     "ai-resource", "ai-resources" -> "AI Resources open on a tablet."
     "problems" -> "Problems opens on a tablet."
     "os-explorer", "host-explorer" -> "OS File Explorer opens on a tablet."

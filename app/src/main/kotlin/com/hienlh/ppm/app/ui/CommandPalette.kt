@@ -92,6 +92,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.schedules
 import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.openAssistant
 import com.hienlh.ppm.app.liftsAsTap
@@ -307,6 +308,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             add(action("Settings", ProductIcon.Settings, words = "config preferences theme", shortcut = formatShortcut(bindings.binding("open-settings")), run = run { model.openSettings() }))
             add(action("Open File Explorer", ProductIcon.AppWindow, words = "open file explorer finder browse files folders disk drive window", run = run { model.openExplorer() }))
             add(action("System Monitor", ProductIcon.Cpu, words = "task manager activity monitor cpu memory ram disk network gpu processes services apps performance resources", run = run { model.openSystemMonitor() }))
+            add(action("Schedules", ProductIcon.CalendarClock, words = "schedules cron reminders timers scheduled prompts runs bypass next run", run = run { model.schedules.open() }))
             add(action("Logs", ProductIcon.ScrollText, words = "logs server errors warnings debug tail ppm.log browser console cloudflared", run = run { model.openLogs() }))
             add(action("Report a Bug", ProductIcon.Bug, words = "report bug issue github feedback problem crash", run = run { model.openLogs("report") }))
         }

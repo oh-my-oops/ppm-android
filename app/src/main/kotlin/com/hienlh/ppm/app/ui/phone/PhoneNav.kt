@@ -40,6 +40,9 @@ enum class PhoneArea(
     TASKS("tasks", "Tasks", "tasks"),
     /** The PPM Assistant's tab, full screen. */
     ASSISTANT("assistant", "PPM Assistant", "assistant"),
+
+    /** The Jira section (the web's sidebar Jira panel), offered while Jira is turned on. */
+    JIRA("jira", "Jira", "jira"),
     ;
 
     companion object {
@@ -85,6 +88,7 @@ enum class PhoneArea(
             "specs" -> SPECS
             "task", "tasks" -> TASKS
             "assistant" -> ASSISTANT
+            "jira" -> JIRA
             else -> null
         }
 

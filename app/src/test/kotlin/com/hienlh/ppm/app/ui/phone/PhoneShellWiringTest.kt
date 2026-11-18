@@ -153,12 +153,12 @@ class PhoneShellWiringTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("phone-tunnels-screen").assertExists()
 
-        // 9. Schedules area renders PhoneSchedulesScreen
+        // 9. Schedules area renders the Schedules window as cards
         composeRule.runOnIdle {
             nav.visitTab(PhoneNav.areaTabId(PhoneArea.SCHEDULES))
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("phone-schedules-screen").assertExists()
+        composeRule.onNodeWithTag("schedules-app").assertExists()
 
         // 10. Settings area renders PhoneSettingsScreen
         composeRule.runOnIdle {
