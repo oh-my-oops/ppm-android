@@ -762,7 +762,7 @@ fun parseJiraWatchers(element: JsonElement?): List<JiraWatcherRow> {
         val id = obj["id"]?.int ?: return@mapNotNull null
         JiraWatcherRow(
             id = id,
-            configId = obj["configId"]?.int ?: obj["config_id"]?.int ?: 0,
+            configId = obj["jiraConfigId"]?.int ?: obj["configId"]?.int ?: obj["config_id"]?.int ?: 0,
             name = obj["name"].string ?: "Watcher #$id",
             jql = obj["jql"].string.orEmpty(),
             promptTemplate = obj["promptTemplate"].string ?: obj["prompt_template"].string,
