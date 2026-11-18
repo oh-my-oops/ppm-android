@@ -306,6 +306,7 @@ private fun SidebarSectionBody(model: AppModel, onChooseProject: () -> Unit) {
         sec == "specs" -> SpecsSidebarPanel(model)
         sec == "tunnels" -> com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model)
         sec == "ai-resources" -> com.hienlh.ppm.app.ui.AiResourcesSidebarPanel(model)
+        sec == "jira" -> com.hienlh.ppm.app.ui.jira.JiraPanel(model)
         sec.startsWith("ext:") -> {
             val viewId = sec.removePrefix("ext:")
             val contribs = model.extensions?.contributions?.collectAsState()?.value
@@ -667,6 +668,7 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier, portr
                         "teams" -> RailSectionSpec(ProductIcon.Users, "Teams", 0, FeatureBadgeKind.BETA, null)
                         "tunnels" -> RailSectionSpec(ProductIcon.Globe, "Port Forwarding", 0, null, null)
                         "ai-resources" -> RailSectionSpec(ProductIcon.Sparkles, "AI Resources", 0, null, null)
+                        "jira" -> RailSectionSpec(ProductIcon.Bug, "Jira", com.hienlh.ppm.app.ui.jira.jiraRailCount(model), null, null)
                         else -> RailSectionSpec(
                             ProductIcon.BotMessageSquare,
                             "Chat History",

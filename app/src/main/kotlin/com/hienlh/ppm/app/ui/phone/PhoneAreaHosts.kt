@@ -87,5 +87,6 @@ internal fun PhoneWorkspaceAreaBody(
             com.hienlh.ppm.app.ui.tasks.TasksPanel(model)
         }
         PhoneArea.ASSISTANT -> tab?.let { TabBody(model = model, tab = it) }
+        PhoneArea.JIRA -> com.hienlh.ppm.app.ui.jira.JiraPanel(model)
     }
 }

@@ -134,6 +134,7 @@ fun PhoneShell(
                 "tunnels" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.PORT_FORWARDING))
                 "specs" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.SPECS))
                 "tasks" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.TASKS))
+                "jira" -> if (!minimal && model.jiraEnabled) nav.visitTab(PhoneNav.areaTabId(PhoneArea.JIRA))
                 "history" -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.CHAT))
                 else -> nav.openDrawer()
             }
@@ -345,7 +346,7 @@ fun PhoneShell(
                 subline = drawerSubline,
                 serverConnected = connectionState == AppBarConnectionState.Connected,
             ),
-            workspaceItems = listOf(
+            workspaceItems = (listOf(
                 DrawerNavItem(
                     id = PhoneArea.CHAT.id,
                     label = "Chat History",
@@ -421,7 +422,10 @@ fun PhoneShell(
                         handleDrawerSelection(model, PhoneArea.DATABASE.id, openTabs, nav)
                     },
                 ),
-            ).filter { item -> PhoneArea.fromId(item.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true },
+            ) + com.hienlh.ppm.app.ui.jira.jiraDrawerItems(model, activeArea == PhoneArea.JIRA) {
+                nav.closeDrawer()
+                handleDrawerSelection(model, PhoneArea.JIRA.id, openTabs, nav)
+            }).filter { item -> PhoneArea.fromId(item.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true },
             toolTiles = listOf(
                 DrawerToolTileItem(
                     id = PhoneArea.PORT_FORWARDING.id,
@@ -811,6 +815,7 @@ private fun handleDrawerSelection(
             nav.visitTab(PhoneNav.areaTabId(PhoneArea.SPECS))
         }
         PhoneArea.TASKS -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.TASKS))
+        PhoneArea.JIRA -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.JIRA))
         PhoneArea.SETTINGS -> {
             model.openSettings()
             model.activeTabId?.let(nav::visitTab)

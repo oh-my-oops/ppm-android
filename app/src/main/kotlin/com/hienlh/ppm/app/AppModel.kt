@@ -766,6 +766,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         jiraEnabled = enabled
         saveUiPrefs()
         putUiPref { put("jiraEnabled", enabled) }
+        // Turned off while its section is open: Explorer instead, as the web does.
+        if (!enabled && sidebarTab == "jira") openSidebarSection("explorer")
     }
 
     fun setRemoteDesktopWarningDismissedPref(dismissed: Boolean) {
@@ -870,17 +872,22 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         if (!report { api?.setTheme(themeSelection) }) themeSelection = previous
     }
 
+    /** The built-in sections, then Jira when it is on (`getAvailableTabs`). */
+    private val availableSidebarSections: List<String>
+        get() = if (jiraEnabled) SIDEBAR_SECTIONS + "jira" else SIDEBAR_SECTIONS
+
     /** This app's sections in the rail's order: those dragged into place first, then the rest as the web lists them (`resolveTabOrder`). */
     val sidebarSections: List<String>
         get() {
-            val ordered = (sidebarTabOrder.filter { it in SIDEBAR_SECTIONS } + SIDEBAR_SECTIONS).distinct()
+            val available = availableSidebarSections
+            val ordered = (sidebarTabOrder.filter { it in available } + available).distinct()
             return if (info?.minimalMode == true) ordered.filter { it in MINIMAL_SIDEBAR_SECTIONS } else ordered
         }
 
     /** The section shown: the one opened last, or the rail's first when that is one this app has not (the drawer's fallback). */
     val sidebarSection: String
         get() = sidebarTab
-            .takeIf { (it in SIDEBAR_SECTIONS || it.startsWith("ext:")) && (info?.minimalMode != true || it in MINIMAL_SIDEBAR_SECTIONS) }
+            .takeIf { (it in availableSidebarSections || it.startsWith("ext:")) && (info?.minimalMode != true || it in MINIMAL_SIDEBAR_SECTIONS) }
             ?: sidebarSections.first()
 
     /** The open server's OS (`/api/system/host`), kept per server so the first frame already knows it. */

@@ -19,7 +19,7 @@ import org.junit.Test
 class PhoneAreaTest {
 
     @Test
-    fun `PhoneArea enum contains the closed set of 15 phone areas, Specs, Tasks and the Assistant included`() {
+    fun `PhoneArea enum contains the closed set of 16 phone areas, Specs, Tasks, the Assistant and Jira included`() {
         val expectedIds = setOf(
             "chat",
             "projects",
@@ -36,9 +36,10 @@ class PhoneAreaTest {
             "specs",
             "tasks",
             "assistant",
+            "jira",
         )
         assertEquals(expectedIds, PhoneArea.entries.map { it.id }.toSet())
-        assertEquals(15, PhoneArea.entries.size)
+        assertEquals(16, PhoneArea.entries.size)
     }
 
     @Test
@@ -58,6 +59,7 @@ class PhoneAreaTest {
             "ports" to PhoneArea.PORT_FORWARDING,
             "web-preview" to PhoneArea.PORT_FORWARDING,
             "settings" to PhoneArea.SETTINGS,
+            "jira" to PhoneArea.JIRA,
         )
 
         for ((type, expectedArea) in phoneTabCases) {
@@ -87,7 +89,6 @@ class PhoneAreaTest {
             "extension",
             "design",
             "group",
-            "jira",
             "ai-resource",
             "problems",
             "os-explorer",
