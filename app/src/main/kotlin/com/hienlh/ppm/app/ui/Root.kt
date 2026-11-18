@@ -235,6 +235,8 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                     ImageLightbox(request, onClose = { model.lightbox = null }, onDownload = download, onCopy = { copyImage(context, clipboard, it) })
                 }
                 if (model.connectionLost) ConnectionLostOverlay(model)
+                // A sealed vault value the user unlocked on a card, for a minute after the card left.
+                com.hienlh.ppm.chat.VaultShownValueHost(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars))
                 Toaster(model.toasts, toaster, mobile, narrow = maxWidth <= 600.dp, dark = model.theme.isDark, onGone = model::forgetToast)
             }
         }

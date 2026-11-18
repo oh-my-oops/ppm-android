@@ -52,6 +52,11 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
                 label = "Show running apps",
                 note = "Opens a web server running on this machine, such as a dev server, in a PPM tab. On another device it goes through a private Tailscale forward; it never makes a public link.",
             ),
+            PpmToolDef(
+                id = "open_branch_review",
+                label = "Open Branch Review",
+                note = "Opens Branch Review on a branch it finished work on, so you review every changed file there. Changes nothing.",
+            ),
         ),
     ),
     PpmToolGroup(
@@ -131,6 +136,11 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
                 label = "Check sessions",
                 note = "Reads what the linked sessions are doing: running or idle, waiting on you, and the opening of their last answer.",
             ),
+            PpmToolDef(
+                id = "design_screenshot",
+                label = "Screenshot designs",
+                note = "Renders a design's pages to pictures on this machine, with a Chrome or Edge it finds here, so the AI can look at them and a manager chat can send them to you with a card.",
+            ),
         ),
     ),
     PpmToolGroup(
@@ -152,6 +162,31 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
                 label = "Delete schedules",
                 note = "Deletes a prompt scheduled into its own chat. Another chat's schedules are out of its reach.",
             ),
+        ),
+    ),
+    PpmToolGroup(
+        title = "Tasks",
+        intro = "Every chat, including manager chats and the PPM Assistant, in projects with Tasks on. A chat started before a change gets it at its next start.",
+        tools = listOf(
+            PpmToolDef("ppm_task_list", "List tasks", "Lists a project's tasks in “what to do first” order, with filters."),
+            PpmToolDef("ppm_task_get", "Read tasks", "Reads one task: its fields, links, children, recent history and the check of the chat it was handed to."),
+            PpmToolDef("ppm_task_project", "Read task settings", "Reads a project's statuses, members and custom fields."),
+            PpmToolDef("ppm_task_create", "Create tasks", "Adds a task. It is recorded in the task's history and you can undo it."),
+            PpmToolDef("ppm_task_update", "Change tasks", "Changes a task's fields, links or result, with a reason shown in its history. You can undo it."),
+            PpmToolDef("ppm_task_close", "Close tasks", "Closes a task as done or dropped. You can undo it."),
+            PpmToolDef("ppm_task_reorder", "Reorder tasks", "Moves a task up or down among tasks of the same urgency and importance."),
+            PpmToolDef("ppm_task_undo", "Undo task changes", "Undoes a change an AI made, within 90 days, while nobody changed the same fields since."),
+            PpmToolDef("ppm_task_project_update", "Change task settings", "Adds or edits a project's members, statuses and custom fields, and how often handed-off work is checked."),
+            PpmToolDef("ppm_task_notify_manager", "Tell the manager now", "The PPM Assistant only: wakes a project's manager chat about task changes, after you said yes."),
+        ),
+    ),
+    PpmToolGroup(
+        title = "Vault",
+        intro = "Your secret vault (Settings → Vault), for ordinary chats. Off until you turn them on here; the PPM Assistant always has them.",
+        tools = listOf(
+            PpmToolDef("vault_list", "List vault items", "Lists the names, kinds and tiers of your vault's items, never a value."),
+            PpmToolDef("vault_read", "Read vault items", "Reads public items at once. Secure items need your password on a card; a sealed item is shown to you unless you give it to the AI."),
+            PpmToolDef("vault_propose", "Propose vault items", "Asks you to save something to the vault. You pick the tier and confirm with its password."),
         ),
     ),
     PpmToolGroup(
@@ -242,7 +277,7 @@ data class PpmFeatureIntro(val id: String, val tools: List<String>)
 val PPM_FEATURE_INTROS: List<PpmFeatureIntro> = listOf(
     PpmFeatureIntro(
         id = "session-tools-2026-11",
-        tools = listOf("search_sessions", "list_session_turns", "read_session_turns", "create_session", "send_to_session", "session_status"),
+        tools = listOf("search_sessions", "list_session_turns", "read_session_turns", "create_session", "send_to_session", "session_status", "design_screenshot"),
     ),
     PpmFeatureIntro(
         id = "session-schedules-2026-11",
@@ -271,9 +306,71 @@ fun ppmFeatureAnswerFromSwitches(ppmTools: Map<String, Boolean>, intro: PpmFeatu
  */
 fun isPpmToolEnabled(ppmTools: Map<String, Boolean>, toolId: String): Boolean {
     ppmTools[toolId]?.let { return it }
-    val intro = ppmFeatureIntroOfTool(toolId) ?: return true
-    return ppmFeatureAnswerFromSwitches(ppmTools, intro) == true
+    val intro = ppmFeatureIntroOfTool(toolId)
+    if (intro != null) return ppmFeatureAnswerFromSwitches(ppmTools, intro) == true
+    // The vault's tools reach the user's secrets (through a card): off until the user turns them on.
+    return toolId !in VAULT_TOOLS
 }
+
+/** `VAULT_TOOLS`. */
+val VAULT_TOOLS = listOf("vault_list", "vault_read", "vault_propose")
+
+/** `ai.session_collab` (`src/shared/session-collab-settings.ts`), every field resolved and clamped. */
+data class SessionCollabSettings(
+    val askBeforeCreate: Boolean = true,
+    val maxDepth: Int = 3,
+    val maxAutoMessagesPerPair: Int = 20,
+    val maxRunningSpawned: Int = 5,
+    val waitTimeoutMinutes: Int = 10,
+) {
+    fun number(key: String): Int = when (key) {
+        "maxDepth" -> maxDepth
+        "maxAutoMessagesPerPair" -> maxAutoMessagesPerPair
+        "maxRunningSpawned" -> maxRunningSpawned
+        else -> waitTimeoutMinutes
+    }
+
+    companion object {
+        /** `resolveSessionCollabSettings`: a missing or mistyped field takes its default; numbers are clamped. Never throws. */
+        fun resolve(stored: kotlinx.serialization.json.JsonElement?): SessionCollabSettings {
+            val raw = stored as? kotlinx.serialization.json.JsonObject ?: return SessionCollabSettings()
+            fun num(key: String, default: Int): Int {
+                val p = raw[key] as? kotlinx.serialization.json.JsonPrimitive ?: return default
+                if (p.isString) return default
+                val v = p.content.toDoubleOrNull()?.takeIf { it.isFinite() } ?: return default
+                return clampSessionCollabNumber(key, v)
+            }
+            val ask = (raw["askBeforeCreate"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { !it.isString }?.content?.toBooleanStrictOrNull()
+            return SessionCollabSettings(
+                askBeforeCreate = ask ?: true,
+                maxDepth = num("maxDepth", 3),
+                maxAutoMessagesPerPair = num("maxAutoMessagesPerPair", 20),
+                maxRunningSpawned = num("maxRunningSpawned", 5),
+                waitTimeoutMinutes = num("waitTimeoutMinutes", 10),
+            )
+        }
+    }
+}
+
+/** One of the four limits as Settings → Tools shows it (`NUMBERS`). */
+data class SessionCollabNumber(val key: String, val label: String, val note: String, val min: Int, val max: Int, val unit: String? = null)
+
+val SESSION_COLLAB_NUMBERS = listOf(
+    SessionCollabNumber("maxDepth", "How deep", "Sessions created by created sessions, counted from one you started.", 1, 5),
+    SessionCollabNumber("maxAutoMessagesPerPair", "Messages per pair", "Sent between two sessions before you are asked. Writing in either starts the count again.", 1, 200),
+    SessionCollabNumber("maxRunningSpawned", "Running at once", "AI-created sessions of one project working at the same time.", 1, 20),
+    SessionCollabNumber("waitTimeoutMinutes", "Longest wait", "How long a session waits for a reply before going on.", 1, 60, "min"),
+)
+
+/** `clampSessionCollabNumber`: rounded (half up, as `Math.round`), then clamped to the setting's range. */
+fun clampSessionCollabNumber(key: String, value: Double): Int {
+    val limits = SESSION_COLLAB_NUMBERS.first { it.key == key }
+    return kotlin.math.floor(value + 0.5).toInt().coerceIn(limits.min, limits.max)
+}
+
+/** What a typed number commits to: the clamped value, or [current] for anything that is not a number. */
+fun commitSessionCollabNumber(key: String, draft: String, current: Int): Int =
+    draft.trim().takeIf { it.isNotEmpty() }?.toDoubleOrNull()?.takeIf { it.isFinite() }?.let { clampSessionCollabNumber(key, it) } ?: current
 
 /**
  * `patchPpmToolSwitches`: [current] with [toolId] set to [on], as the server stores one switch.
@@ -752,31 +849,6 @@ fun duplicateAiResourceTargetScope(itemScope: String, activeProjectPath: String)
 // 5. PPMBot / Clawbot (Phase 12b.5 — /api/settings/clawbot)
 // ===========================================================================
 
-data class ClawbotConfigState(
-    val enabled: Boolean = false,
-    val defaultProvider: String = "claude",
-    val systemPrompt: String = "",
-    val showToolCalls: Boolean = true,
-    val showThinking: Boolean = false,
-    val permissionMode: String = "bypassPermissions",
-    val debounceMs: Int = 2000,
-)
-
-fun parseClawbotConfig(json: JsonElement?): ClawbotConfigState {
-    if (json == null) return ClawbotConfigState()
-    return ClawbotConfigState(
-        enabled = json["enabled"].bool == true,
-        defaultProvider = json["default_provider"].string ?: "claude",
-        systemPrompt = json["system_prompt"].string.orEmpty(),
-        showToolCalls = json["show_tool_calls"].bool ?: true,
-        showThinking = json["show_thinking"].bool == true,
-        permissionMode = json["permission_mode"].string ?: "bypassPermissions",
-        debounceMs = json["debounce_ms"].int ?: 2000,
-    )
-}
-
-fun clampDebounceMs(raw: Int): Int = raw.coerceIn(0, 30_000)
-
 data class TelegramPairedChat(
     val chatId: String,
     val name: String,
@@ -849,50 +921,6 @@ fun parseClawbotTelegram(
         connectError = connectError,
     )
 }
-
-data class ClawbotTaskRow(
-    val id: String,
-    val chatId: String,
-    val projectName: String,
-    val prompt: String,
-    val status: String,
-    val createdAt: Long,
-    val completedAt: Long? = null,
-)
-
-fun parseClawbotTasks(json: JsonElement?): List<ClawbotTaskRow> =
-    json?.array.orEmpty().mapNotNull { row ->
-        val id = row["id"].string ?: return@mapNotNull null
-        ClawbotTaskRow(
-            id = id,
-            chatId = row["chat_id"].string.orEmpty(),
-            projectName = row["project_name"].string.orEmpty(),
-            prompt = row["prompt"].string.orEmpty(),
-            status = row["status"].string ?: "pending",
-            createdAt = row["created_at"].long ?: 0L,
-            completedAt = row["completed_at"].long,
-        )
-    }
-
-data class ClawbotMemoryRow(
-    val id: Long,
-    val project: String,
-    val content: String,
-    val category: String,
-    val importance: Int = 1,
-)
-
-fun parseClawbotMemories(json: JsonElement?): List<ClawbotMemoryRow> =
-    json?.array.orEmpty().mapNotNull { row ->
-        val id = row["id"].long ?: return@mapNotNull null
-        ClawbotMemoryRow(
-            id = id,
-            project = row["project"].string ?: "_global",
-            content = row["content"].string.orEmpty(),
-            category = row["category"].string ?: "general",
-            importance = row["importance"].int ?: 1,
-        )
-    }
 
 // ===========================================================================
 // 6. Design Settings & Design Systems (Phase 12b.5)

@@ -25,15 +25,18 @@ class SettingsAiStateTest {
     @Test
     fun `the tool groups are the web's Settings - Tools groups, in its order`() {
         assertEquals(
-            listOf("Tabs", "Terminal", "Session history", "Database", "Session collaboration", "Schedules", "Spec mode", "Memory"),
+            listOf("Tabs", "Terminal", "Session history", "Database", "Session collaboration", "Schedules", "Tasks", "Vault", "Spec mode", "Memory"),
             PPM_TOOL_GROUPS.map { it.title },
         )
         assertEquals(
             listOf(
-                "open_file", "open_preview", "open_url", "read_terminal", "run_in_terminal",
+                "open_file", "open_preview", "open_url", "open_branch_review", "read_terminal", "run_in_terminal",
                 "search_sessions", "list_session_turns", "read_session_turns", "db_query", "open_query", "db_execute",
-                "create_session", "send_to_session", "session_status",
+                "create_session", "send_to_session", "session_status", "design_screenshot",
                 "session_schedule_create", "session_schedule_list", "session_schedule_delete",
+                "ppm_task_list", "ppm_task_get", "ppm_task_project", "ppm_task_create", "ppm_task_update", "ppm_task_close",
+                "ppm_task_reorder", "ppm_task_undo", "ppm_task_project_update", "ppm_task_notify_manager",
+                "vault_list", "vault_read", "vault_propose",
                 "spec_status", "spec_create", "spec_submit", "spec_open_design", "task_start", "task_done", "task_red", "task_green", "suite_check",
                 "memory_search", "memory_read", "memory_write", "memory_forget",
             ),
@@ -71,7 +74,7 @@ class SettingsAiStateTest {
         assertEquals(
             mapOf(
                 "db_query" to false, "create_session" to true, "send_to_session" to false, "session_status" to false,
-                "search_sessions" to false, "list_session_turns" to false, "read_session_turns" to false,
+                "search_sessions" to false, "list_session_turns" to false, "read_session_turns" to false, "design_screenshot" to false,
             ),
             next,
         )

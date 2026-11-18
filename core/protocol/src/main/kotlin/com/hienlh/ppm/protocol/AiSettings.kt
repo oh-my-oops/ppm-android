@@ -23,6 +23,8 @@ data class AiSettings(
     val leftoverProcessesIdleMinutes: Int? = null,
     /** `hide_builtin_cron`: Claude chats start without its own cron tools while PPM's are on; null when never set (on). */
     val hideBuiltinCron: Boolean? = null,
+    /** `session_collab` as stored, resolved where it is shown (`SessionCollabSettings.resolve`). */
+    val sessionCollab: JsonElement? = null,
 ) {
     /** `providerTabs`: every configured provider but the mock one, in the server's order. */
     val providerTabs: List<String>
@@ -47,6 +49,7 @@ data class AiSettings(
                 ppmTools = ppmTools,
                 leftoverProcessesIdleMinutes = value["leftover_processes_idle_minutes"].int,
                 hideBuiltinCron = value["hide_builtin_cron"].bool,
+                sessionCollab = value["session_collab"],
             )
         }
     }
@@ -115,6 +118,9 @@ object AiSettingsPatch {
         buildJsonObject { put("ppm_tools", buildJsonObject { put(tool, on) }) }
 
     fun hideBuiltinCron(on: Boolean): JsonObject = buildJsonObject { put("hide_builtin_cron", on) }
+
+    /** `{ session_collab: { [key]: value } }`: one session-collaboration setting. */
+    fun sessionCollab(key: String, value: JsonElement): JsonObject = buildJsonObject { put("session_collab", buildJsonObject { put(key, value) }) }
 
     fun leftoverIdleMinutes(minutes: Int): JsonObject =
         buildJsonObject { put("leftover_processes_idle_minutes", minutes) }

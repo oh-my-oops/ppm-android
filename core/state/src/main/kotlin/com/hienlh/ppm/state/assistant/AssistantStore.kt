@@ -130,6 +130,9 @@ class AssistantStore(
 
     fun refreshManagers() = launchQuiet { val managers = api.managerChats(); _view.update { it.copy(managers = managers) } }
 
+    /** The persona's name as Settings just saved it (`rememberAssistantName`); empty is none. */
+    fun rememberName(name: String?) = _view.update { it.copy(name = name?.takeIf { n -> n.isNotEmpty() }) }
+
     private fun refreshOpen() {
         val at = openChanges
         launchQuiet {

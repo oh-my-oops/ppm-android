@@ -152,6 +152,12 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
         DesignShotCard(shotCall, result?.output, isError, isDone, modifier)
         return
     }
+    // The vault's tools never show a locked value: a read is a count.
+    val vaultCall = if (tool.requestId == null) remember(tool.name, tool.input) { vaultToolCall(tool.name, tool.input) } else null
+    if (vaultCall != null) {
+        VaultToolCard(vaultCall, tool.toolUseId, result?.output, isError, isDone, modifier)
+        return
+    }
     if (tool.isAgent && variant == ToolCardVariant.Chat) {
         val opener = LocalAgentSessionOpener.current
         AgentRow(tool, if (isError || bgFailed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING, bgRunning, modifier) {

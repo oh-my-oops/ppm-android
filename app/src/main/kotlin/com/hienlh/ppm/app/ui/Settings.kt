@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -144,6 +145,10 @@ internal fun SettingsBody(
         model.requestedSettingsCategory = null
         onCategoryChange(it)
     }
+    // A link to the retired PPMBot pane lands on the sub-tab it became, once per link.
+    LaunchedEffect(rawRequestedCategory) {
+        if (rawRequestedCategory?.trim()?.lowercase() == "ppmbot") com.hienlh.ppm.app.ui.settings.assistant.AssistantSettingsTab.tab = "sessions"
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val isPhone = SizeClass.of(maxWidth) == SizeClass.Phone
@@ -220,7 +225,8 @@ enum class SettingsCategory(
     Accounts("accounts", "Accounts", "Claude, Codex and Antigravity sign-ins, rotation", ProductIcon.Users, SettingsGroup.Ai, minimalSafe = true),
     Mcp("mcp", "MCP Servers", "Model Context Protocol servers & sign-in", ProductIcon.Plug, SettingsGroup.Ai, minimalSafe = true),
     AiResources("ai-resources", "AI Resources", "Skills, agents, commands & MCP configs", ProductIcon.Layers, SettingsGroup.Ai, minimalSafe = false),
-    PpmBot("ppmbot", "PPMBot", "Telegram bot coordinator, tasks & memory", ProductIcon.BotMessageSquare, SettingsGroup.Ai, minimalSafe = false),
+    Assistant("assistant", "PPM Assistant", "Its own model, instructions, MCP servers, Telegram", ProductIcon.Sparkles, SettingsGroup.Ai, minimalSafe = false),
+    Vault("vault", "Vault", "Personal details the AI may read, behind passwords", ProductIcon.Lock, SettingsGroup.Ai, minimalSafe = false),
     Design("design", "Design", "Design Canvas apps, instructions & skills", ProductIcon.LayoutGrid, SettingsGroup.Ai, minimalSafe = false),
 
     // Integrations
@@ -233,7 +239,7 @@ enum class SettingsCategory(
     Schedules("schedules", "Schedules", "Cron prompt & script tasks, logs & templates", ProductIcon.CalendarClock, SettingsGroup.Integrations, minimalSafe = false),
 
     // Advanced
-    QueryAudit("query-audit", "Query Audit Log", "SQL history retention & size cap", ProductIcon.ScrollText, SettingsGroup.Advanced, minimalSafe = false),
+    QueryAudit("query-audit", "Storage", "Databases, backups and logs on disk", ProductIcon.ScrollText, SettingsGroup.Advanced, minimalSafe = false),
     LanguageServers("language-servers", "Language Servers", "Editor code intelligence", ProductIcon.Code, SettingsGroup.Advanced, minimalSafe = false),
     DatabaseDrivers("database-drivers", "Database Drivers", "On-demand database engines", ProductIcon.Database, SettingsGroup.Advanced, minimalSafe = false),
     RemoteDesktop("remote-desktop", "Remote Desktop", "MediaMTX WebRTC relay", ProductIcon.Monitor, SettingsGroup.Advanced, minimalSafe = false),
@@ -249,6 +255,8 @@ enum class SettingsCategory(
                 "keybindings", "keyboard", "keyboard-shortcuts" -> Shortcuts
                 "theme", "themes" -> Appearance
                 "storage" -> QueryAudit
+                // The old PPMBot pane is now PPM Assistant → Sessions & Telegram.
+                "ppmbot" -> Assistant
                 else -> null
             }
         }
@@ -546,7 +554,8 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                     SettingsCategory.Accounts -> AccountsSettingsSection(model)
                     SettingsCategory.Mcp -> McpSettingsSection(model)
                     SettingsCategory.AiResources -> AiResourcesSettingsSection(model)
-                    SettingsCategory.PpmBot -> PpmBotSettingsSection(model)
+                    SettingsCategory.Assistant -> com.hienlh.ppm.app.ui.settings.assistant.AssistantSettingsSection(model)
+                    SettingsCategory.Vault -> com.hienlh.ppm.app.ui.settings.vault.VaultSettingsSection(model)
                     SettingsCategory.Design -> DesignSettingsSection(model)
                     SettingsCategory.Notifications -> NotificationsSettingsSection(model)
                     SettingsCategory.RemoteAccess -> RemoteAccessSettingsSection(model)
@@ -555,7 +564,10 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                     SettingsCategory.Extensions -> ExtensionsSettingsSection(model)
                     SettingsCategory.Jira -> JiraSettingsSection(model)
                     SettingsCategory.Schedules -> SchedulesSettingsSection(model)
-                    SettingsCategory.QueryAudit -> QueryAuditSection(model)
+                    SettingsCategory.QueryAudit -> {
+                        com.hienlh.ppm.app.ui.settings.StorageOverviewSection(model)
+                        QueryAuditSection(model)
+                    }
                     SettingsCategory.LanguageServers -> LanguageServersSection(model)
                     SettingsCategory.DatabaseDrivers -> DatabaseDriversSection(model)
                     SettingsCategory.RemoteDesktop -> RemoteDesktopSettingsSection(model)

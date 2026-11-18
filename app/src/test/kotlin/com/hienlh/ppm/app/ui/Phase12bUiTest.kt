@@ -12,8 +12,6 @@ import com.hienlh.ppm.state.settings.AiResourceFilter
 import com.hienlh.ppm.state.settings.AiResourceItem
 import com.hienlh.ppm.state.settings.AiResourcesOverview
 import com.hienlh.ppm.state.settings.AiResourcesStats
-import com.hienlh.ppm.state.settings.ClawbotConfigState
-import com.hienlh.ppm.state.settings.ClawbotTelegramState
 import com.hienlh.ppm.state.settings.DesignProviderSkillGroup
 import com.hienlh.ppm.state.settings.DesignSettingsState
 import com.hienlh.ppm.state.settings.DesignSkillItem
@@ -140,42 +138,6 @@ class Phase12bUiTest {
 
         composeRule.onNodeWithTag("ai-resource-delete-db-debugger").performClick()
         assertEquals("db-debugger", deletedName)
-    }
-
-    @Test
-    fun ppmBotSettingsContent_togglesEnableSavesTokenAndClampsDebounce() {
-        var enabledState: Boolean? = null
-        var savedToken: String? = null
-        var savedDebounce: Int? = null
-
-        composeRule.setContent {
-            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
-                PpmBotSettingsContent(
-                    config = ClawbotConfigState(enabled = false, debounceMs = 1500),
-                    telegram = ClawbotTelegramState(configured = true, botUsername = "ppm_bot"),
-                    tasks = emptyList(),
-                    memories = emptyList(),
-                    onToggleEnabled = { enabledState = it },
-                    onSaveTelegramToken = { savedToken = it },
-                    onStartTelegramConnect = {},
-                    onCancelTelegramConnect = {},
-                    onDisconnectChat = {},
-                    onSaveCoordinatorConfig = { savedDebounce = it.debounceMs },
-                    onDeleteMemory = {},
-                )
-            }
-        }
-
-        composeRule.onNodeWithTag("ppmbot-enable-switch").performClick()
-        assertEquals(true, enabledState)
-
-        composeRule.onNodeWithTag("ppmbot-telegram-token-input").performTextReplacement("999:XYZ")
-        composeRule.onNodeWithTag("ppmbot-save-token-btn").performClick()
-        assertEquals("999:XYZ", savedToken)
-
-        composeRule.onNodeWithTag("ppmbot-debounce-input").performTextReplacement("99000")
-        composeRule.onNodeWithTag("ppmbot-save-config-btn").performClick()
-        assertEquals(30_000, savedDebounce)
     }
 
     @Test

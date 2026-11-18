@@ -47,6 +47,8 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.answerCollabApproval
 import com.hienlh.ppm.client.answerDbApproval
+import com.hienlh.ppm.client.answerVaultCard
+import com.hienlh.ppm.client.vaultCardPrefill
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -61,6 +63,7 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.SessionCollabAnswer
 import com.hienlh.ppm.protocol.SessionCollabApprovalInput
+import com.hienlh.ppm.protocol.VaultCardResult
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.get
@@ -85,6 +88,12 @@ interface PpmApprovals {
     suspend fun answerCollab(requestId: String, answer: SessionCollabAnswer)
 
     suspend fun answerDb(requestId: String, approved: Boolean, password: String?)
+
+    /** A vault card's answer (`VaultCardAnswers`); a sealed value shown to the user comes back only here. */
+    suspend fun answerVault(requestId: String, answer: JsonObject): VaultCardResult = throw UnsupportedOperationException("Vault cards are not answered here")
+
+    /** The value an AI put into a vault proposal, for its card to show masked. */
+    suspend fun vaultPrefill(requestId: String): String? = null
 }
 
 /** [PpmApprovals] on the open server. Equal for the same client, so providing it again recomposes nothing. */
@@ -92,6 +101,10 @@ data class ServerPpmApprovals(private val api: ApiClient) : PpmApprovals {
     override suspend fun answerCollab(requestId: String, answer: SessionCollabAnswer) = api.answerCollabApproval(requestId, answer)
 
     override suspend fun answerDb(requestId: String, approved: Boolean, password: String?) = api.answerDbApproval(requestId, approved, password)
+
+    override suspend fun answerVault(requestId: String, answer: JsonObject): VaultCardResult = api.answerVaultCard(requestId, answer)
+
+    override suspend fun vaultPrefill(requestId: String): String? = api.vaultCardPrefill(requestId)
 }
 
 /** How this chat answers PPM's own approvals; none, and their cards show what is asked without buttons. */

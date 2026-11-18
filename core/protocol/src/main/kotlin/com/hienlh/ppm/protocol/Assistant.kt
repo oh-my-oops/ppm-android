@@ -313,6 +313,12 @@ data class ManagerChatSummary(
     val permissionMode: String,
     val waiting: Int,
     val rulesPending: Boolean,
+    /** Whether the morning digest asks this manager; on unless switched off. */
+    val digest: Boolean = true,
+    /** What Telegram shows of this project's cards: `full` or `title`. */
+    val telegramDetail: String = "full",
+    /** The chat's stream started before it became the manager: its tools arrive at its next start. */
+    val toolsPending: Boolean = false,
 ) {
     companion object {
         fun from(json: JsonElement?): ManagerChatSummary? {
@@ -328,6 +334,9 @@ data class ManagerChatSummary(
                 permissionMode = json["permissionMode"].string ?: "default",
                 waiting = json["waiting"].int ?: 0,
                 rulesPending = json["rulesPending"].bool ?: false,
+                digest = json["digest"].bool ?: true,
+                telegramDetail = json["telegramDetail"].string?.takeIf { it == "full" || it == "title" } ?: "full",
+                toolsPending = json["toolsPending"].bool ?: false,
             )
         }
 
@@ -364,14 +373,37 @@ data class AssistantTelegram(
     val quietWhileInPpm: Boolean,
     /** The Assistant sessions a connected Telegram chat talks to. */
     val chatSessionIds: List<String> = emptyList(),
+    /** Every connected chat and the session it talks to (`parseAssistantTelegramState`). */
+    val chats: List<AssistantTelegramChat> = emptyList(),
 ) {
+    /** Chats that may be pointed at a session: only while the bridge is switched on. */
+    val bindableChats: List<AssistantTelegramChat> get() = if (enabled) chats else emptyList()
+
+    fun chatsOn(sessionId: String): List<AssistantTelegramChat> = chats.filter { it.sessionId == sessionId }
+
     companion object {
         fun from(json: JsonElement?) = AssistantTelegram(
             enabled = json["enabled"].bool ?: false,
             running = json["running"].bool ?: false,
             quietWhileInPpm = json["quietWhileInPpm"].bool ?: false,
             chatSessionIds = json["chats"].array.orEmpty().mapNotNull { it["sessionId"].string },
+            chats = json["chats"].array.orEmpty().mapNotNull(AssistantTelegramChat::from),
         )
+    }
+}
+
+/** One connected Telegram chat; [sessionId] is null until its first message makes one. */
+data class AssistantTelegramChat(val chatId: String, val name: String, val sessionId: String?, val sessionTitle: String?) {
+    companion object {
+        fun from(json: JsonElement?): AssistantTelegramChat? {
+            val id = json["chatId"].string?.takeIf { it.isNotEmpty() } ?: return null
+            return AssistantTelegramChat(
+                chatId = id,
+                name = json["name"].string?.takeIf { it.isNotEmpty() } ?: id,
+                sessionId = json["sessionId"].string?.takeIf { it.isNotEmpty() },
+                sessionTitle = json["sessionTitle"].string,
+            )
+        }
     }
 }
 

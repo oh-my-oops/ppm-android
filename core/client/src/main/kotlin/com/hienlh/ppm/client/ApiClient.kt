@@ -353,6 +353,7 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
                     code = json["code"].string,
                     hint = json["hint"].string,
                     data = json["data"]?.takeIf { it !is JsonNull },
+                    body = json,
                 )
             }
             return json["data"] ?: JsonNull

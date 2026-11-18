@@ -11,11 +11,10 @@ internal fun settingsSectionsShown(category: SettingsCategory): List<String> = w
     SettingsCategory.Ai, SettingsCategory.Tools -> listOf("ai")
     SettingsCategory.Files -> listOf("files")
     SettingsCategory.Notifications -> listOf("notifications", "telegram", "clawbot")
-    SettingsCategory.PpmBot -> listOf("telegram", "clawbot")
     SettingsCategory.Mcp, SettingsCategory.AiResources -> listOf("mcp")
     SettingsCategory.Accounts -> listOf("accounts")
     SettingsCategory.Proxy -> listOf("proxy")
-    SettingsCategory.QueryAudit -> listOf("query-audit")
+    SettingsCategory.QueryAudit -> listOf("query-audit", "session-trace")
     SettingsCategory.Shortcuts -> listOf("keybindings")
     else -> emptyList()
 }

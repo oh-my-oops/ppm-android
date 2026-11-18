@@ -168,6 +168,15 @@ fun PhoneSettingsScreen(
                             MemorySettingsSection(model)
                         }
                     }
+                    PhoneSettingsSection.Tools -> PhoneHostedSettingsPage("Tools", "phone-settings-tools-page", goHome) {
+                        com.hienlh.ppm.app.ui.ToolsSettingsSection(model)
+                    }
+                    PhoneSettingsSection.Assistant -> PhoneHostedSettingsPage("PPM Assistant", "phone-settings-assistant-page", goHome) {
+                        com.hienlh.ppm.app.ui.settings.assistant.AssistantSettingsSection(model)
+                    }
+                    PhoneSettingsSection.Vault -> PhoneHostedSettingsPage("Vault", "phone-settings-vault-page", goHome) {
+                        com.hienlh.ppm.app.ui.settings.vault.VaultSettingsSection(model)
+                    }
                     PhoneSettingsSection.Notifications -> NotificationsPage(
                         model = model,
                         onBack = goHome,
@@ -252,6 +261,7 @@ fun PhoneSettingsHomeList(
                             PhoneSettingsSection.Accounts -> null
                             PhoneSettingsSection.AiProvider -> null
                             PhoneSettingsSection.Memory -> null
+                            PhoneSettingsSection.Tools, PhoneSettingsSection.Assistant, PhoneSettingsSection.Vault -> null
                             PhoneSettingsSection.Notifications -> null
                             PhoneSettingsSection.Theme -> themeLabel
                             PhoneSettingsSection.Servers -> serverLabel

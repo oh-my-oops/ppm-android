@@ -63,16 +63,6 @@ import com.hienlh.ppm.client.aiResourcesDelete
 import com.hienlh.ppm.client.aiResourcesDuplicate
 import com.hienlh.ppm.client.aiResourcesList
 import com.hienlh.ppm.client.aiSettings
-import com.hienlh.ppm.client.clawbotCancelTelegramConnect
-import com.hienlh.ppm.client.clawbotDeleteMemory
-import com.hienlh.ppm.client.clawbotDisconnectPairedChat
-import com.hienlh.ppm.client.clawbotGetConfig
-import com.hienlh.ppm.client.clawbotGetTelegram
-import com.hienlh.ppm.client.clawbotListMemories
-import com.hienlh.ppm.client.clawbotListTasks
-import com.hienlh.ppm.client.clawbotPutConfig
-import com.hienlh.ppm.client.clawbotPutTelegramToken
-import com.hienlh.ppm.client.clawbotStartTelegramConnect
 import com.hienlh.ppm.client.antigravityAccountsOverview
 import com.hienlh.ppm.client.antigravityCancelLogin
 import com.hienlh.ppm.client.antigravityDeleteAccount
@@ -141,10 +131,6 @@ import com.hienlh.ppm.state.settings.AccountRotationSettings
 import com.hienlh.ppm.state.settings.AiResourceFilter
 import com.hienlh.ppm.state.settings.AiResourceItem
 import com.hienlh.ppm.state.settings.AiResourcesOverview
-import com.hienlh.ppm.state.settings.ClawbotConfigState
-import com.hienlh.ppm.state.settings.ClawbotMemoryRow
-import com.hienlh.ppm.state.settings.ClawbotTaskRow
-import com.hienlh.ppm.state.settings.ClawbotTelegramState
 import com.hienlh.ppm.state.settings.CodexBrowserLoginFlow
 import com.hienlh.ppm.state.settings.CodexDeviceLoginFlow
 import com.hienlh.ppm.state.settings.DESIGN_INSTRUCTIONS_MAX_BYTES
@@ -159,7 +145,6 @@ import com.hienlh.ppm.state.settings.PPM_TOOL_GROUPS
 import com.hienlh.ppm.state.settings.TokenTestReport
 import com.hienlh.ppm.state.settings.UsageSnapshotPoint
 import com.hienlh.ppm.state.settings.buildMcpConfigJson
-import com.hienlh.ppm.state.settings.clampDebounceMs
 import com.hienlh.ppm.state.settings.effectiveClaudeBackupPassword
 import com.hienlh.ppm.state.settings.filterAiResources
 import com.hienlh.ppm.state.settings.isPpmToolEnabled
@@ -169,10 +154,6 @@ import com.hienlh.ppm.state.settings.parseAccountRotationSettings
 import com.hienlh.ppm.state.settings.parseAiResources
 import com.hienlh.ppm.state.settings.parseAntigravityLoginStart
 import com.hienlh.ppm.state.settings.parseAntigravityLoginStatus
-import com.hienlh.ppm.state.settings.parseClawbotConfig
-import com.hienlh.ppm.state.settings.parseClawbotMemories
-import com.hienlh.ppm.state.settings.parseClawbotTasks
-import com.hienlh.ppm.state.settings.parseClawbotTelegram
 import com.hienlh.ppm.state.settings.parseCodexBrowserLogin
 import com.hienlh.ppm.state.settings.parseCodexDeviceLogin
 import com.hienlh.ppm.state.settings.parseCodexLoginPollStatus
@@ -180,7 +161,6 @@ import com.hienlh.ppm.state.settings.parseDesignSettings
 import com.hienlh.ppm.state.settings.parseDesignSystems
 import com.hienlh.ppm.state.settings.parseMcpServers
 import com.hienlh.ppm.state.settings.parseOAuthCodeFlowStart
-import com.hienlh.ppm.state.settings.parseTelegramConnectLink
 import com.hienlh.ppm.state.settings.parseTokenTestReport
 import com.hienlh.ppm.state.settings.parseUsageHistory
 import com.hienlh.ppm.state.settings.utf8ByteCount
@@ -213,6 +193,7 @@ internal fun ToolsSettingsSection(model: AppModel) {
     val scope = rememberCoroutineScope()
     var ppmTools by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     var hideBuiltinCron by remember { mutableStateOf<Boolean?>(null) }
+    var sessionCollab by remember { mutableStateOf<kotlinx.serialization.json.JsonElement?>(null) }
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
@@ -222,6 +203,7 @@ internal fun ToolsSettingsSection(model: AppModel) {
             val loaded = client.aiSettings()
             ppmTools = loaded.ppmTools
             hideBuiltinCron = loaded.hideBuiltinCron
+            sessionCollab = loaded.sessionCollab
             errorMsg = null
         } catch (t: Throwable) {
             errorMsg = t.message ?: "Failed to load tools settings"
@@ -240,7 +222,7 @@ internal fun ToolsSettingsSection(model: AppModel) {
         errorMsg = errorMsg,
         onToggleTool = { toolId, enabled ->
             val previous = ppmTools
-            ppmTools = previous + (toolId to enabled)
+            ppmTools = com.hienlh.ppm.state.settings.patchPpmToolSwitches(previous, toolId, enabled)
             errorMsg = null
             val client = api ?: return@ToolsSettingsContent
             scope.launch {
@@ -271,6 +253,19 @@ internal fun ToolsSettingsSection(model: AppModel) {
                 }
             }
         },
+        sessionCollab = com.hienlh.ppm.state.settings.SessionCollabSettings.resolve(sessionCollab),
+        onSessionCollab = { key, value ->
+            errorMsg = null
+            val client = api ?: return@ToolsSettingsContent
+            scope.launch {
+                try {
+                    sessionCollab = client.updateAiSettings(com.hienlh.ppm.protocol.AiSettingsPatch.sessionCollab(key, value)).sessionCollab
+                } catch (t: Throwable) {
+                    errorMsg = t.message ?: "Could not save"
+                    reload()
+                }
+            }
+        },
     )
 }
 
@@ -283,11 +278,13 @@ internal fun ToolsSettingsContent(
     /** `hide_builtin_cron`, on unless set off. */
     hideBuiltinCron: Boolean = true,
     onHideBuiltinCron: (Boolean) -> Unit = {},
+    sessionCollab: com.hienlh.ppm.state.settings.SessionCollabSettings = com.hienlh.ppm.state.settings.SessionCollabSettings(),
+    onSessionCollab: (key: String, value: kotlinx.serialization.json.JsonElement) -> Unit = { _, _ -> },
 ) {
     val tokens = LocalPpmTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         BasicText(
-            "Control which built-in PPM MCP tools are exposed to AI chats. Changes apply to new turns.",
+            "PPM's own tools for the AI chat, with Claude, Codex and Antigravity alike. New chats get the tools that are on; turning one off also stops it in chats already open.",
             style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
         )
         if (loading) {
@@ -314,6 +311,9 @@ internal fun ToolsSettingsContent(
                         onCheckedChange = { next -> onToggleTool(tool.id, next) },
                         testTag = "ppm-tool-toggle-${tool.id}",
                     )
+                }
+                if (group.tools.any { it.id == "create_session" }) {
+                    com.hienlh.ppm.app.ui.settings.SessionCollabControls(sessionCollab, onSessionCollab)
                 }
                 if (group.tools.any { it.id == "session_schedule_create" }) {
                     SettingsToggleRow(
@@ -3024,398 +3024,6 @@ internal fun AiResourcesContent(
             style = ppmText(11f).copy(color = tokens.text3.color),
             modifier = Modifier.testTag("ai-resources-stats-footer"),
         )
-    }
-}
-
-// ===========================================================================
-// 6. PPMBot (Clawbot) Section
-// ===========================================================================
-
-@Composable
-internal fun PpmBotSettingsSection(model: AppModel) {
-    val api = model.api
-    val scope = rememberCoroutineScope()
-    val uriHandler = LocalUriHandler.current
-
-    var config by remember { mutableStateOf(ClawbotConfigState()) }
-    var telegram by remember { mutableStateOf(ClawbotTelegramState()) }
-    var chatsBeforeConnect by remember { mutableStateOf<Set<String>?>(null) }
-    var tasks by remember { mutableStateOf<List<ClawbotTaskRow>>(emptyList()) }
-    var memories by remember { mutableStateOf<List<ClawbotMemoryRow>>(emptyList()) }
-    var statusMsg by remember { mutableStateOf<String?>(null) }
-    var isError by remember { mutableStateOf(false) }
-
-    suspend fun reloadAll() {
-        val client = api ?: return
-        runCatching { config = parseClawbotConfig(client.clawbotGetConfig()) }
-        runCatching {
-            telegram = parseClawbotTelegram(
-                client.clawbotGetTelegram(),
-                previousConnectUrl = telegram.connectUrl,
-                previousChatIds = chatsBeforeConnect,
-            )
-        }
-        runCatching { tasks = parseClawbotTasks(client.clawbotListTasks(20)) }
-        runCatching { memories = parseClawbotMemories(client.clawbotListMemories("_global")) }
-    }
-
-    LaunchedEffect(api) {
-        if (api != null) reloadAll()
-    }
-
-    // Poll Telegram connect state every 2s while a connect link is active
-    LaunchedEffect(api, telegram.connectActive, telegram.connectUrl) {
-        val client = api ?: return@LaunchedEffect
-        if (!telegram.connectActive && telegram.connectUrl.isNullOrBlank()) return@LaunchedEffect
-        while (isActive) {
-            delay(2_000L)
-            val next = runCatching {
-                parseClawbotTelegram(
-                    client.clawbotGetTelegram(),
-                    previousConnectUrl = telegram.connectUrl,
-                    previousChatIds = chatsBeforeConnect,
-                )
-            }.getOrNull() ?: continue
-            val before = chatsBeforeConnect
-            val added = if (before != null) next.chats.firstOrNull { it.chatId !in before } else null
-            telegram = next
-            if (added != null) {
-                chatsBeforeConnect = null
-                isError = false
-                statusMsg = "Connected ${added.name}"
-                break
-            } else if (!next.connectActive) {
-                chatsBeforeConnect = null
-                break
-            }
-        }
-    }
-
-    // Poll tasks every 10s
-    LaunchedEffect(api) {
-        val client = api ?: return@LaunchedEffect
-        while (isActive) {
-            delay(10_000L)
-            runCatching { tasks = parseClawbotTasks(client.clawbotListTasks(20)) }
-        }
-    }
-
-    PpmBotSettingsContent(
-        config = config,
-        telegram = telegram,
-        tasks = tasks,
-        memories = memories,
-        statusMsg = statusMsg,
-        isError = isError,
-        onToggleEnabled = { enabled ->
-            val client = api ?: return@PpmBotSettingsContent
-            config = config.copy(enabled = enabled)
-            scope.launch {
-                try {
-                    config = parseClawbotConfig(
-                        client.clawbotPutConfig(buildJsonObject { put("enabled", enabled) }),
-                    )
-                    runCatching { telegram = parseClawbotTelegram(client.clawbotGetTelegram()) }
-                    isError = false
-                    statusMsg = if (enabled) "PPMBot enabled" else "PPMBot disabled"
-                } catch (t: Throwable) {
-                    isError = true
-                    statusMsg = t.message ?: "Failed to update PPMBot"
-                }
-            }
-        },
-        onSaveTelegramToken = { token ->
-            val client = api ?: return@PpmBotSettingsContent
-            scope.launch {
-                try {
-                    // PUT /api/settings/clawbot/telegram returns maskedBot ({bot_token, bot_username}),
-                    // not PPMBotTelegramStatus; re-fetch GET /api/settings/clawbot/telegram as web does.
-                    client.clawbotPutTelegramToken(token)
-                    chatsBeforeConnect = null
-                    telegram = parseClawbotTelegram(client.clawbotGetTelegram())
-                    isError = false
-                    statusMsg = "Telegram bot token saved"
-                } catch (t: Throwable) {
-                    isError = true
-                    statusMsg = t.message ?: "Telegram token verification failed"
-                }
-            }
-        },
-        onStartTelegramConnect = {
-            val client = api ?: return@PpmBotSettingsContent
-            scope.launch {
-                try {
-                    chatsBeforeConnect = telegram.chats.map { it.chatId }.toSet()
-                    val link = parseTelegramConnectLink(client.clawbotStartTelegramConnect())
-                    val url = link?.url
-                    val fresh = runCatching {
-                        parseClawbotTelegram(
-                            client.clawbotGetTelegram(),
-                            previousConnectUrl = url,
-                            previousChatIds = chatsBeforeConnect,
-                        )
-                    }.getOrNull()
-                    telegram = (fresh ?: telegram).copy(
-                        connectActive = true,
-                        connectUrl = url,
-                        connectExpiresAt = link?.expiresAt,
-                        connectError = null,
-                    )
-                    if (!url.isNullOrBlank()) {
-                        runCatching { uriHandler.openUri(url) }
-                    }
-                } catch (t: Throwable) {
-                    isError = true
-                    statusMsg = t.message ?: "Failed to start Telegram connect"
-                }
-            }
-        },
-        onCancelTelegramConnect = {
-            val client = api ?: return@PpmBotSettingsContent
-            scope.launch {
-                runCatching { client.clawbotCancelTelegramConnect() }
-                chatsBeforeConnect = null
-                telegram = telegram.copy(connectActive = false, connectUrl = null, connectExpiresAt = null)
-            }
-        },
-        onDisconnectChat = { chatId ->
-            val client = api ?: return@PpmBotSettingsContent
-            scope.launch {
-                runCatching { client.clawbotDisconnectPairedChat(chatId) }
-                runCatching { telegram = parseClawbotTelegram(client.clawbotGetTelegram()) }
-            }
-        },
-        onSaveCoordinatorConfig = { next ->
-            val client = api ?: return@PpmBotSettingsContent
-            scope.launch {
-                try {
-                    config = parseClawbotConfig(
-                        client.clawbotPutConfig(
-                            buildJsonObject {
-                                put("system_prompt", next.systemPrompt)
-                                put("show_tool_calls", next.showToolCalls)
-                                put("show_thinking", next.showThinking)
-                                put("debounce_ms", clampDebounceMs(next.debounceMs))
-                            },
-                        ),
-                    )
-                    isError = false
-                    statusMsg = "Coordinator settings saved"
-                } catch (t: Throwable) {
-                    isError = true
-                    statusMsg = t.message ?: "Failed to save coordinator settings"
-                }
-            }
-        },
-        onDeleteMemory = { memId ->
-            val client = api ?: return@PpmBotSettingsContent
-            scope.launch {
-                runCatching { client.clawbotDeleteMemory(memId) }
-                memories = memories.filterNot { it.id == memId }
-            }
-        },
-    )
-}
-
-@Composable
-internal fun PpmBotSettingsContent(
-    config: ClawbotConfigState,
-    telegram: ClawbotTelegramState,
-    tasks: List<ClawbotTaskRow>,
-    memories: List<ClawbotMemoryRow>,
-    statusMsg: String? = null,
-    isError: Boolean = false,
-    onToggleEnabled: (Boolean) -> Unit,
-    onSaveTelegramToken: (String) -> Unit,
-    onStartTelegramConnect: () -> Unit,
-    onCancelTelegramConnect: () -> Unit,
-    onDisconnectChat: (String) -> Unit,
-    onSaveCoordinatorConfig: (ClawbotConfigState) -> Unit,
-    onDeleteMemory: (Long) -> Unit,
-) {
-    val tokens = LocalPpmTokens.current
-    var botTokenInput by remember { mutableStateOf("") }
-    var showToken by remember { mutableStateOf(false) }
-    var promptInput by remember(config.systemPrompt) { mutableStateOf(config.systemPrompt) }
-    var showTools by remember(config.showToolCalls) { mutableStateOf(config.showToolCalls) }
-    var showThinking by remember(config.showThinking) { mutableStateOf(config.showThinking) }
-    var debounceText by remember(config.debounceMs) { mutableStateOf(config.debounceMs.toString()) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        SettingsToggleRow(
-            title = "Turn on PPMBot",
-            subtitle = "Background Telegram coordinator that delegates tasks to project sessions",
-            checked = config.enabled,
-            onCheckedChange = onToggleEnabled,
-            testTag = "ppmbot-enable-switch",
-        )
-
-        if (statusMsg != null) {
-            BasicText(
-                statusMsg,
-                style = ppmText(11f).copy(color = if (isError) tokens.error.color else tokens.success.color),
-            )
-        }
-
-        Separator()
-
-        // Telegram Bot setup
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SettingsSectionTitle("Telegram Bot")
-            if (telegram.botUsername != null) {
-                BasicText(
-                    "Connected bot: @${telegram.botUsername}",
-                    style = ppmText(12f, FontWeight.Medium).copy(color = tokens.success.color),
-                )
-            }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SettingsPasswordInput(
-                    value = botTokenInput,
-                    onValueChange = { botTokenInput = it },
-                    placeholder = if (telegram.configured) "Bot token configured (enter new to replace)" else "123456:ABC-DEF...",
-                    visible = showToken,
-                    onToggleVisible = { showToken = !showToken },
-                    modifier = Modifier.weight(1f),
-                    inputTestTag = "ppmbot-telegram-token-input",
-                )
-                SettingsButton(
-                    label = "Save Token",
-                    primary = true,
-                    enabled = botTokenInput.isNotBlank(),
-                    modifier = Modifier.testTag("ppmbot-save-token-btn"),
-                    onClick = {
-                        onSaveTelegramToken(botTokenInput.trim())
-                        botTokenInput = ""
-                    },
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SettingsButton(
-                    label = "Connect Telegram",
-                    primary = true,
-                    enabled = telegram.configured,
-                    modifier = Modifier.testTag("ppmbot-connect-telegram-btn"),
-                    onClick = onStartTelegramConnect,
-                )
-                if (telegram.connectActive || !telegram.connectUrl.isNullOrBlank()) {
-                    SettingsButton(
-                        label = "Cancel Pairing",
-                        onClick = onCancelTelegramConnect,
-                    )
-                }
-            }
-
-            for (chat in telegram.chats) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    BasicText(
-                        "${chat.name} (${chat.chatId})",
-                        style = ppmText(12f).copy(color = tokens.text.color),
-                    )
-                    SettingsButton(
-                        label = "Disconnect",
-                        danger = true,
-                        onClick = { onDisconnectChat(chat.chatId) },
-                    )
-                }
-            }
-        }
-
-        Separator()
-
-        // Coordinator Configuration
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SettingsSectionTitle("Coordinator Configuration")
-            SettingsToggleRow(
-                title = "Show tool calls in Telegram",
-                subtitle = "Forward tool progress updates to paired chats",
-                checked = showTools,
-                onCheckedChange = { showTools = it },
-            )
-            SettingsToggleRow(
-                title = "Show thinking in Telegram",
-                subtitle = "Forward reasoning summaries to paired chats",
-                checked = showThinking,
-                onCheckedChange = { showThinking = it },
-            )
-            SettingsTextInput(
-                value = debounceText,
-                onValueChange = { debounceText = it },
-                placeholder = "Debounce ms (0 - 30000)",
-                keyboardType = KeyboardType.Number,
-                modifier = Modifier.fillMaxWidth().testTag("ppmbot-debounce-input"),
-            )
-            SettingsTextInput(
-                value = promptInput,
-                onValueChange = { promptInput = it },
-                placeholder = "Custom coordinator instructions…",
-                singleLine = false,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
-            )
-            SettingsButton(
-                label = "Save Coordinator Settings",
-                primary = true,
-                modifier = Modifier.testTag("ppmbot-save-config-btn"),
-                onClick = {
-                    val parsedDebounce = clampDebounceMs(debounceText.trim().toIntOrNull() ?: config.debounceMs)
-                    debounceText = parsedDebounce.toString()
-                    onSaveCoordinatorConfig(
-                        config.copy(
-                            systemPrompt = promptInput,
-                            showToolCalls = showTools,
-                            showThinking = showThinking,
-                            debounceMs = parsedDebounce,
-                        ),
-                    )
-                },
-            )
-        }
-
-        if (tasks.isNotEmpty()) {
-            Separator()
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                SettingsSectionTitle("Recent Delegated Tasks (${tasks.size})")
-                for (task in tasks) {
-                    BasicText(
-                        "• [${task.status}] ${task.projectName}: ${task.prompt}",
-                        style = ppmText(11f).copy(color = tokens.text2.color),
-                    )
-                }
-            }
-        }
-
-        if (memories.isNotEmpty()) {
-            Separator()
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                SettingsSectionTitle("Global Memories (${memories.size})")
-                for (mem in memories) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        BasicText(
-                            mem.content,
-                            style = ppmText(11f).copy(color = tokens.text2.color),
-                            modifier = Modifier.weight(1f).padding(end = 8.dp),
-                        )
-                        SettingsButton(
-                            label = "Delete",
-                            danger = true,
-                            onClick = { onDeleteMemory(mem.id) },
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
