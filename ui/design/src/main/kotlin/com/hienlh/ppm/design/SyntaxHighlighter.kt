@@ -1,7 +1,6 @@
 package com.hienlh.ppm.design
 
 import android.content.Context
-import android.util.Log
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -93,7 +92,7 @@ class SyntaxHighlighter private constructor(private val context: Context) {
             val result = try {
                 tokens(engine, key)
             } catch (e: Exception) {
-                Log.w(TAG, "could not highlight a block of ${key.language.ifEmpty { "text" }}", e)
+                PpmLog.w(TAG, "could not highlight a block of ${key.language.ifEmpty { "text" }}", e)
                 if (e is IsolateTerminatedException || e is SandboxDeadException) engine.dead = true
                 null
             }
@@ -195,7 +194,7 @@ class SyntaxHighlighter private constructor(private val context: Context) {
             engine = started
             started
         } catch (e: Exception) {
-            Log.w(TAG, "the highlighter did not start", e)
+            PpmLog.w(TAG, "the highlighter did not start", e)
             runCatching { sandbox?.close() }
             null
         }

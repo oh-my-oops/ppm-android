@@ -2,7 +2,6 @@ package com.hienlh.ppm.app.push
 
 import android.content.Context
 import android.os.Build
-import android.util.Log
 import com.hienlh.ppm.app.KeystoreSecrets
 import com.hienlh.ppm.app.PrefsStore
 import com.hienlh.ppm.client.ApiClient
@@ -14,6 +13,7 @@ import com.hienlh.ppm.client.ServerStore
 import com.hienlh.ppm.client.defaultAndroidPushLabel
 import com.hienlh.ppm.client.originUrl
 import com.hienlh.ppm.client.unsubscribePush
+import com.hienlh.ppm.design.PpmLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,7 +39,7 @@ class UnifiedPushReceiver : MessagingReceiver() {
         val pubKey = endpoint.pubKeySet?.pubKey?.trim().orEmpty()
         val auth = endpoint.pubKeySet?.auth?.trim().orEmpty()
         if (endpoint.url.isBlank() || pubKey.isEmpty() || auth.isEmpty()) {
-            Log.w(TAG, "Ignoring UnifiedPush endpoint without WebPush keys for instance=$instance")
+            PpmLog.w(TAG, "Ignoring UnifiedPush endpoint without WebPush keys for instance=$instance")
             return
         }
         val prefs = PrefsStore(context.applicationContext ?: context)
@@ -62,7 +62,7 @@ class UnifiedPushReceiver : MessagingReceiver() {
                     auth = auth,
                 )
             } catch (e: Throwable) {
-                Log.w(TAG, "Failed to register UnifiedPush endpoint with PPM server: ${e.message}")
+                PpmLog.w(TAG, "Failed to register UnifiedPush endpoint with PPM server: ${e.message}")
             } finally {
                 runCatching { pending?.finish() }
             }
@@ -77,7 +77,7 @@ class UnifiedPushReceiver : MessagingReceiver() {
         val payload = WebPushPayload.fromPushMessage(message)
         if (payload == null) {
             if (!message.decrypted) {
-                Log.w(TAG, "Dropped unencrypted UnifiedPush message for instance=$instance")
+                PpmLog.w(TAG, "Dropped unencrypted UnifiedPush message for instance=$instance")
             }
             return
         }
@@ -117,7 +117,7 @@ class UnifiedPushReceiver : MessagingReceiver() {
                 val api = PushDeviceManager.resolveApiClient(appContext, prefs, instance)
                 api?.unsubscribePush(endpoint = oldEndpoint, id = oldDeviceId)
             } catch (e: Throwable) {
-                Log.w(TAG, "Failed to unsubscribe push endpoint from PPM server: ${e.message}")
+                PpmLog.w(TAG, "Failed to unsubscribe push endpoint from PPM server: ${e.message}")
             } finally {
                 runCatching { pending?.finish() }
             }

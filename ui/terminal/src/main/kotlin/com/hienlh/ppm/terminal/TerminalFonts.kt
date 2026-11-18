@@ -6,8 +6,8 @@ import android.graphics.fonts.Font
 import android.graphics.fonts.FontFamily
 import android.graphics.fonts.FontStyle
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
+import com.hienlh.ppm.design.PpmLog
 import com.hienlh.ppm.design.R as DesignR
 import java.io.IOException
 
@@ -33,15 +33,15 @@ object TerminalFonts {
             try {
                 return FallbackApi29.load(context)
             } catch (error: IOException) {
-                Log.w("TerminalFonts", "Terminal font assets unavailable; using Monaspace", error)
+                PpmLog.w("TerminalFonts", "Terminal font assets unavailable; using Monaspace", error)
             } catch (error: RuntimeException) {
-                Log.w("TerminalFonts", "Terminal font chain unavailable; using Monaspace", error)
+                PpmLog.w("TerminalFonts", "Terminal font chain unavailable; using Monaspace", error)
             }
         }
         return try {
             context.resources.getFont(DesignR.font.monaspace_argon_regular)
         } catch (error: RuntimeException) {
-            Log.w("TerminalFonts", "Monaspace unavailable; using system monospace", error)
+            PpmLog.w("TerminalFonts", "Monaspace unavailable; using system monospace", error)
             Typeface.MONOSPACE
         }
     }

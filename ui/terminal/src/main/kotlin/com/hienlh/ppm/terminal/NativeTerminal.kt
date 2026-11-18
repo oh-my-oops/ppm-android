@@ -1,6 +1,5 @@
 package com.hienlh.ppm.terminal
 
-import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -8,6 +7,7 @@ import androidx.compose.ui.graphics.toArgb
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.KeyValueStore
 import com.hienlh.ppm.design.BuiltInThemes
+import com.hienlh.ppm.design.PpmLog
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.protocol.isJsSpace
 import com.hienlh.ppm.state.terminal.Keystroke
@@ -234,7 +234,7 @@ class NativeTerminal(
         val bytes = replayedParkBytes
         replayingParked = false
         replayedParkBytes = 0
-        Log.d("NativeTerminal", "Replayed $bytes bytes in $elapsedMs ms")
+        PpmLog.d("NativeTerminal", "Replayed $bytes bytes in $elapsedMs ms")
     }
 
     /**

@@ -49,6 +49,7 @@ import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.PpmLog
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
@@ -263,6 +264,7 @@ private fun PreviewFrame(src: String, onNavigate: (String) -> Unit, onCrash: () 
                     }
 
                     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        PpmLog.renderError("WebPreviewTab", rendererGone(detail))
                         crash()
                         return true
                     }

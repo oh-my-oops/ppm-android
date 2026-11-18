@@ -2,7 +2,6 @@ package com.hienlh.ppm.app
 
 import android.content.Context
 import android.graphics.BitmapFactory
-import android.util.Log
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.foundation.text.input.clearText
@@ -59,6 +58,7 @@ import com.hienlh.ppm.client.androidCapabilities
 import com.hienlh.ppm.client.remoteDesktopCapabilities
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.IconFramework
+import com.hienlh.ppm.design.PpmLog
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.state.files.FileDocumentClassifier
@@ -2110,6 +2110,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     fun becameActive() {
         resumes++
+        AppTrace.front(this)
         refreshProjectRegistrations()
         for (tab in chats.values) tab.controller?.resumed()
         for (group in groupChats.values) group.chat.wake()
@@ -3121,7 +3122,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         // Asked at each change, as the web asks `useIsMobile`: a phone opens every tab in the first panel.
         // A new chat tab is resolved from this device's cache before its first frame, as `openTab` resolves it.
         val chatCache = newChatCache
-        val store = WorkspaceStore(cache, isMobile = { !wide }, windows = windowStore, warn = { Log.w("PPM", "workspace: $it") }) { project ->
+        val store = WorkspaceStore(cache, isMobile = { !wide }, windows = windowStore, warn = { PpmLog.w("PPM", "workspace: $it") }) { project ->
             project?.let { NewChatDefaults(chatCache.settings(), chatCache.providers(it)?.map(ProviderInfo::id)) }
         }
         workspaceCache = cache
@@ -3236,11 +3237,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      */
     private fun withWorkspace(open: (WorkspaceStore) -> Unit) {
         val store = workspace ?: run {
-            Log.w("PPM", "workspace: no layout open, dropped a tab request (project $selectedProject)")
+            PpmLog.w("PPM", "workspace: no layout open, dropped a tab request (project $selectedProject)")
             return
         }
         if (store.state.value.currentProject == selectedProject) open(store) else {
-            Log.i("PPM", "workspace: tab request waits for $selectedProject (layout shows ${store.state.value.currentProject}, ${waitingForWorkspace.size} waiting)")
+            PpmLog.i("PPM", "workspace: tab request waits for $selectedProject (layout shows ${store.state.value.currentProject}, ${waitingForWorkspace.size} waiting)")
             waitingForWorkspace += open
         }
     }
@@ -3511,8 +3512,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     val activeTab: WorkspaceTab? get() = layout?.activeGridTab
     val activeTabId: String? get() = activeTab?.id
 
-    /** Read from the store rather than [layout]: the global socket asks between two frames. */
-    private val activeSessionId: String? get() = tabSessionId(workspace?.state?.value?.activeGridTab)
+    /** Read from the store rather than [layout]: the global socket asks between two frames, and the trace from any thread. */
+    internal val activeSessionId: String? get() = tabSessionId(workspace?.state?.value?.activeGridTab)
 
     /** The chat of a chat tab; none for a tab whose chat has not started. */
     fun chat(tabId: String): ChatTab? = chats[tabId]
@@ -3671,7 +3672,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      */
     fun openTab(session: SessionInfo, panelId: String? = null) {
         val project = selectedProject ?: run {
-            Log.w("PPM", "workspace: no project selected, session ${session.id} not opened")
+            PpmLog.w("PPM", "workspace: no project selected, session ${session.id} not opened")
             return
         }
         withWorkspace { store ->

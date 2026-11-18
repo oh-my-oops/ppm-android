@@ -33,6 +33,8 @@ class PpmApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // First, so whatever fails below already reaches PPM's Logs.
+        AppTrace.install(this)
         // Once per process; creating another window must not remove live attachment copies.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { clearAttachmentCopies(this@PpmApplication) }
         SyntaxHighlighter.get(this).warm()

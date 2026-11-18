@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmLog
 import java.io.ByteArrayInputStream
 
 /** Sanitized Word HTML only. No script, app origin, bridge, file/content access or navigation. */
@@ -55,7 +56,11 @@ fun DocxSurface(safeHtml: String, onLink: (String) -> Unit, onCrash: () -> Unit,
                     return if (!request.isForMainFrame && uri.scheme in setOf("http", "https")) null else blockedDocumentResource()
                 }
 
-                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean { crash(); return true }
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    PpmLog.renderError("DocxSurface", rendererGone(detail))
+                    crash()
+                    return true
+                }
             }
         }
     }, update = { view ->

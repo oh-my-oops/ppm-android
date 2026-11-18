@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.hienlh.ppm.design.PpmLog
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -99,6 +100,7 @@ fun HtmlSurface(
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = request.isForMainFrame
 
                     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        PpmLog.renderError("HtmlSurface", rendererGone(detail))
                         if (channel.view === view) channel.view = null
                         crashed()
                         return true
@@ -226,6 +228,7 @@ fun ExtensionWebviewSurface(
                         request.isForMainFrame
 
                     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        PpmLog.renderError("HtmlSurface", rendererGone(detail))
                         if (channel.view === view) channel.view = null
                         crashed()
                         return true
