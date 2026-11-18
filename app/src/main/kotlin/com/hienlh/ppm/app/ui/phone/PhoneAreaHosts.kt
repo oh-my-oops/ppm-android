@@ -59,9 +59,7 @@ internal fun PhoneWorkspaceAreaBody(
             model = model,
             tab = tab,
         )
-        PhoneArea.SCHEDULES -> PhoneSchedulesAreaHost(
-            model = model,
-        )
+        PhoneArea.SCHEDULES -> com.hienlh.ppm.app.ui.schedules.SchedulesApp(model, phone = true)
         // "Open in a tab" makes a `web-preview` tab: it shows the forwarded page itself, as `TabBody` does.
         PhoneArea.PORT_FORWARDING -> if (tab?.type == "web-preview") {
             TabBody(model = model, tab = tab)

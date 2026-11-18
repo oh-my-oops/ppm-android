@@ -469,16 +469,10 @@ fun PhoneShell(
                     nav.closeDrawer()
                     handleDrawerSelection(model, PhoneArea.ASSISTANT.id, openTabs, nav)
                 },
-                DrawerToolTileItem(
-                    id = PhoneArea.SCHEDULES.id,
-                    title = PhoneArea.SCHEDULES.title,
-                    subtitle = "Runs & logs",
-                    icon = ProductIcon.CalendarClock,
-                    onClick = {
-                        nav.closeDrawer()
-                        handleDrawerSelection(model, PhoneArea.SCHEDULES.id, openTabs, nav)
-                    },
-                ),
+                com.hienlh.ppm.app.ui.schedules.schedulesDrawerTile(model) {
+                    nav.closeDrawer()
+                    handleDrawerSelection(model, PhoneArea.SCHEDULES.id, openTabs, nav)
+                },
             ).filter { tile -> PhoneArea.fromId(tile.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true },
             onProjectClick = {
                 nav.closeDrawer()

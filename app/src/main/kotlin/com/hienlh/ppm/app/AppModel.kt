@@ -4112,9 +4112,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      * its own, and back to [panelId] when the window closes. The menu offers it only where it can
      * work, so a refusal is the shared window cap.
      */
-    fun popOutTab(tabId: String, panelId: String) {
+    fun popOutTab(
+        tabId: String,
+        panelId: String,
+        rect: com.hienlh.ppm.state.windows.Rect? = null,
+        closeTabsOnClose: Boolean = false,
+    ) {
         val store = workspace ?: return
-        if (store.popOutTab(tabId, panelId) == null) actionError(TOO_MANY_WINDOWS)
+        if (store.popOutTab(tabId, panelId, closeTabsOnClose, rect) == null) actionError(TOO_MANY_WINDOWS)
     }
 
     /**

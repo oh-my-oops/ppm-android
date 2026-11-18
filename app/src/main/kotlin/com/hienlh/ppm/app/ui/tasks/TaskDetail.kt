@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.schedules
 import com.hienlh.ppm.app.tasks
 import com.hienlh.ppm.app.ui.BottomSheet
 import com.hienlh.ppm.app.ui.DropdownBelowEnd
@@ -418,6 +419,7 @@ private fun RemindersCard(model: AppModel, taskId: String) {
                         11.5f, if (problem) tokens.error.color else tokens.text2.color, maxLines = 2,
                     )
                 }
+                IconBtn(ProductIcon.ExternalLink, "Open in Schedules", size = 28.dp) { model.schedules.open(select = r.id) }
                 IconBtn(ProductIcon.X, "Remove reminder", size = 28.dp) {
                     scope.launch {
                         try {
