@@ -164,8 +164,9 @@ class PhoneAreaTest {
         assertEquals(PhoneArea.SOURCE_CONTROL, (route as PhoneTabRoute.Area).area)
 
         // Switching across tablet-only and phone tabs on phone never drops any tablet-only tab from WorkspaceStore
+        // A table's structure shows in the Database area now.
         store.setActiveTab(structureTab.id)
-        assertTrue(resolvePhoneTabRoute(store.state.value.activeGridTab!!) is PhoneTabRoute.TabletOnly)
+        assertEquals(PhoneArea.DATABASE, (resolvePhoneTabRoute(store.state.value.activeGridTab!!) as PhoneTabRoute.Area).area)
 
         // A design opens full screen on the phone now
         store.setActiveTab(designTab.id)

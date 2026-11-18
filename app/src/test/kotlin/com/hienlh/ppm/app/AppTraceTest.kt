@@ -120,6 +120,10 @@ class AppTraceTest {
         worker.uncaughtExceptionHandler = AppTrace.CrashRecorder(trace) { _, error -> handedOn = error }
         worker.start()
         worker.join(5_000)
+        // kotlinx-coroutines-test also keeps every uncaught coroutine exception once any test in this JVM has
+        // used runTest (Compose tests do), and hands it to the next runTest as "uncaught exceptions before the
+        // test started": take it back here, or whichever test runs next fails for this one.
+        runCatching { kotlinx.coroutines.test.runTest { } }
         assertNotNull(handedOn)
         val entry = WireJson.parse(store.value!!).array!!.single()
         assertEquals("unhandled_rejection", entry["type"].string)

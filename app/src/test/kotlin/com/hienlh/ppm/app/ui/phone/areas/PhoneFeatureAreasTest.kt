@@ -123,7 +123,8 @@ class PhoneFeatureAreasTest {
             tab("design", "design:landing", mapOf("designSlug" to "landing")) to PhoneArea.DESIGNS,
             tab("group", "group:g1", mapOf("groupId" to "g1")) to PhoneArea.TEAMS,
             tab("ai-resource", "ai-resource:1", mapOf("filePath" to "/home/u/.claude/skills/a/SKILL.md")) to PhoneArea.AI_RESOURCES,
-            tab("extension", "extension:git-graph", mapOf("viewType" to "git-graph.view")) to PhoneArea.EXTENSIONS,
+            // Not Git Graph: a phone hosts that one in Source Control (PhoneGitTabs.kt).
+            tab("extension", "extension:todo", mapOf("viewType" to "todo-tree.view")) to PhoneArea.EXTENSIONS,
             tab("remote-desktop", "remote-desktop:1") to PhoneArea.REMOTE_DESKTOP,
             tab("android", "android:1") to PhoneArea.ANDROID,
         )
