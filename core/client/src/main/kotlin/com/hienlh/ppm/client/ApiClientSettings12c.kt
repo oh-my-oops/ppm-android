@@ -449,6 +449,19 @@ suspend fun ApiClient.schedulesDelete(id: Int): JsonElement =
 suspend fun ApiClient.schedulesRunNow(id: Int): JsonElement =
     call("POST", "/api/schedules/$id/run-now")
 
+/**
+ * Hides the red dot for the schedule's current problem, named by its [key]; the server answers 409
+ * when that is no longer the current problem. A null [key] brings the dot back. Answers the overview.
+ */
+suspend fun ApiClient.schedulesDismiss(id: Int, key: String?): JsonElement =
+    call(
+        "POST",
+        "/api/schedules/$id/dismiss",
+        body = buildJsonObject {
+            put("key", key)
+        },
+    )
+
 suspend fun ApiClient.schedulesListRuns(id: Int, limit: Int = 20): JsonElement =
     call("GET", "/api/schedules/$id/runs", query = listOf("limit" to limit.toString()))
 
