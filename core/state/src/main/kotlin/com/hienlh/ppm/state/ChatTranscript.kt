@@ -41,6 +41,9 @@ sealed interface ChatEffect {
     /** The AI's tab tool asked this device for a tab; it waits for the answer, which must always come. */
     data class OpenTab(val request: TabOpenRequest) : ChatEffect
 
+    /** A PPM Assistant screen tool asked this device; it waits for the answer, which must always come. */
+    data class AssistantUi(val request: com.hienlh.ppm.protocol.AssistantUiRequest) : ChatEffect
+
     /** Worth a sound, and for an approval a toast, when the chat is not in front of the user. */
     data class Attention(val attention: ChatAttention) : ChatEffect
 }
@@ -250,6 +253,7 @@ class ChatTranscript(var providerId: String? = null) {
             }
             is ChatFrame.CompactStatus -> compacting = frame.compacting
             is ChatFrame.TabOpen -> effects += ChatEffect.OpenTab(frame.request)
+            is ChatFrame.AssistantUi -> effects += ChatEffect.AssistantUi(frame.request)
             is ChatFrame.BackgroundRegistry -> backgroundShells = frame.shells
             is ChatFrame.McpStatus -> mcpNeedsAuth = frame.needsAuth
             is ChatFrame.TurnStarted -> frame.clientMessageId?.let { bindTurn(it, frame.turnId) }

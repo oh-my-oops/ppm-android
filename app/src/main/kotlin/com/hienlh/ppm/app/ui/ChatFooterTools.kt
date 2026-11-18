@@ -210,6 +210,7 @@ fun ChatFooterTools(
     teamContent: @Composable () -> Unit = {},
     antigravityUsageContent: @Composable (onClose: () -> Unit) -> Unit = {},
     modifier: Modifier = Modifier,
+    managerRole: com.hienlh.ppm.app.ui.assistant.MoreMenuManagerRole? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -438,6 +439,12 @@ fun ChatFooterTools(
                         },
                     )
                 },
+                managerRole = managerRole?.let { r ->
+                    com.hienlh.ppm.app.ui.assistant.MoreMenuManagerRole(r.label, r.unset) {
+                        close()
+                        r.onClick()
+                    }
+                },
             )
         }
     }
@@ -547,8 +554,10 @@ fun ChatPaneFooterTools(
     val session = tab.session
     val unreads = model.unreadSessions()
     val hasUnread = session != null && unreads.containsKey(session.id)
+    val managerRole = com.hienlh.ppm.app.ui.assistant.managerRoleMenu(model, tab)
 
     ChatFooterTools(
+        managerRole = managerRole,
         usageInfo = usageInfo,
         providerId = tab.providerId,
         narrow = narrow,

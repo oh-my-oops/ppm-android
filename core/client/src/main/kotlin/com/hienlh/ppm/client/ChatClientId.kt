@@ -20,5 +20,8 @@ object ChatClientId {
     /** A fresh id, one per chat tab for that tab's whole life. */
     fun mint(): String = UUID.randomUUID().toString()
 
+    /** This running app, where a request names a device rather than a tab (an Assistant card's `deviceId`). */
+    val value: String = mint()
+
     fun isValid(id: String): Boolean = VALID.matches(id)
 }

@@ -247,6 +247,9 @@ sealed interface ChatFrame {
     /** The AI asked this device to open a tab ([TabOpenRequest]); its tool waits for the answer. */
     data class TabOpen(val request: TabOpenRequest) : ChatFrame
 
+    /** A PPM Assistant screen tool asked this device ([AssistantUiRequest]); it waits for the answer. */
+    data class AssistantUi(val request: AssistantUiRequest) : ChatFrame
+
     /**
      * Every background command the session has, whole (`background_registry`): sent when one
      * starts, is asked to stop or stops, and to a client that connects while any are known.
@@ -321,6 +324,7 @@ sealed interface ChatFrame {
                 }
                 "compact_status" -> CompactStatus(json["status"].string == "compacting")
                 "tab_open" -> TabOpenRequest.from(json)?.let(::TabOpen) ?: Event(ChatEvent.from(json), seq)
+                "assistant_ui" -> AssistantUiRequest.from(json)?.let(::AssistantUi) ?: Event(ChatEvent.from(json), seq)
                 "background_registry" -> BackgroundRegistry(json["shells"].array.orEmpty().mapNotNull(BackgroundShell::from))
                 "mcp_status" -> McpStatus(names(json["needsAuth"]))
                 else -> Event(ChatEvent.from(json), seq)
@@ -380,6 +384,8 @@ sealed interface ChatClientMessage {
         val sendNow: Boolean = false,
         /** Turns of other sessions the message points at; the server checks them and grants their read. */
         val turnRefs: List<com.hienlh.ppm.protocol.generated.TurnReference> = emptyList(),
+        /** An Assistant session's picture of this device's screen, sent with every message (`uiSummary`). */
+        val uiSummary: JsonObject? = null,
     ) : ChatClientMessage {
         override val json
             get() = buildJsonObject {
@@ -409,6 +415,7 @@ sealed interface ChatClientMessage {
                 options.model?.let { put("model", it) }
                 options.effort?.let { put("effort", it) }
                 options.thinking?.let { put("thinking", it) }
+                uiSummary?.let { put("uiSummary", it) }
             }
     }
 

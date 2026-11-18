@@ -742,6 +742,7 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier, portr
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            com.hienlh.ppm.app.ui.assistant.AssistantRailButton(model)
             NotificationBell(model)
             if (foldFooter) {
                 if (model.info?.minimalMode != true) {

@@ -129,6 +129,7 @@ internal class MessageEdits(private val model: AppModel) {
                 chat.pendingEdit = PendingEdit(message.content, message.replyTo?.copy(sessionId = forked.id), message.permissionMode, source.id, message.turnRefs)
                 chat.swapSession(listed, moveDraft = true)
                 model.patchTabMetadata(tabId, "sessionId" to JsonPrimitive(forked.id))
+                if (com.hienlh.ppm.protocol.isAssistantProject(chat.project)) model.assistant.followBranch(source.id, forked.id)
                 // Bounded: a socket that never says hello would keep the message with nothing on screen.
                 val connected = withTimeoutOrNull(PENDING_SEND_MILLIS) {
                     chat.controller?.state?.first { it.sessionId == forked.id && it.connected }
@@ -160,6 +161,7 @@ internal class MessageEdits(private val model: AppModel) {
         val next = model.sessions.firstOrNull { it.id == sessionId } ?: SessionInfo(id = sessionId, providerId = chat.providerId, title = current.title)
         chat.swapSession(next, moveDraft = false)
         model.patchTabMetadata(chat.tabId, "sessionId" to JsonPrimitive(sessionId))
+        if (com.hienlh.ppm.protocol.isAssistantProject(chat.project)) model.assistant.followBranch(current.id, sessionId)
     }
 
     /**

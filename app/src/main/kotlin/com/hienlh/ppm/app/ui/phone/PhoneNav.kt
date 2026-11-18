@@ -38,6 +38,8 @@ enum class PhoneArea(
 
     /** PPM Tasks (the web's sidebar Tasks panel); a task picked from it or opened by link shows its page here. */
     TASKS("tasks", "Tasks", "tasks"),
+    /** The PPM Assistant's tab, full screen. */
+    ASSISTANT("assistant", "PPM Assistant", "assistant"),
     ;
 
     companion object {
@@ -82,6 +84,7 @@ enum class PhoneArea(
             "settings" -> SETTINGS
             "specs" -> SPECS
             "task", "tasks" -> TASKS
+            "assistant" -> ASSISTANT
             else -> null
         }
 

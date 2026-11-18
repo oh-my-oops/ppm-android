@@ -1757,7 +1757,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             initialProject = null
             when {
                 last != null && projects.any { it.name == last } ->
-                    openProject(last, then = link?.takeIf { linked != null }?.let { l -> { store: WorkspaceStore -> openFromLink(store, l, last) } })
+                    openProject(
+                        last,
+                        then = link?.takeIf { linked != null }?.let { l -> { store: WorkspaceStore -> openFromLink(store, l, last) } }
+                            ?: link?.assistant?.let { a -> { store: WorkspaceStore -> assistant.openIn(store, a.sessionId, a.providerId); Unit } },
+                    )
                 projects.isNotEmpty() -> openProject(projects.first().name)
             }
         } catch (error: CancellationException) {
@@ -1859,6 +1863,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             documents.values.forEach { it.reconnected() }
         }
         events.isShown = { id -> windowVisible && activeSessionId == id }
+        assistant.connect(api, events)
         events.onGitChanged = { gitChanged.tryEmit(it) }
         events.onGitCommitDraft = { project, repoPath, message, _, clientId ->
             val repo = com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(gitDiscovery[project], gitChosenRepoPath[project])
@@ -3236,6 +3241,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         for (open in waiting) open(store)
     }
 
+    /** [withWorkspace] for the model's companions (`AppAssistant`). */
+    internal fun onWorkspace(open: (WorkspaceStore) -> Unit) = withWorkspace(open)
+
     /**
      * Runs [open] on the selected project's layout: a tab opened before it is shown would land in no
      * project's. With no project selected it runs at once, on the layout that has no project: Settings,
@@ -3297,7 +3305,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      */
     private fun syncChats(state: WorkspaceState) {
         val live = HashMap<String, WorkspaceTab>()
-        for (panel in state.panels.values) for (tab in panel.tabs) if (tab.type == "chat" || tab.type == "design") live[tab.id] = tab
+        for (panel in state.panels.values) for (tab in panel.tabs) if (tab.type == "chat" || tab.type == "design" || assistantChatReady(tab)) live[tab.id] = tab
         for ((id, chat) in chats.toList()) {
             val tab = live[id]
             // A tab that went to another session is a new chat; one that got the session its first message made is the same.
@@ -3362,6 +3370,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     notePresenceInput()
                 }
                 chat.tabOpener = { request -> answerAiTabOpen(chat, request) }
+                if (tab.type == "assistant") assistant.wire(chat)
                 chat.onAttention = { attention -> chatAttention(chat, attention) }
                 chat.defaultsFor = { provider -> newChatCache.settings()?.defaults?.get(provider) }
                 chat.modePicked = { mode -> patchTabMetadata(id, "permissionMode" to JsonPrimitive(mode.value), "permissionModeSource" to JsonPrimitive("user")) }
@@ -3811,6 +3820,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             pendingLink = serverKey to parsed.state
             return
         }
+        parsed.state.assistant?.let { a -> return openAssistant(a.sessionId, a.providerId) }
         val name = parsed.state.projectName ?: return
         if (projects.none { it.name == name }) {
             actionError(noSuchProject(name))
@@ -4616,6 +4626,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      * it was forked at waits in its box ([pendingMessage]) to be sent as it is or changed first.
      */
     internal fun openFork(project: String, session: SessionInfo, title: String, pendingMessage: String) {
+        if (assistant.takeFork(project, session, pendingMessage)) return
         withWorkspace { store ->
             store.openTab(
                 NewTab(
@@ -4677,6 +4688,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 false
             }
             is ClientCommand.Clear -> {
+                if (assistant.takeClear(tab)) return true
                 // The mode goes over as a cached default only: the new chat starts from the settings like any other.
                 newChat(tab.providerId, panelOf(tab.tabId), title = command.title, clearedFrom = tab.session?.id, permissionMode = tab.permissionMode?.value)
                 true
@@ -4914,6 +4926,10 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
 
     /** Opens the tabs the AI asks for on this chat's socket (`tab_open`), and says how that went. */
     var tabOpener: (suspend (TabOpenRequest) -> TabOpenAnswer)? = null
+
+    /** An Assistant chat's screen tools and screen summary (set by the model; `AppAssistant.wire`). */
+    var assistantUi: (suspend (com.hienlh.ppm.protocol.AssistantUiRequest) -> com.hienlh.ppm.protocol.AssistantUiResult)? = null
+    var uiSummary: (() -> JsonObject?)? = null
 
     /** Hears what may need the user while this chat is not in front (set by the model). */
     var onAttention: ((ChatAttention) -> Unit)? = null
@@ -5514,6 +5530,8 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         }
         val controller = ChatController(from.api, project, next, from.scope, providerId = providerId, stale = stale, clientId = clientId).also {
             it.tabOpener = tabOpener
+            it.assistantUi = assistantUi
+            it.uiSummary = uiSummary
             it.onAttention = onAttention
             it.defaultsFor = defaultsFor
             it.start()
@@ -5564,6 +5582,8 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         welcomeList = HistoryList(api, project, scope)
         val controller = ChatController(api, project, session, scope, providerId = providerId, clientId = clientId).also {
             it.tabOpener = tabOpener
+            it.assistantUi = assistantUi
+            it.uiSummary = uiSummary
             it.onAttention = onAttention
             it.defaultsFor = defaultsFor
             it.start()

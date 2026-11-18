@@ -22,6 +22,8 @@ data class UrlState(
     val openChat: String? = null,
     /** `?openTask=<id>` (Telegram's "Open in PPM" on a task card): the task to open; null when not a task id. */
     val openTask: String? = null,
+    /** `/assistant?session=<provider>/<id>`: the PPM Assistant, on that session when one is named. */
+    val assistant: com.hienlh.ppm.state.assistant.AssistantDeepLink? = null,
 )
 
 /** The tab types an address can name (`VALID_TAB_TYPES`). */
@@ -151,6 +153,7 @@ fun parsePpmLink(link: String): PpmLink? {
     val openTask = query.split('&').firstOrNull { it.substringBefore('=') == "openTask" }
         ?.substringAfter('=', "")?.let { decodeQueryValue(it) }?.takeIf { SESSION_UUID.matches(it) }
     val state = parseUrlState(path, openChat).let { it.copy(tabIdentifier = it.tabIdentifier?.let(::decodePathSegment), openTask = openTask) }
+        .let { s -> if (path.trimEnd('/') != "/assistant") s else s.copy(assistant = assistantLinkOf(query)) }
     return PpmLink(host.lowercase(), port.toIntOrNull(), state)
 }
 
@@ -203,3 +206,9 @@ private fun hexDigit(c: Char): Int = when (c) {
     in 'A'..'F' -> c - 'A' + 10
     else -> -1
 }
+
+/** The Assistant deep link's `?session=` (`/assistant?session=<provider>/<id>`). */
+private fun assistantLinkOf(query: String): com.hienlh.ppm.state.assistant.AssistantDeepLink =
+    com.hienlh.ppm.state.assistant.parseAssistantSessionRef(
+        query.split('&').firstOrNull { it.substringBefore('=') == "session" }?.substringAfter('=', "")?.let { decodeQueryValue(it) },
+    )

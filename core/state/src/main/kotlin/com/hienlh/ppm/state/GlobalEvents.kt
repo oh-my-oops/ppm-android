@@ -132,6 +132,7 @@ class GlobalEvents(
 
     /** `presence:input`, throttled: call on real input (a tap, a key, typing). */
     val presence = PresenceInput(::sendIfOpen)
+    private val assistantListeners = LinkedHashSet<(type: String, frame: JsonElement) -> Unit>()
     private var socket: SocketConnection? = null
 
     /** Persisted notification feed (`/api/notifications/feed`), with fallback to [unread] on older servers. */
@@ -318,6 +319,12 @@ class GlobalEvents(
         return { tasksListeners -= listener }
     }
 
+    /** Every PPM Assistant event (`assistant:card`, `assistant:waiting_changed`, …), with its type. */
+    fun onAssistantEvent(listener: (type: String, frame: JsonElement) -> Unit): () -> Unit {
+        assistantListeners += listener
+        return { assistantListeners -= listener }
+    }
+
     /** The local embedding model's install moved (`memory:embed-install`): its `status` object. */
     fun onMemoryEmbedInstall(listener: (status: JsonElement) -> Unit): () -> Unit {
         memoryInstallListeners += listener
@@ -352,6 +359,7 @@ class GlobalEvents(
     // Frames
 
     internal fun handle(frame: JsonElement) {
+        frame["type"].string?.takeIf { it.startsWith("assistant:") }?.let { type -> assistantListeners.toList().forEach { it(type, frame) } }
         when (frame["type"].string) {
             "global_ready" -> {
                 failures = 0

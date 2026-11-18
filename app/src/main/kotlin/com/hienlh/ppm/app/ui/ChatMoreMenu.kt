@@ -82,6 +82,8 @@ fun ChatMoreMenu(
     onReload: (() -> Unit)? = null,
     session: MoreMenuSessionActions? = null,
     modifier: Modifier = Modifier,
+    /** "Set as manager chat" / "Unset manager chat" (the PPM Assistant). */
+    managerRole: com.hienlh.ppm.app.ui.assistant.MoreMenuManagerRole? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -189,6 +191,15 @@ fun ChatMoreMenu(
                     } else {
                         null
                     },
+                )
+            }
+
+            if (managerRole != null) {
+                MoreMenuRow(
+                    icon = { PpmIcon(if (managerRole.unset) ProductIcon.X else ProductIcon.Bot, 16.dp, tokens.text3.color) },
+                    label = managerRole.label,
+                    testTag = "more-manager-role",
+                    onClick = managerRole.onClick,
                 )
             }
 

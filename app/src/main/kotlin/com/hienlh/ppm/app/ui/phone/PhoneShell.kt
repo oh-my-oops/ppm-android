@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.testTag
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.PrefsStore
 import com.hienlh.ppm.app.tasks
+import com.hienlh.ppm.app.openAssistant
 import com.hienlh.ppm.app.ui.phone.notifications.NotificationsSheet
 import com.hienlh.ppm.app.ui.phone.onboarding.PhoneOnboardingController
 import com.hienlh.ppm.app.ui.phone.onboarding.PhoneOnboardingHost
@@ -464,6 +465,10 @@ fun PhoneShell(
                         handleDrawerSelection(model, PhoneArea.CLOUD_AND_SHARE.id, openTabs, nav)
                     },
                 ),
+                com.hienlh.ppm.app.ui.assistant.assistantDrawerTile(model) {
+                    nav.closeDrawer()
+                    handleDrawerSelection(model, PhoneArea.ASSISTANT.id, openTabs, nav)
+                },
                 DrawerToolTileItem(
                     id = PhoneArea.SCHEDULES.id,
                     title = PhoneArea.SCHEDULES.title,
@@ -814,6 +819,10 @@ private fun handleDrawerSelection(
         PhoneArea.TASKS -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.TASKS))
         PhoneArea.SETTINGS -> {
             model.openSettings()
+            model.activeTabId?.let(nav::visitTab)
+        }
+        PhoneArea.ASSISTANT -> {
+            model.openAssistant()
             model.activeTabId?.let(nav::visitTab)
         }
         null -> Unit

@@ -88,5 +88,6 @@ internal fun PhoneWorkspaceAreaBody(
         } else {
             com.hienlh.ppm.app.ui.tasks.TasksPanel(model)
         }
+        PhoneArea.ASSISTANT -> tab?.let { TabBody(model = model, tab = it) }
     }
 }
