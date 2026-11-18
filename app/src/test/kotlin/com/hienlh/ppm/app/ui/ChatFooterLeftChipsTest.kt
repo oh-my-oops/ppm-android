@@ -298,20 +298,21 @@ class ChatFooterLeftChipsTest {
     }
 
     @Test
-    fun linkedSessionsPanel_ordersEachGroupByAttentionStably() {
-        fun kid(n: Int, status: LinkedSessionStatus) = LinkedSessionView(
+    fun linkedSessionsPanel_pinsApprovalsThenOrdersEachGroupByLatestInteraction() {
+        fun kid(n: Int, status: LinkedSessionStatus, at: Long?) = LinkedSessionView(
             sessionId = "cccccccc-0000-4000-8000-00000000000$n",
             title = "Kid $n",
             providerId = "claude",
             relations = listOf(SessionLinkRelation.CHILD),
             status = status,
+            lastInteractionAt = at,
         )
         val initial = listOf(
-            kid(1, LinkedSessionStatus.IDLE),
-            kid(2, LinkedSessionStatus.NEW_MESSAGE),
-            kid(3, LinkedSessionStatus.RUNNING),
-            kid(4, LinkedSessionStatus.IDLE),
-            kid(5, LinkedSessionStatus.NEEDS_APPROVAL),
+            kid(1, LinkedSessionStatus.IDLE, 1_000),
+            kid(2, LinkedSessionStatus.NEW_MESSAGE, 5_000),
+            kid(3, LinkedSessionStatus.RUNNING, null),
+            kid(4, LinkedSessionStatus.IDLE, 3_000),
+            kid(5, LinkedSessionStatus.NEEDS_APPROVAL, 10),
         )
 
         composeRule.setContent {
@@ -339,7 +340,7 @@ class ChatFooterLeftChipsTest {
             }
             .sortedBy { it.second }
             .map { it.first }
-        assertEquals(listOf("Kid 5", "Kid 3", "Kid 2", "Kid 1", "Kid 4"), renderedOrder)
+        assertEquals(listOf("Kid 5", "Kid 2", "Kid 4", "Kid 1", "Kid 3"), renderedOrder)
     }
 
     @Test

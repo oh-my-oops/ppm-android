@@ -180,7 +180,13 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             LocalTabScrollStore provides tabScrollStore,
             // PPM's own approvals are answered over HTTP, and a from-session bubble or turn chip opens its session.
             LocalPpmApprovals provides model.api?.let(::ServerPpmApprovals),
-            LocalChatSessionOpener provides remember(model) { ChatSessionOpener { model.openLinkedSession(it.projectName, it.sessionId, it.providerId, it.title) } },
+            LocalChatSessionOpener provides remember(model) {
+                ChatSessionOpener { target ->
+                    val turnId = target.turnId
+                    if (turnId != null) model.openTurnRef(target.projectName, target.providerId, target.sessionId, turnId, target.title)
+                    else model.openLinkedSession(target.projectName, target.sessionId, target.providerId, target.title)
+                }
+            },
         ) {
             PpmThemeProvider(theme, mobile) {
                 // Chrome's own word on a download, which the web leaves to the browser.

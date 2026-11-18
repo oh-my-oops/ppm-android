@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -530,6 +531,8 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                     .widthIn(max = TABLET_DETAIL_MAX_WIDTH),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
+                // Changed on another device: the pane reads its values again.
+                key(settingsLiveRevision(model, category)) {
                 when (category) {
                     SettingsCategory.General -> GeneralSection(model)
                     SettingsCategory.Appearance -> AppearanceSection(model)
@@ -556,6 +559,7 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                     SettingsCategory.LanguageServers -> LanguageServersSection(model)
                     SettingsCategory.DatabaseDrivers -> DatabaseDriversSection(model)
                     SettingsCategory.RemoteDesktop -> RemoteDesktopSettingsSection(model)
+                }
                 }
             }
         }

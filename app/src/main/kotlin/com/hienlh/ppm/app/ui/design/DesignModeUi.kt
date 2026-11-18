@@ -274,6 +274,12 @@ fun DesignsSidebarPane(
     LaunchedEffect(project, api) {
         reloadAll()
     }
+    // Created, renamed, deleted or restored anywhere (`design:list_changed`): read the list again.
+    val events = model.events
+    DisposableEffect(events, project, api) {
+        val off = events?.onDesignListChanged { changed -> if (changed == project) reloadAll() }
+        onDispose { off?.invoke() }
+    }
 
     if (project == null) {
         Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {

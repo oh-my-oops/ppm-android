@@ -97,6 +97,9 @@ import com.hienlh.ppm.protocol.ProviderInfo
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.state.ChatController
+import com.hienlh.ppm.state.ComposerTurnChips
+import com.hienlh.ppm.app.ui.ComposerTurnChipRow
+import com.hienlh.ppm.app.ui.rememberTurnChips
 import com.hienlh.ppm.state.Effort
 import com.hienlh.ppm.state.ModelNames
 import com.hienlh.ppm.state.PermissionMode
@@ -149,6 +152,7 @@ internal fun PhoneChatContent(
 
     val fallbackDraft = remember { TextFieldState("") }
     val composerState = chatTab?.draft ?: fallbackDraft
+    val turnChips = rememberTurnChips(chatTab)
 
     var showModelSheet by remember { mutableStateOf(false) }
     var showModesSheet by remember { mutableStateOf(false) }
@@ -260,6 +264,8 @@ internal fun PhoneChatContent(
     val composerTransformation = remember(chatTab) {
         chatTab?.let { tab ->
             InputTransformation {
+                // A pasted turn link becomes a chip and leaves the text.
+                tab.turnLinks.takePastedLinks(this)
                 if (!asCharSequence().contentEquals(originalText)) {
                     tab.historyIndex = -1
                     tab.updatePickers(asCharSequence(), selection.min)
@@ -346,7 +352,9 @@ internal fun PhoneChatContent(
                 showChangesSheet = true
             },
             onOpenSessionInfoSheet = { showSessionInfoSheet = true },
-            sendEnabled = !startingConversation,
+            sendEnabled = !startingConversation && ComposerTurnChips.blockedReason(turnChips) == null,
+            hasTurnChips = turnChips.isNotEmpty(),
+            turnChips = if (chatTab != null && turnChips.isNotEmpty()) ({ ComposerTurnChipRow(chatTab) }) else null,
             composerInputTransformation = composerTransformation,
             pickerContent = {
                 if (chatTab != null) {
@@ -410,6 +418,7 @@ internal fun PhoneChatContent(
                                 onClearErrors = chatController::clearErrors,
                                 jumpRequest = model.chatJump?.takeIf { it.sessionId == chatState.sessionId },
                                 onJumpTaken = model::chatJumpDone,
+                                turnTools = chatTab.turnLinks.tools,
                                 // Not while the draft, which may carry a reply of its own, is on its way, nor while an edit's version is made.
                                 onReply = if (chatTab.draftLoading || chatTab.editForking) null else chatTab::selectReply,
                                 edits = edits,

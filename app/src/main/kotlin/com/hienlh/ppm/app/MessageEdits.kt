@@ -19,10 +19,22 @@ import java.time.Instant
 data class EditFork(val anchor: String?, val messageId: String)
 
 /** An edited message as the box hands it on (`handleInputSend`): its text with its files' markers, what it goes on from, and what it answers. */
-class EditMessage(val content: String, val anchor: String?, val replyTo: ReplyReference?, val permissionMode: String?)
+class EditMessage(
+    val content: String,
+    val anchor: String?,
+    val replyTo: ReplyReference?,
+    val permissionMode: String?,
+    val turnRefs: List<com.hienlh.ppm.protocol.generated.TurnReference> = emptyList(),
+)
 
 /** An edited message waiting for its version's socket (`pendingSendRef`), and the session whose draft it was written as. */
-class PendingEdit(val content: String, val replyTo: ReplyReference?, val permissionMode: String?, val draftId: String)
+class PendingEdit(
+    val content: String,
+    val replyTo: ReplyReference?,
+    val permissionMode: String?,
+    val draftId: String,
+    val turnRefs: List<com.hienlh.ppm.protocol.generated.TurnReference> = emptyList(),
+)
 
 /**
  * Fork, Edit and the version switcher on a chat's messages (chat-tab.tsx): a fork opens in a tab
@@ -92,7 +104,7 @@ internal class MessageEdits(private val model: AppModel) {
                         if (gone(text)) "The original message is no longer available in the session transcript." else text,
                     ))
                     // The box emptied as the message went: it goes back there, as `restoreUnsentMessage` puts it.
-                    chat.restore(RejectedSend(message.content, message.replyTo, text))
+                    chat.restore(RejectedSend(message.content, message.replyTo, text, message.turnRefs))
                     model.toast(ErrorToastMessage("Message not sent", "$text Your text is back in the input."))
                 }
                 // Bounded as a new chat's session is, at the same cost: a fork the server finished
@@ -114,7 +126,7 @@ internal class MessageEdits(private val model: AppModel) {
                 model.addSession(project, listed)
                 // The edit goes on in the fork, so its reply is the fork's. The draft it was written
                 // as is the source's, and goes once the message does.
-                chat.pendingEdit = PendingEdit(message.content, message.replyTo?.copy(sessionId = forked.id), message.permissionMode, source.id)
+                chat.pendingEdit = PendingEdit(message.content, message.replyTo?.copy(sessionId = forked.id), message.permissionMode, source.id, message.turnRefs)
                 chat.swapSession(listed, moveDraft = true)
                 model.patchTabMetadata(tabId, "sessionId" to JsonPrimitive(forked.id))
                 // Bounded: a socket that never says hello would keep the message with nothing on screen.

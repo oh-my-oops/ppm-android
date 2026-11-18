@@ -503,6 +503,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                         onClearErrors = chat::clearErrors,
                                         jumpRequest = model.chatJump?.takeIf { it.sessionId == state.sessionId },
                                         onJumpTaken = model::chatJumpDone,
+                                        turnTools = tab.turnLinks.tools,
                                         // Not while the draft, which may carry a reply of its own, is on its way, nor
                                         // while an edit's version is made.
                                         onReply = if (tab.draftLoading || tab.editForking) null else tab::selectReply,

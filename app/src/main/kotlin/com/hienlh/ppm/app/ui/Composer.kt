@@ -352,14 +352,15 @@ fun ChatComposer(
             }
         }
     }
-    val hasContent = tab.hasContent
+    val turnChips = rememberTurnChips(tab)
+    val hasContent = tab.hasContent || turnChips.isNotEmpty()
     val pickMode: (PermissionMode) -> Unit = { mode ->
         tab.pickMode(mode)
         modeOpen = false
     }
     // Send asks no connection, as on the web: a new chat's first message makes the session, and
     // what is sent while a chat reconnects goes out once it is back.
-    val canSend = hasContent && !tab.firstSendPending
+    val canSend = hasContent && !tab.firstSendPending && com.hienlh.ppm.state.ComposerTurnChips.blockedReason(turnChips) == null
     // `disabled` while the first message goes: the text, the paperclip and the mic at half strength.
     val locked = tab.firstSendPending
 
@@ -400,6 +401,7 @@ fun ChatComposer(
             }
         }
         AttachmentChips(tab.attachments, inset, onRemove = { id -> model.removeAttachment(tab, id) }, onTextTap = { tab.requestFocus() })
+        ComposerTurnChipRow(tab, Modifier.padding(start = inset, end = inset, top = 8.dp))
 
         val placeholder = composerPlaceholder(running, offline)
         if (mobile) {
@@ -593,6 +595,8 @@ internal fun ComposerField(
             // changed text counts.
             inputTransformation = remember(tab) {
                 InputTransformation {
+                    // A pasted turn link becomes a chip and leaves the text.
+                    tab.turnLinks.takePastedLinks(this)
                     if (!asCharSequence().contentEquals(originalText)) {
                         tab.historyIndex = -1
                         tab.updatePickers(asCharSequence(), selection.min)
