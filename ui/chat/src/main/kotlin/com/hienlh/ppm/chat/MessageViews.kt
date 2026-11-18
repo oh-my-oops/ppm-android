@@ -47,6 +47,8 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -123,7 +125,10 @@ fun ChatMessageView(
     onDismiss: () -> Unit = {},
 ) {
     when (item.role) {
-        ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, replies, modifier, onReply, edits)
+        // A compaction summary starts no turn of its own: nothing to link to.
+        ChatItem.Role.USER -> CompositionLocalProvider(LocalTurnLinkItem provides item.takeIf { it.compaction == null }) {
+            UserBubble(item.text, item.timestamp, replies, modifier, onReply, edits)
+        }
         ChatItem.Role.ASSISTANT -> CompositionLocalProvider(LocalMarkdownImageScope provides item.id) {
             AssistantBlocks(item.blocks, live = false, actions = actions, modifier = modifier, usage = item.usage)
         }
@@ -185,7 +190,18 @@ internal fun CopyActionButton(text: String) {
  * phone, its content centred.
  */
 @Composable
-internal fun ActionButton(icon: ProductIcon, label: String, title: String, touchTarget: Boolean = false, onClick: () -> Unit) {
+internal fun ActionButton(
+    icon: ProductIcon,
+    label: String,
+    title: String,
+    touchTarget: Boolean = false,
+    /** The icon's own colour, kept while lit (`text-primary` on Link ready). */
+    iconTint: Color? = null,
+    spinning: Boolean = false,
+    /** `iconOnlyBelowMd`: the label only off a phone; the icon still names it. */
+    iconOnlyOnMobile: Boolean = false,
+    onClick: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -201,6 +217,7 @@ internal fun ActionButton(icon: ProductIcon, label: String, title: String, touch
             .hoverable(source)
             .webTitle(title)
             .clickable(source, indication = null, role = Role.Button, onClick = onClick)
+            .then(if (iconOnlyOnMobile && LocalPpmMobile.current) Modifier.semantics { contentDescription = label } else Modifier)
             .defaultMinSize(minWidth = target),
         gap = 4.dp,
         start = 6.dp,
@@ -210,8 +227,8 @@ internal fun ActionButton(icon: ProductIcon, label: String, title: String, touch
         minHeight = target,
         centre = true,
     ) {
-        PpmIcon(icon, 14.dp, color, Modifier.cssWidth(14.dp))
-        CssText(label, ppmText(12f, lineHeight = 16f).copy(color = color))
+        PpmIcon(icon, 14.dp, iconTint ?: color, Modifier.cssWidth(14.dp), spinning = spinning)
+        if (!(iconOnlyOnMobile && LocalPpmMobile.current)) CssText(label, ppmText(12f, lineHeight = 16f).copy(color = color))
     }
 }
 

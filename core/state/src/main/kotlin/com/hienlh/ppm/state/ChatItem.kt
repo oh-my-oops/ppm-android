@@ -61,6 +61,10 @@ data class ChatItem(
     val taskCalls: Int = 0,
     /** The token split of the turn this answer ended, as its `done` reported it; history has none. */
     val usage: TurnUsage? = null,
+    /** The turn it belongs to, as history stamps every message; null for one drawn here until history is read again. */
+    val turnId: String? = null,
+    /** That turn's number in the session. */
+    val turnN: Int? = null,
 ) {
     enum class Role { USER, ASSISTANT, SYSTEM }
 
@@ -84,6 +88,8 @@ data class ChatItem(
                     sdkUuid = message.sdkUuid,
                     timestampText = message.timestampText,
                     compaction = message.compaction,
+                    turnId = message.turnId,
+                    turnN = message.turnN,
                 )
             }
             HistoryMessage.Role.ASSISTANT -> {
@@ -103,7 +109,10 @@ data class ChatItem(
                 if (blocks.isEmpty()) {
                     null
                 } else {
-                    ChatItem(message.id, Role.ASSISTANT, blocks, message.timestamp, message.sdkUuid, message.timestampText, answerText, message.compaction, taskCalls)
+                    ChatItem(
+                        message.id, Role.ASSISTANT, blocks, message.timestamp, message.sdkUuid, message.timestampText, answerText, message.compaction, taskCalls,
+                        turnId = message.turnId, turnN = message.turnN,
+                    )
                 }
             }
         }

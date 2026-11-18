@@ -246,6 +246,10 @@ fun PhoneChatScreen(
     sendEnabled: Boolean = true,
     /** What the box does with what the user types: saves the draft and opens the `/` and `@` pickers. */
     composerInputTransformation: InputTransformation? = null,
+    /** The composer's turn chips, over its text; null when there are none. */
+    turnChips: (@Composable () -> Unit)? = null,
+    /** Turn chips alone are a message that can be sent. */
+    hasTurnChips: Boolean = false,
     transcriptContent: @Composable () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
@@ -390,7 +394,7 @@ fun PhoneChatScreen(
 
                 // Composer inside BottomActionCard (Requirement 4.1, Phone 1 Section 5)
                 val draftText = composerState.text.toString()
-                val canSend = sendEnabled && (draftText.isNotBlank() || attachments.isNotEmpty())
+                val canSend = sendEnabled && (draftText.isNotBlank() || attachments.isNotEmpty() || hasTurnChips)
                 val bypass = permissionModeId == "bypassPermissions"
                 val placeholder = if (specModeEnabled) "Describe the feature or bug for Spec mode…" else "Message ${modelLabel}…"
                 val composerFocus = remember { FocusRequester() }
@@ -399,7 +403,7 @@ fun PhoneChatScreen(
                 // Claude's app: one row (+, the placeholder, the mic) until the box is used; a tap opens it
                 // with the keyboard, and an empty box folds back when it loses focus or the keyboard closes.
                 val collapsed = !composerFocused && !openingComposer && draftText.isEmpty() &&
-                    attachments.isEmpty() && !voiceRecording
+                    attachments.isEmpty() && !voiceRecording && turnChips == null
                 LaunchedEffect(openingComposer) {
                     if (openingComposer) {
                         composerFocus.requestFocus()
@@ -444,9 +448,10 @@ fun PhoneChatScreen(
                     }
                 } else BottomActionCard(
                     applyWindowInsets = true,
-                    topContent = if (attachments.isNotEmpty() || (voiceRecording && onToggleVoiceRecording != null)) {
+                    topContent = if (attachments.isNotEmpty() || (voiceRecording && onToggleVoiceRecording != null) || turnChips != null) {
                         {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                turnChips?.invoke()
                                 // What the mic hears is written into the box below as it comes.
                                 if (voiceRecording && onToggleVoiceRecording != null) {
                                     PhoneVoiceRecordingBar(

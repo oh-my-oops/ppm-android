@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -66,7 +67,10 @@ import com.hienlh.ppm.protocol.SessionLinkRelation
 import com.hienlh.ppm.state.LinkedSessionStatus
 import com.hienlh.ppm.state.LinkedSessionView
 import com.hienlh.ppm.state.UNDO_UNLINK_MS
-import com.hienlh.ppm.state.byAttention
+import com.hienlh.ppm.state.LINKED_FILTER_MIN_ROWS
+import com.hienlh.ppm.state.byRecentInteraction
+import com.hienlh.ppm.state.git.GitChangesView
+import com.hienlh.ppm.state.matchesLinkedFilter
 import com.hienlh.ppm.state.canUnlink
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -113,7 +117,8 @@ private data class UndoState(
 
 /**
  * The Sessions tab of the footer's activity chip (`LinkedSessionsPanel` in `linked-sessions-panel.tsx`):
- * grouped by relation, with per-row unlink, "Unlink idle & done", 6-second Undo, folded Unlinked
+ * grouped by relation — inside each, what waits on the person first, then the latest interaction,
+ * each row saying how long ago that was — with a filter by name once the list is long, per-row unlink, "Unlink idle & done", 6-second Undo, folded Unlinked
  * relink section, and inline "Stop all child sessions" confirmation.
  */
 @Composable
@@ -133,7 +138,13 @@ fun LinkedSessionsPanel(
     var confirming by remember { mutableStateOf(false) }
     var stopping by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var unlinkedOpen by remember { mutableStateOf(false) }
+    // Null until the person opens or closes Unlinked; until then a search opens it for its matches.
+    var unlinkedOpen by remember { mutableStateOf<Boolean?>(null) }
+    val filter = rememberTextFieldState()
+    // Once used, the filter stays, so clearing it never takes away the box being typed in.
+    var filterUsed by remember { mutableStateOf(false) }
+    val query = filter.text.toString()
+    LaunchedEffect(query) { if (query.isNotEmpty()) filterUsed = true }
     var undo by remember { mutableStateOf<UndoState?>(null) }
     var nextUndoToken by remember { mutableIntStateOf(1) }
     val pendingIds = remember { LinkedHashSet<String>() }
@@ -156,8 +167,18 @@ fun LinkedSessionsPanel(
 
     val visible = groups.visible
     val hidden = groups.hidden
+    val searched = query.isNotBlank()
+    val shown = remember(visible, query) { if (searched) visible.filter { matchesLinkedFilter(it.title, query) } else visible }
     val runningChildren = remember(visible) { visible.filter(::isRunningChild) }
-    val finished = remember(visible) { visible.filter { canUnlink(it.status) } }
+    // During a search, the bulk unlink reaches only the rows on screen.
+    val finished = remember(shown) { shown.filter { canUnlink(it.status) } }
+    // Unlinked rows count: the filter reaches them too.
+    val filtering = visible.size + hidden.size > LINKED_FILTER_MIN_ROWS || filterUsed
+    val shownHidden = remember(hidden, query) {
+        byRecentInteraction(if (searched) hidden.filter { matchesLinkedFilter(it.title, query) } else hidden)
+    }
+    // A search opens Unlinked, so a match hidden there is not missed, unless the person closed it.
+    val unlinkedShown = unlinkedOpen ?: (searched && shownHidden.isNotEmpty())
 
     // If all running children finished externally while confirming, close the confirm box.
     LaunchedEffect(runningChildren.isEmpty()) {
@@ -199,16 +220,23 @@ fun LinkedSessionsPanel(
         undo = null
     }
 
-    // A heading with nothing under it goes too. Inside each, what needs the person or runs comes first.
-    val grouped = remember(visible) {
+    // A heading with nothing under it goes too. Inside each, what waits on the person, then the latest interaction.
+    val grouped = remember(shown) {
         GROUP_ORDER.mapNotNull { relation ->
-            val list = byAttention(visible.filter { (it.relations.firstOrNull() ?: SessionLinkRelation.MESSAGED) == relation })
+            val list = byRecentInteraction(shown.filter { (it.relations.firstOrNull() ?: SessionLinkRelation.MESSAGED) == relation })
             if (list.isEmpty()) null else relation to list
         }
     }
 
     val listScroll = rememberScrollState()
     Column(modifier.fillMaxWidth().testTag("linked-sessions-panel")) {
+        if (filtering) {
+            SearchBox(
+                filter,
+                "Find a session",
+                Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp).testTag("linked-filter"),
+            )
+        }
         Column(
             Modifier
                 .fillMaxWidth()
@@ -219,7 +247,11 @@ fun LinkedSessionsPanel(
             if (grouped.isEmpty()) {
                 Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
                     BasicText(
-                        "No linked sessions shown. Unlinked ones are below.",
+                        when {
+                            !searched -> "No linked sessions shown. Unlinked ones are below."
+                            shownHidden.isNotEmpty() -> "Only unlinked sessions match. They are below."
+                            else -> "No linked session matches “${query.trim()}”."
+                        },
                         style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
                     )
                 }
@@ -340,9 +372,9 @@ fun LinkedSessionsPanel(
             }
         }
 
-        if (hidden.isNotEmpty()) {
+        if (shownHidden.isNotEmpty()) {
             val chevronTurn by animateFloatAsState(
-                targetValue = if (unlinkedOpen) 180f else 0f,
+                targetValue = if (unlinkedShown) 180f else 0f,
                 animationSpec = tween(if (reducedMotion) 0 else 150),
                 label = "unlinkedChevron",
             )
@@ -361,10 +393,10 @@ fun LinkedSessionsPanel(
                             pressedColor = tokens.surfaceHover.color,
                             hoverColor = tokens.surfaceHover.color,
                             shape = RoundedCornerShape(6.dp),
-                            onClick = { unlinkedOpen = !unlinkedOpen },
+                            onClick = { unlinkedOpen = !unlinkedShown },
                         )
                         .padding(horizontal = 8.dp, vertical = 6.dp)
-                        .semantics { stateDescription = if (unlinkedOpen) "expanded" else "collapsed" }
+                        .semantics { stateDescription = if (unlinkedShown) "expanded" else "collapsed" }
                         .testTag("unlinked-toggle"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -380,13 +412,13 @@ fun LinkedSessionsPanel(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         BasicText(
-                            "${hidden.size}",
+                            "${shownHidden.size}",
                             style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color, fontFeatureSettings = "tnum"),
                         )
                         PpmIcon(ProductIcon.ChevronDown, 12.dp, tokens.text3.color, Modifier.rotate(chevronTurn))
                     }
                 }
-                FoldGroup(open = unlinkedOpen) {
+                FoldGroup(open = unlinkedShown) {
                     val hiddenScroll = rememberScrollState()
                     Column(
                         Modifier
@@ -394,7 +426,7 @@ fun LinkedSessionsPanel(
                             .then(if (mobile) Modifier else Modifier.heightIn(max = 160.dp))
                             .verticalScroll(hiddenScroll),
                     ) {
-                        for (session in hidden) {
+                        for (session in shownHidden) {
                             LinkedSessionRow(
                                 session = session,
                                 action = SessionRowAction.Relink { doRelink(listOf(session.sessionId)) },
@@ -505,6 +537,7 @@ private fun LinkedSessionRow(
                 maxLines = 1,
                 softWrap = false,
             )
+            InteractionTime(session.lastInteractionAt)
         }
 
         val btnSize = if (mobile) 44.dp else 32.dp
@@ -548,6 +581,33 @@ private fun LinkedSessionRow(
         }
     }
 }
+
+/** How long ago the two sessions last interacted, in the app's usual relative form (`InteractionTime`). */
+@Composable
+private fun InteractionTime(at: Long?) {
+    val tokens = LocalPpmTokens.current
+    val slot = Modifier.defaultMinSize(minWidth = 48.dp)
+    if (at == null) {
+        Spacer(slot)
+        return
+    }
+    val full = java.text.DateFormat.getDateTimeInstance().format(java.util.Date(at))
+    BasicText(
+        linkedInteractionText(at),
+        slot.webTitle("Last interaction $full").testTag("linked-interaction"),
+        style = ppmText(11f, lineHeight = 15f).copy(
+            color = tokens.text3.color,
+            fontFeatureSettings = "tnum",
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        ),
+        maxLines = 1,
+        softWrap = false,
+    )
+}
+
+/** "just now", "5m ago", "3h ago", "2d ago", "Apr 21" (`formatRelativeDate`). */
+internal fun linkedInteractionText(at: Long, now: Long = System.currentTimeMillis()): String =
+    GitChangesView.formatRelativeTime(java.time.Instant.ofEpochMilli(at).toString(), now)
 
 /**
  * Inline confirmation before stopping running child sessions (`StopChildSessionsConfirm` in

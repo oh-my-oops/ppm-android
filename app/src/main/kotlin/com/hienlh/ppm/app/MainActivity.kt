@@ -60,11 +60,19 @@ open class MainActivity : ComponentActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         val mouse = event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE
         if (event.actionMasked == if (mouse) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_UP) TextInputFocus.activate()
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && ::model.isInitialized) model.notePresenceInput()
         return super.dispatchTouchEvent(event)
+    }
+
+    // A mouse wheel or a trackpad scroll is someone at this device too (`wheel`).
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_SCROLL && ::model.isInitialized) model.notePresenceInput()
+        return super.dispatchGenericMotionEvent(event)
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && !event.isSystem && event.keyCode != KeyEvent.KEYCODE_ESCAPE) TextInputFocus.activate()
+        if (event.action == KeyEvent.ACTION_DOWN && !event.isSystem && ::model.isInitialized) model.notePresenceInput()
         return shortcuts.dispatch(event, nativeEditor = currentFocus?.onCheckIsTextEditor() == true) || super.dispatchKeyEvent(event)
     }
 

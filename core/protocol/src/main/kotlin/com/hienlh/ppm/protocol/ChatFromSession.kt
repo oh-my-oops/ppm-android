@@ -50,8 +50,8 @@ data class FromSessionReference(
     companion object {
         private const val MAX_TITLE = 200
         private const val MAX_PROJECT_NAME = 200
-        internal val SESSION_ID_RE = Regex("^[A-Za-z0-9_-]{8,64}$")
-        internal val TURN_ID_RE = Regex("^(u:)?[A-Za-z0-9-]{8,64}$")
+        val SESSION_ID_RE = Regex("^[A-Za-z0-9_-]{8,64}$")
+        val TURN_ID_RE = Regex("^(u:)?[A-Za-z0-9-]{8,64}$")
         internal val ISO_MILLIS = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC)
 
         /** One line, single spaces, at most 200 code points, never empty (`normalizeFromSessionTitle`). */
@@ -289,6 +289,47 @@ object ChatTurnRefs {
     }
 
     /**
+     * One reference as JSON, keys in the order `chat-turn-ref.ts` writes them and `n` a whole
+     * number, so the block this writes is byte for byte the browser's.
+     */
+    fun toJson(ref: TurnReference): String = buildString {
+        append("{\"version\":1,\"projectName\":")
+        appendJsString(ref.projectName)
+        append(",\"providerId\":")
+        appendJsString(ref.providerId)
+        append(",\"sessionId\":")
+        appendJsString(ref.sessionId)
+        append(",\"turnId\":")
+        appendJsString(ref.turnId)
+        append(",\"n\":")
+        append(ref.n.toLong())
+        append(",\"title\":")
+        appendJsString(ref.title)
+        append(",\"prompt\":")
+        appendJsString(ref.prompt)
+        append(",\"at\":")
+        appendJsString(ref.at)
+        append('}')
+    }
+
+    /** The references as a JSON array, as a message's `turnRefs` field carries them. */
+    fun toJsonArray(refs: List<TurnReference>): String = refs.joinToString(",", "[", "]", transform = ::toJson)
+
+    /**
+     * [content] with the block for [refs] after it (`encodeTurnRefs`), for the bubble drawn while
+     * the server's own copy is on its way; [ownProject] says which project the chat is in. No refs, no block.
+     */
+    fun encode(content: String, refs: List<TurnReference>?, ownProject: String? = null): String {
+        if (refs.isNullOrEmpty()) return content
+        val valid = validateAll(WireJson.parseOrNull(toJsonArray(refs))) ?: return content
+        val header = valid.joinToString("\n") { ref ->
+            headerLine(ref, if (ownProject == null) Placement.UNKNOWN else if (ref.projectName == ownProject) Placement.OWN else Placement.OTHER)
+        }
+        val data = Base64.getEncoder().encodeToString(toJsonArray(valid).toByteArray(Charsets.UTF_8))
+        return "$content$BLOCK_START$header\n$DISPLAY_PREFIX$data$BLOCK_END"
+    }
+
+    /**
      * Splits a trailing references block off [content] (`decodeTurnRefs`). A block that is
      * malformed, not at the end, of another version, or whose header lines do not match its own
      * data stays visible text.
@@ -399,8 +440,13 @@ enum class SessionLinkRelation(val wire: String, val order: Int, val heading: St
 data class SessionLink(
     val sessionId: String,
     val relations: List<SessionLinkRelation>,
+    /** When the two sessions last interacted with each other (epoch ms); null when PPM never recorded one. */
+    val lastInteractionAt: Long? = null,
 ) {
     companion object {
+        /** `new Date()`'s limit, past which a time cannot be formatted. */
+        private const val MAX_DATE_MS = 8.64e15
+
         fun parseList(body: JsonElement?): List<SessionLink> {
             val array = body.array ?: return emptyList()
             val out = mutableListOf<SessionLink>()
@@ -408,7 +454,9 @@ data class SessionLink(
                 val id = item["sessionId"].string?.takeIf { it.isNotEmpty() } ?: continue
                 val relations = item["relations"].array ?: continue
                 val known = relations.mapNotNull { SessionLinkRelation.fromWire(it.string) }.distinct()
-                if (known.isNotEmpty()) out += SessionLink(id, known)
+                // Within what a date can hold, so a corrupt record cannot break the row that formats it.
+                val at = item["lastInteractionAt"].double?.takeIf { it.isFinite() && it > 0 && it < MAX_DATE_MS }?.toLong()
+                if (known.isNotEmpty()) out += SessionLink(id, known, at)
             }
             return out
         }

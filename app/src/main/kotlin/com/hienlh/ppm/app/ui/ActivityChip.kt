@@ -124,6 +124,7 @@ fun ActivityChip(
                 items = items,
                 liveLinks = collab.links[sessionId].orEmpty(),
                 announced = collab.announced,
+                interactedAt = collab.interactedAt[sessionId].orEmpty(),
             )
         }
     }
@@ -135,6 +136,7 @@ fun ActivityChip(
                 providerId = l.providerId,
                 relations = l.relations,
                 status = linkedSessionStatus(l.sessionId, streamingSessions, unreads, collab.pendingApprovals),
+                lastInteractionAt = l.lastInteractionAt,
             )
         }
     }

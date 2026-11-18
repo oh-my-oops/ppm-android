@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -29,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.app.ui.phoneSettingsLiveRevision
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.BuildConfig
 import com.hienlh.ppm.app.ui.MemorySettingsSection
@@ -133,7 +135,7 @@ fun PhoneSettingsScreen(
                 )
             }
 
-            is PhoneSettingsRoute.FullPage -> {
+            is PhoneSettingsRoute.FullPage -> key(phoneSettingsLiveRevision(model, current.section.category, current.section == PhoneSettingsSection.Storage)) {
                 when (current.section) {
                     PhoneSettingsSection.Accounts -> PhoneAccountsPage(
                         model = model,

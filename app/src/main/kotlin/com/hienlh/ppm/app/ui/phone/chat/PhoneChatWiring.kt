@@ -561,10 +561,13 @@ internal fun QueuedMessageAnswerEffect(model: AppModel, tab: ChatTab, chat: Chat
         if (content != null) {
             val decoded = ChatReply.decode(content)
             val reply = decoded.replyTo?.let { quoted -> tab.session?.let { quoted.copy(sessionId = it.id) } ?: quoted }
-            if (decoded.content.isNotEmpty()) {
-                tab.restore(RejectedSend(decoded.content, reply ?: tab.replyTo, ""))
-            } else if (reply != null) {
-                tab.replyTo = reply
+            // Its turn chips come back as chips, the block out of the text.
+            val refs = com.hienlh.ppm.protocol.ChatTurnRefs.decode(decoded.content)
+            if (refs.content.isNotEmpty()) {
+                tab.restore(RejectedSend(refs.content, reply ?: tab.replyTo, "", refs.turnRefs))
+            } else {
+                if (reply != null) tab.replyTo = reply
+                tab.turnLinks.merge(refs.turnRefs)
             }
         } else {
             answer.error?.let { model.toast(ErrorToastMessage(it, kind = ErrorToastMessage.Kind.INFO)) }

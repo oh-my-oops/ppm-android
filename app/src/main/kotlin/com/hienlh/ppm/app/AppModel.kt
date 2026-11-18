@@ -1,5 +1,7 @@
 package com.hienlh.ppm.app
 
+import com.hienlh.ppm.protocol.ChatTurnRefs
+import com.hienlh.ppm.client.ChatClientId
 import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.text.input.TextFieldState
@@ -915,6 +917,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** Each session's turns: an open chat publishes its own, a Review tab reads them (`useSessionTurnsStore`). */
     val sessionTurns = SessionTurnsStore()
+
+    /** Revisions of what other devices changed, which open screens read again on (LiveSync.kt). */
+    internal val liveSync = LiveSyncState()
 
     /** "Show in chat" on its way to the chat showing its session (`useChatJumpStore`). */
     var chatJump by mutableStateOf<ChatJumpRequest?>(null)
@@ -1889,6 +1894,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 ).sortedForList()
             }
         }
+        wireLiveSync(events)
         events.onLogsIssuesChanged {
             if (openLogsWindowCount == 0) {
                 refreshLogsIssuesSummary()
@@ -3351,7 +3357,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 chat.closeMic = { voice.closeFor(chat) }
                 chat.firstSend = { message -> newChats.sendFirst(chat, message) }
                 chat.editSend = { message -> edits.send(chat, message) }
-                chat.prewarmTouch = { newChats.touchPrewarm(chat) }
+                chat.prewarmTouch = {
+                    newChats.touchPrewarm(chat)
+                    notePresenceInput()
+                }
                 chat.tabOpener = { request -> answerAiTabOpen(chat, request) }
                 chat.onAttention = { attention -> chatAttention(chat, attention) }
                 chat.defaultsFor = { provider -> newChatCache.settings()?.defaults?.get(provider) }
@@ -3370,6 +3379,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 // Prepared first, so its draft and its gate join that one request.
                 newChats.prepare(chat)
                 chat.start(api, scope, DraftLocalStore(draftPrefs, serverKey), newChats.preparedDraft(chat), sessionTurns)
+                chat.turnLinks.start(api, scope, { name -> projects.any { it.name == name } }) { title, detail -> toast(ErrorToastMessage(title, detail)) }
                 newChats.started(chat)
             }
         }
@@ -3503,6 +3513,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** The chat took [request] up, or gave up on it; a newer request stays. */
     fun chatJumpDone(request: ChatJumpRequest) {
         if (chatJump === request) chatJump = null
+    }
+
+    /** A turn chip or turn link (`openTurnRef`): its session's chat shown, then asked to bring the turn on screen. */
+    fun openTurnRef(projectName: String, providerId: String, sessionId: String, turnId: String, title: String) {
+        if (projects.none { it.name == projectName }) return toast(ErrorToastMessage("Project \"$projectName\" is not in this PPM"))
+        chatJump = ChatJumpRequest(sessionId, null, null, monotonicMillis(), turnId)
+        openLinkedSession(projectName, sessionId, providerId, title)
     }
 
     /** The tab bar's tabs, the phone's merged one: every grid panel's, this project's, with the panel each is in. */
@@ -4922,6 +4939,12 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     /** What is typed in this tab's message box, kept while another tab is in front. */
     val draft = TextFieldState()
 
+    /** This tab's id on its chat socket (`?clientId=`), the same across reconnects and session switches. */
+    val clientId: String = ChatClientId.mint()
+
+    /** Its turn chips, Copy turn link and history window. */
+    val turnLinks = ChatTabTurnLinks(this)
+
     /**
      * The account this chat is on as far as the app can tell (`servingAccount`): written by a
      * switch the server accepted and by the stream naming who served, the later of the two
@@ -5282,7 +5305,9 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         val agent = agent
         val ready = attachments.filter { it.status == ComposerAttachment.Status.READY }
         val first = session == null
-        if (chat == null || (typed.isEmpty() && ready.isEmpty() && agent == null) || firstSendPending) {
+        val turnRefs = turnLinks.refs
+        // A chip still loading or one whose turn is gone holds the send back (`turnChipsBlockedReason`).
+        if (chat == null || (typed.isEmpty() && ready.isEmpty() && agent == null && turnRefs.isEmpty()) || firstSendPending || turnLinks.blockedReason != null) {
             pendingSend = false
             return
         }
@@ -5310,7 +5335,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
             // through a fork, which takes only text: every file is named by its marker.
             saveDraft()
             drafts?.cancelPendingSave()
-            val message = EditMessage(messageWithAttachments(text, ready, emptyList()), edit.anchor, replyTo, permissionMode?.value)
+            val message = EditMessage(messageWithAttachments(text, ready, emptyList()), edit.anchor, replyTo, permissionMode?.value, turnRefs)
             editFork = null
             emptyBox()
             editSend?.invoke(message)
@@ -5324,7 +5349,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
             // draft is its only other copy. Only a save still waiting for the server is dropped.
             saveDraft()
             drafts?.cancelPendingSave()
-            val message = FirstMessage(text, content, images, imagePaths, replyTo)
+            val message = FirstMessage(text, content, images, imagePaths, replyTo, turnRefs)
             emptyBox()
             firstSend?.invoke(message)
             return
@@ -5336,6 +5361,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
             replyTo,
             images,
             imagePaths,
+            turnRefs = turnRefs,
         )
         // Only now: the message is on the session's socket.
         drafts?.clear()
@@ -5372,7 +5398,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     /** The new session's socket is up: the first message goes on it, and its draft, still under [DraftSync.NEW_CHAT], goes. */
     internal fun flushFirst(permission: String?) {
         val message = firstMessage ?: return
-        controller?.send(message.content, TurnOptions(permissionMode = permission), message.replyTo, message.images, message.imagePaths)
+        controller?.send(message.content, TurnOptions(permissionMode = permission), message.replyTo, message.images, message.imagePaths, turnRefs = message.turnRefs)
         endFirstSend()
         drafts?.clear(DraftSync.NEW_CHAT)
     }
@@ -5387,7 +5413,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     internal fun restoreFirst(reason: String) {
         val message = firstMessage
         endFirstSend()
-        message?.let { restore(RejectedSend(it.content, it.replyTo, reason)) }
+        message?.let { restore(RejectedSend(it.content, it.replyTo, reason, it.turnRefs)) }
     }
 
     private fun endFirstSend() {
@@ -5407,6 +5433,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         pendingSend = false
         priority = MessagePriority.DEFAULT
         historyIndex = -1
+        turnLinks.clear()
     }
 
     /** A refused message back in the box (`restoreUnsentMessage`): after what is typed there, with the reply it carried. */
@@ -5414,6 +5441,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         val typed = draft.text.toString()
         draft.setTextAndPlaceCursorAtEnd(if (typed.isNotBlank()) "$typed\n\n${rejected.content}" else rejected.content)
         replyTo = rejected.replyTo
+        turnLinks.merge(rejected.turnRefs)
         edited()
         requestFocus()
     }
@@ -5429,7 +5457,10 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         val session = session
         replyTo = if (quoted != null && session != null) quoted.copy(sessionId = session.id) else quoted
         editFork = EditFork(anchor, item.id)
-        draft.setTextAndPlaceCursorAtEnd(decoded.content)
+        // Its turn chips back as chips, the block out of the text.
+        val refs = ChatTurnRefs.decode(decoded.content)
+        turnLinks.replace(refs.turnRefs)
+        draft.setTextAndPlaceCursorAtEnd(refs.content)
         edited()
         requestFocus()
     }
@@ -5449,6 +5480,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         draft.clearText()
         attachments.clear()
         agent = null
+        turnLinks.clear()
     }
 
     /**
@@ -5466,6 +5498,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         old?.stop()
         turnsJob?.cancel()
         turnsJob = null
+        turnLinks.sessionChanged()
         session = next
         providerId = next.providerId
         servingAccount = null
@@ -5479,7 +5512,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
             controller = null
             return
         }
-        val controller = ChatController(from.api, project, next, from.scope, providerId = providerId, stale = stale).also {
+        val controller = ChatController(from.api, project, next, from.scope, providerId = providerId, stale = stale, clientId = clientId).also {
             it.tabOpener = tabOpener
             it.onAttention = onAttention
             it.defaultsFor = defaultsFor
@@ -5503,7 +5536,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     /** Its version's socket is up: the edited message goes on it, and the draft it was written under goes. */
     internal fun flushEdit() {
         val pending = takePendingEdit() ?: return
-        controller?.send(pending.content, TurnOptions(permissionMode = pending.permissionMode), pending.replyTo)
+        controller?.send(pending.content, TurnOptions(permissionMode = pending.permissionMode), pending.replyTo, turnRefs = pending.turnRefs)
         drafts?.clear(pending.draftId)
     }
 
@@ -5511,7 +5544,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     internal fun abandonEdit(pending: PendingEdit, reason: String) {
         editForking = false
         drafts?.clear(pending.draftId)
-        restore(RejectedSend(pending.content, pending.replyTo, reason))
+        restore(RejectedSend(pending.content, pending.replyTo, reason, pending.turnRefs))
     }
 
     /**
@@ -5529,7 +5562,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         startedWith = Started(api, scope, draftStore, turns)
         historyList = HistoryList(api, project, scope)
         welcomeList = HistoryList(api, project, scope)
-        val controller = ChatController(api, project, session, scope, providerId = providerId).also {
+        val controller = ChatController(api, project, session, scope, providerId = providerId, clientId = clientId).also {
             it.tabOpener = tabOpener
             it.onAttention = onAttention
             it.defaultsFor = defaultsFor

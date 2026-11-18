@@ -14,9 +14,17 @@ class ChatJumpRequest(
     val messageId: String?,
     /** When it was asked ([monotonicMillis]): a request nothing can take up is dropped after [GIVE_UP_MILLIS]. */
     val at: Long,
+    /**
+     * The turn to show (a turn chip, a turn link): its first message pinned near the top when it is
+     * drawn, else the history window opened around it.
+     */
+    val turnId: String? = null,
 ) {
     companion object {
         /** `CHAT_JUMP_GIVE_UP_MS`. */
         const val GIVE_UP_MILLIS = 8_000L
+
+        /** `CHAT_JUMP_MAX_WAIT_MS`: the longest a request waits in all, for a tab still opening (another project's). */
+        const val MAX_WAIT_MILLIS = 60_000L
     }
 }

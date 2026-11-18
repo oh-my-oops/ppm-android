@@ -170,7 +170,22 @@ data class SessionStateFrame(
     val effortStatus: Reported<EffortStatusReport> = Reported.NotReported,
     /** The session's queue; null when this greeting does not carry it, which leaves it as it was. */
     val queue: List<QueuedMessage>? = null,
+    /** Which turn each recent message opened (`turnBindings`), for a socket that joined after its `turn_started`. */
+    val turnBindings: List<TurnBinding> = emptyList(),
 )
+
+/** A sent message's turn (`turn_started`): the client id it was sent under, and the turn it opened or joined. */
+data class TurnBinding(val clientMessageId: String, val turnId: String) {
+    companion object {
+        fun from(json: JsonElement?): TurnBinding? {
+            val turnId = json["turnId"].string?.takeIf { FromSessionReference.TURN_ID_RE.matches(it) } ?: return null
+            val clientId = json["clientMessageId"].string?.takeIf { it.isNotEmpty() } ?: return null
+            return TurnBinding(clientId, turnId)
+        }
+
+        fun list(json: JsonElement?): List<TurnBinding> = json.array.orEmpty().mapNotNull(::from)
+    }
+}
 
 /** `turn_events`: every buffered event of the running turn — a full snapshot, not a delta. */
 data class TurnSnapshot(
@@ -196,7 +211,15 @@ sealed interface ChatFrame {
         val message: String,
         val content: String? = null,
         val replyTo: ReplyReference? = null,
+        /** The turn chips the message carried. */
+        val turnRefs: List<com.hienlh.ppm.protocol.generated.TurnReference>? = null,
     ) : ChatFrame
+
+    /**
+     * A message opened or joined a turn (`turn_started`). [clientMessageId] is the id the sending
+     * device gave it, so a queued message is never bound to the turn that ran when it was sent.
+     */
+    data class TurnStarted(val turnId: String, val clientMessageId: String?) : ChatFrame
     /**
      * A message entering the conversation that this device did not draw: one sent from another
      * device, or a queued one (this device's too) the AI has just started on. [clientMessageId] is
@@ -258,6 +281,7 @@ sealed interface ChatFrame {
                         promptCache = PromptCacheState.from(json["promptCache"]),
                         mcpNeedsAuth = names(json["mcpNeedsAuth"]),
                         queue = QueuedMessage.list(json["queue"]),
+                        turnBindings = TurnBinding.list(json["turnBindings"]),
                         effortStatus = if ((json as? JsonObject)?.containsKey("effortStatus") == true) {
                             Reported.Value(EffortStatusReport.from(json["effortStatus"]))
                         } else {
@@ -281,7 +305,11 @@ sealed interface ChatFrame {
                     message = json["message"].string ?: "Message could not be sent",
                     content = json["content"].string,
                     replyTo = ReplyReference.from(json["replyTo"]),
+                    turnRefs = ChatTurnRefs.validateAll(json["turnRefs"]),
                 )
+                "turn_started" -> json["turnId"].string?.takeIf { FromSessionReference.TURN_ID_RE.matches(it) }
+                    ?.let { TurnStarted(it, json["clientMessageId"].string?.takeIf(String::isNotEmpty)) }
+                    ?: Event(ChatEvent.from(json), seq)
                 "user_message" -> UserMessage(json["content"].string ?: "", json["clientMessageId"].string)
                 "queue_state" -> QueuedMessage.list(json["queue"])?.let(::QueueState) ?: Event(ChatEvent.from(json), seq)
                 "effort_status" -> EffortStatusChanged(EffortStatusReport.from(json["status"]))
@@ -350,6 +378,8 @@ sealed interface ChatClientMessage {
         val queued: Boolean = false,
         /** With [queued]: the AI reads the queue at once (Claude Code's Send now). */
         val sendNow: Boolean = false,
+        /** Turns of other sessions the message points at; the server checks them and grants their read. */
+        val turnRefs: List<com.hienlh.ppm.protocol.generated.TurnReference> = emptyList(),
     ) : ChatClientMessage {
         override val json
             get() = buildJsonObject {
@@ -375,6 +405,7 @@ sealed interface ChatClientMessage {
                 }
                 if (imagePaths.isNotEmpty()) put("imagePaths", buildJsonArray { imagePaths.forEach { add(it) } })
                 replyTo?.let { put("replyTo", it.toJson()) }
+                if (turnRefs.isNotEmpty()) WireJson.parseOrNull(ChatTurnRefs.toJsonArray(turnRefs))?.let { put("turnRefs", it) }
                 options.model?.let { put("model", it) }
                 options.effort?.let { put("effort", it) }
                 options.thinking?.let { put("thinking", it) }

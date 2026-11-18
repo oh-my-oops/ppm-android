@@ -128,6 +128,10 @@ class GlobalEvents(
     private val schedulesChangedListeners = LinkedHashSet<() -> Unit>()
     private val tasksListeners = LinkedHashSet<(JsonElement) -> Unit>()
     private val memoryInstallListeners = LinkedHashSet<(status: JsonElement) -> Unit>()
+    private val liveSync = LiveSyncListeners()
+
+    /** `presence:input`, throttled: call on real input (a tap, a key, typing). */
+    val presence = PresenceInput(::sendIfOpen)
     private var socket: SocketConnection? = null
 
     /** Persisted notification feed (`/api/notifications/feed`), with fallback to [unread] on older servers. */
@@ -320,6 +324,24 @@ class GlobalEvents(
         return { memoryInstallListeners -= listener }
     }
 
+    /** A project's chat list changed elsewhere (`sessions:list_changed`), with the chat renamed when it was a rename. */
+    fun onSessionsListChanged(listener: (project: String, renamed: RenamedChat?) -> Unit): () -> Unit = liveSync.sessionsList.add(listener)
+
+    /** The project list changed on the server (`projects:changed`). */
+    fun onProjectsChanged(listener: () -> Unit): () -> Unit = liveSync.projects.add(listener)
+
+    /** A settings section changed (`settings:changed`); [clientId] names the app that made it, when it said. */
+    fun onSettingsChanged(listener: (section: String, clientId: String?) -> Unit): () -> Unit = liveSync.settings.add(listener)
+
+    /** The saved database connections changed (`db:connections_changed`). */
+    fun onDbConnectionsChanged(listener: () -> Unit): () -> Unit = liveSync.dbConnections.add(listener)
+
+    /** An extension was installed, removed, enabled or disabled (`extensions:changed`). */
+    fun onExtensionsChanged(listener: () -> Unit): () -> Unit = liveSync.extensions.add(listener)
+
+    /** A design was created, renamed, deleted or restored in a project (`design:list_changed`). */
+    fun onDesignListChanged(listener: (project: String) -> Unit): () -> Unit = liveSync.designList.add(listener)
+
     fun onDesignCheckRequest(
         listener: (projectName: String, slug: String, requestId: String?, screenshot: Boolean) -> Unit,
     ): () -> Unit {
@@ -339,6 +361,7 @@ class GlobalEvents(
                 loadUnread()
                 onReady?.invoke()
                 readyListeners.toList().forEach { it() }
+                presence.retryIfPending()
             }
             "notifications:feed_changed" -> {
                 onNotificationsFeedChanged?.invoke()
@@ -402,6 +425,7 @@ class GlobalEvents(
                 val screenshot = frame["screenshot"].bool ?: false
                 designCheckListeners.toList().forEach { it(proj, slug, reqId, screenshot) }
             }
+            else -> liveSync.handle(frame)
         }
     }
 

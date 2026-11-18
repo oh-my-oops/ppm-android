@@ -46,6 +46,8 @@ class FirstMessage(
     val images: List<InlineImage>,
     val imagePaths: List<String>,
     val replyTo: ReplyReference?,
+    /** Turns of other sessions it points at, shown as chips. */
+    val turnRefs: List<com.hienlh.ppm.protocol.generated.TurnReference> = emptyList(),
 )
 
 /** The first message as it shows while its session is made (`firstSendPreview`). */

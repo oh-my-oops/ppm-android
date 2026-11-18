@@ -184,8 +184,15 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
     suspend fun unreadSessions(project: String): Map<String, SessionUnread> =
         SessionUnread.list(call("GET", "${chatPath(project)}/sessions/unread"))
 
-    fun chatSocketUrl(project: String, sessionId: String, providerId: String): String =
-        socketUrl("/ws/project/${escape(project)}/chat/${escape(sessionId)}", listOf("providerId" to providerId))
+    /**
+     * [clientId] names the chat tab this socket belongs to (`?clientId=`, `chat-client-id.ts`), kept
+     * across its reconnects, so the server still knows which device a turn's message came from.
+     */
+    fun chatSocketUrl(project: String, sessionId: String, providerId: String, clientId: String? = null): String =
+        socketUrl(
+            "/ws/project/${escape(project)}/chat/${escape(sessionId)}",
+            listOf("providerId" to providerId) + listOfNotNull(clientId?.takeIf(ChatClientId::isValid)?.let { ChatClientId.PARAM to it }),
+        )
 
     /** The app-wide socket: running and unread sessions, file changes, and other broadcasts. */
     fun globalSocketUrl(): String = socketUrl("/ws/global", emptyList())

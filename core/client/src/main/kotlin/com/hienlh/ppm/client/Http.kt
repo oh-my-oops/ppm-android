@@ -47,12 +47,30 @@ object PpmHttp {
         return "PPM-Android/$app (Android $android; $device; $kind)"
     }
 
+    /**
+     * This app in the settings writes it makes (`x-ppm-settings-client`, `settings-client-id.ts`)
+     * and so in the `settings:changed` the server announces for them: the app skips that echo,
+     * since it already shows its own change. One per process; a hint, never a credential.
+     */
+    val SETTINGS_CLIENT_ID: String = java.util.UUID.randomUUID().toString()
+
+    /** `SETTINGS_CLIENT_HEADER`. */
+    const val SETTINGS_CLIENT_HEADER = "x-ppm-settings-client"
+
     /** A POST may take as long as the work behind it (the web gives one no timeout at all). */
     val client: OkHttpClient = OkHttpClient.Builder()
         .addInterceptor { chain ->
             val request = chain.request()
             val agent = userAgent
             chain.proceed(if (agent == null || request.header("User-Agent") != null) request else request.newBuilder().header("User-Agent", agent).build())
+        }
+        // Every write names this app: only a settings write reads it, any other route ignores it.
+        .addInterceptor { chain ->
+            val request = chain.request()
+            chain.proceed(
+                if (request.method == "GET" || request.method == "HEAD") request
+                else request.newBuilder().header(SETTINGS_CLIENT_HEADER, SETTINGS_CLIENT_ID).build(),
+            )
         }
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(600, TimeUnit.SECONDS)
