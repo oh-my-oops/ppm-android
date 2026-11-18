@@ -152,6 +152,8 @@ class JiraUiTest {
         composeRule.onNodeWithTag("jira-debug-1").performClick()
         waitForTag("jira-debug-dialog")
         waitForText("Start Debug: BUG-1")
+        // The watcher's prompt fills the field once the watchers have loaded: start only then.
+        waitForText("Fix BUG-1")
         composeRule.onNodeWithTag("jira-debug-start").performClick()
         val body = WireJson.parse(waitForRequest("POST /api/jira/results/1/debug"))
         assertEquals("Fix BUG-1", body["prompt"].string)

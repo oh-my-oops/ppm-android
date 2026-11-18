@@ -145,6 +145,8 @@ class AssistantSettingsUiTest {
         start(mobile = false, tab = "general")
         waitTag("asst-instructions")
         composeRule.onNodeWithTag("asst-general-save").assertIsNotEnabled()
+        // The old memories arrive by their own request, after the form: wait for them, not only the form.
+        waitText("Remembered by PPMBot (1)")
         node("Remembered by PPMBot (1)").performScrollTo().performClick()
         composeRule.onNodeWithTag("asst-memory-copy-7", useUnmergedTree = true).performScrollTo().performClick()
         node("Unsaved changes").assertExists()
