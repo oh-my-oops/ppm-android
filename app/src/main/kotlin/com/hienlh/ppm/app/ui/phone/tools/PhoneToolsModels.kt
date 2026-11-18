@@ -292,8 +292,7 @@ class PhoneLogsState(
  * State holder for the Phone Port Forwarding screen (Requirement 14.2, Phone 7 Section 3).
  *
  * - Forwards a port over Tailscale or Cloudflare from the bottom action card.
- * - Shows `"Set up Tailscale or Cloudflare on a tablet."` when a transport is not configured
- *   instead of opening any setup wizard on phone (`canConfigureTransportOnPhone == false`).
+ * - Each transport's row opens its setup in Settings → Remote Access (Set up, or Manage once done).
  * - Confirms before stopping a tunnel started outside PPM (`"Stop a tunnel PPM did not start?"`).
  */
 @Stable
@@ -305,8 +304,6 @@ class PhonePortForwardingState(
     var portInput: String by mutableStateOf(initialPortInput)
     var confirmStopExternalTunnel: TunnelEntry? by mutableStateOf(null)
 
-    val canConfigureTransportOnPhone: Boolean = false
-    val tabletSetupNoticeText: String = "Set up Tailscale or Cloudflare on a tablet."
     val externalStopConfirmTitle: String = "Stop a tunnel PPM did not start?"
 
     val parsedPort: Int?
@@ -321,11 +318,6 @@ class PhonePortForwardingState(
         } else {
             "Public: anyone with the link can open it."
         }
-
-    fun shouldShowTabletSetupNotice(
-        tailscaleReady: Boolean,
-        cloudflareReady: Boolean,
-    ): Boolean = !tailscaleReady || !cloudflareReady
 
     fun canSubmitForward(
         tailscaleReady: Boolean,
@@ -361,9 +353,7 @@ class PhonePortForwardingState(
  *
  * - Allows enabling/disabling schedules, running/restarting immediately, and reading the full log.
  * - Keeps primary actions (`Full log`, `Run now` / `Restart`) in the bottom action card.
- * - Forbids script editing and schedule creation/deletion on phone
- *   (`canEditScript == false`, `canCreateOrDeleteSchedule == false`), showing
- *   `"Edit a script or add a schedule on a tablet."`.
+ * - New, Import, Edit (a script or a prompt) and Delete open the web's schedule form in a sheet.
  */
 @Stable
 class PhoneSchedulesState(
@@ -376,9 +366,6 @@ class PhoneSchedulesState(
     var viewingFullLogScheduleId: Int? by mutableStateOf(null)
 
     val settingsBreadcrumb: String = "Settings > Schedules"
-    val canEditScript: Boolean = false
-    val canCreateOrDeleteSchedule: Boolean = false
-    val tabletNoticeText: String = "Edit a script or add a schedule on a tablet."
 
     val selectedSchedule: ScheduleRowState?
         get() = schedules.firstOrNull { it.id == selectedScheduleId } ?: schedules.firstOrNull()

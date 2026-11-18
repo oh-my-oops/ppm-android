@@ -16,7 +16,11 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.ui.phone.tools.PhoneSchedulesScreen
 import com.hienlh.ppm.app.ui.phone.tools.PhoneSchedulesState
+import com.hienlh.ppm.app.ui.ScheduleChatOption
+import com.hienlh.ppm.client.schedulesCreate
+import com.hienlh.ppm.client.schedulesDelete
 import com.hienlh.ppm.client.schedulesGetLogs
+import com.hienlh.ppm.client.schedulesImport
 import com.hienlh.ppm.client.schedulesList
 import com.hienlh.ppm.client.schedulesListRuns
 import com.hienlh.ppm.client.schedulesRunNow
@@ -28,6 +32,7 @@ import com.hienlh.ppm.state.settings.ScheduleLogBufferState
 import com.hienlh.ppm.state.settings.ScheduleProjectOption
 import com.hienlh.ppm.state.settings.ScheduleRunRow
 import com.hienlh.ppm.state.settings.mergeScheduleLogs
+import com.hienlh.ppm.state.settings.parseScheduleTemplateJson
 import com.hienlh.ppm.state.settings.parseScheduleLogs
 import com.hienlh.ppm.state.settings.parseScheduleRuns
 import com.hienlh.ppm.state.settings.parseSchedulesList
@@ -132,6 +137,22 @@ internal fun PhoneSchedulesAreaHost(
         }
     }
 
+    /** One write to `/api/schedules`, said in a toast as the web says it, then the list read again. */
+    fun write(done: String, failed: String, call: suspend (com.hienlh.ppm.client.ApiClient) -> Unit) {
+        val api = model.api ?: return
+        scope.launch {
+            try {
+                call(api)
+                model.toast(ErrorToastMessage(done, kind = ErrorToastMessage.Kind.SUCCESS))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                model.toast(ErrorToastMessage(e.message?.takeIf { it.isNotBlank() } ?: failed))
+            }
+            reloadSchedules()
+        }
+    }
+
     PhoneSchedulesScreen(
         state = schedulesState,
         runsByScheduleId = runsById,
@@ -171,6 +192,32 @@ internal fun PhoneSchedulesAreaHost(
                 } catch (e: Exception) {
                     model.toast(ErrorToastMessage(e.message?.takeIf { it.isNotBlank() } ?: "Run failed"))
                 }
+            }
+        },
+        onCreate = { body ->
+            write("Schedule created", "Failed to create schedule") { api -> api.schedulesCreate(body) }
+        },
+        onUpdate = { row, body ->
+            write("Schedule saved", "Failed to save schedule") { api -> api.schedulesUpdate(row.id, body) }
+        },
+        onDelete = { row ->
+            write("Schedule deleted", "Delete failed") { api -> api.schedulesDelete(row.id) }
+        },
+        onImport = { json, projectName, trust ->
+            val parsed = parseScheduleTemplateJson(json).getOrElse {
+                model.toast(ErrorToastMessage(it.message ?: "Invalid template JSON"))
+                return@PhoneSchedulesScreen
+            }
+            write("Imported \"" + parsed.name + "\"", "Import failed") { api ->
+                api.schedulesImport(template = parsed.rawJson, projectName = projectName, trust = trust)
+            }
+        },
+        loadChats = { projectName ->
+            val api = model.api
+            if (api == null) {
+                emptyList()
+            } else {
+                api.sessions(projectName, limit = 50, offset = 0).sessions.map { ScheduleChatOption(it.id, it.title.trim().ifEmpty { "Untitled chat" }) }
             }
         },
         onToggleEnabled = { row, enabled ->
