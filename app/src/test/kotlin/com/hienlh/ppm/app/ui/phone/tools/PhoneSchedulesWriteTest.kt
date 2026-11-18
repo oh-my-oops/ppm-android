@@ -2,11 +2,13 @@ package com.hienlh.ppm.app.ui.phone.tools
 
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
+import com.hienlh.ppm.app.ui.ScheduleCreateFormContent
 import com.hienlh.ppm.app.ui.SchedulesSettingsContent
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.BuiltInThemes
@@ -110,32 +112,42 @@ class PhoneSchedulesWriteTest {
 
     @Test
     @Config(sdk = [34], qualifiers = "w1280dp-h800dp-xxhdpi")
-    fun `a tablet edits a schedule on the same form`() {
-        var updated: Pair<Int, JsonObject>? = null
+    fun `a tablet offers Edit on each schedule, and the form saves the change`() {
+        var updated: JsonObject? = null
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
-                SchedulesSettingsContent(
-                    schedules = listOf(nightly),
-                    projects = projects,
-                    onToggleEnabledOnly = {},
-                    onRunNow = {},
-                    onToggleScheduleEnabled = { _, _ -> },
-                    onDeleteSchedule = {},
-                    onCreateSchedule = {},
-                    onUpdateSchedule = { id, body -> updated = id to body },
-                    onExportTemplate = {},
-                    onImportTemplate = { _, _ -> },
-                    onOpenLogs = {},
-                    onCloseLogs = {},
-                )
+                androidx.compose.foundation.layout.Column {
+                    SchedulesSettingsContent(
+                        schedules = listOf(nightly),
+                        projects = projects,
+                        onToggleEnabledOnly = {},
+                        onRunNow = {},
+                        onToggleScheduleEnabled = { _, _ -> },
+                        onDeleteSchedule = {},
+                        onCreateSchedule = {},
+                        onUpdateSchedule = { _, _ -> },
+                        onExportTemplate = {},
+                        onImportTemplate = { _, _ -> },
+                        onOpenLogs = {},
+                        onCloseLogs = {},
+                    )
+                    // The form the Edit button opens in a dialog (a Dialog never idles under Robolectric
+                    // here, the existing New and Import dialogs included), driven inline.
+                    ScheduleCreateFormContent(
+                        projects = projects,
+                        onDismiss = {},
+                        onSubmit = { updated = it },
+                        editing = nightly,
+                    )
+                }
             }
         }
-        composeRule.onNodeWithTag("schedule-edit-1").performClick()
+        assertTrue(composeRule.onAllNodesWithTag("schedule-edit-1").fetchSemanticsNodes().isNotEmpty())
         assertTrue(composeRule.onAllNodesWithText("Edit: Nightly backup").fetchSemanticsNodes().isNotEmpty())
         composeRule.onNodeWithTag("schedule-form-cron").performTextReplacement("30 3 * * *")
-        composeRule.onNodeWithTag("schedule-form-submit").performClick()
-        assertEquals(1, updated?.first)
-        assertEquals("30 3 * * *", updated?.second?.get("cron_expr")?.string)
-        assertEquals("60000", updated?.second?.get("timeout_ms")?.toString())
+        composeRule.onNodeWithTag("schedule-form-submit").assertTextContains("Save changes").performClick()
+        assertEquals("30 3 * * *", updated?.get("cron_expr")?.string)
+        assertEquals("60000", updated?.get("timeout_ms")?.toString())
+        assertFalse(updated!!.containsKey("kind"))
     }
 }
