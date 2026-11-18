@@ -51,7 +51,6 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.PpmSwitch
 import com.hienlh.ppm.app.ui.SettingsPasswordInput
 import com.hienlh.ppm.app.ui.SettingsTextInput
-import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
 import com.hienlh.ppm.client.accountUsages
 import com.hienlh.ppm.client.accounts
 import com.hienlh.ppm.client.accountsAddManual
@@ -135,6 +134,8 @@ data class PhoneAccountCardData(
 fun PhoneAccountsPage(
     model: AppModel,
     onBack: () -> Unit,
+    /** Opens the tablet's whole Accounts pane: rotation, encrypted backup and restore, token tests. */
+    onOpenAllSettings: (() -> Unit)? = null,
 ) {
     val api = model.api
     val scope = rememberCoroutineScope()
@@ -288,6 +289,7 @@ fun PhoneAccountsPage(
         )
 
         PhoneAccountsContent(
+            onOpenAllSettings = onOpenAllSettings,
             activeProvider = activeProvider,
             onSelectProvider = { activeProvider = it },
             cards = currentCards,
@@ -474,6 +476,8 @@ fun PhoneAccountsContent(
     spendClaudeReset: (suspend (PhoneAccountCardData, ClaudeLimitResetGrant) -> String)? = null,
     spendCodexReset: (suspend (PhoneAccountCardData, CodexCredit) -> String)? = null,
     onResetDone: (message: String, failed: Boolean) -> Unit = { _, _ -> },
+    /** Opens every account setting the tablet shows; null leaves the row out. */
+    onOpenAllSettings: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     var menuCard by remember { mutableStateOf<PhoneAccountCardData?>(null) }
@@ -566,9 +570,14 @@ fun PhoneAccountsContent(
                 )
             }
 
-            OpenOnTabletNotice(
-                text = "Rotation strategy, encrypted backup/restore and token tests open on a tablet.",
-            )
+            if (onOpenAllSettings != null) {
+                PhoneAllSettingsRow(
+                    title = PHONE_ACCOUNTS_ALL_TITLE,
+                    subtitle = "Rotation strategy, encrypted backup and restore, token tests",
+                    tag = "phone-accounts-all-settings",
+                    onClick = onOpenAllSettings,
+                )
+            }
         }
 
         val activeCount = cards.count { it.isEnabled && !it.needsSignIn }

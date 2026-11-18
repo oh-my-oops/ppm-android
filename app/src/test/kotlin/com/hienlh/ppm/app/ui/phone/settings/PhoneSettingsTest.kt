@@ -7,7 +7,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.ui.SettingsCategory
 import com.hienlh.ppm.app.ui.TABLET_DETAIL_MAX_WIDTH
@@ -43,10 +45,14 @@ class PhoneSettingsTest {
     val rules: RuleChain = withComposeActivity(composeRule)
 
     @Test
-    fun `phone settings route model maps the 6 full sections and routes all other categories to Open on a tablet`() {
-        // Requirement 15.1: 6 full phone sections
+    fun `phone settings route model gives every settings category a full page`() {
         assertEquals(
-            listOf("Accounts", "AI Provider", "Memory", "Tools", "PPM Assistant", "Vault", "Notifications", "Theme", "Servers", "Schedules", "Storage", "About"),
+            listOf(
+                "Accounts", "AI Provider", "Memory", "Tools", "MCP Servers", "AI Resources", "PPM Assistant", "Vault", "Design",
+                "Notifications", "Theme", "Voice Input", "Keyboard Shortcuts", "Servers", "Schedules", "Storage", "About",
+                "Remote Access", "Cloud & Share", "API Proxy", "Extensions", "Jira", "File Filters", "Language Servers",
+                "Database Drivers", "Remote Desktop",
+            ),
             PhoneSettingsSection.entries.map { it.title },
         )
         assertEquals(
@@ -89,35 +95,21 @@ class PhoneSettingsTest {
         assertEquals(PhoneSettingsRoute.FullPage(PhoneSettingsSection.Storage), resolvePhoneSettingsRoute("storage"))
         assertEquals(PhoneSettingsRoute.FullPage(PhoneSettingsSection.Storage), resolvePhoneSettingsRoute("query-audit"))
 
-        // Requirement 15.2: Every other SettingsCategory resolves to TabletOnlyPage
-        val fullCategories = setOf(
-            SettingsCategory.Accounts,
-            SettingsCategory.Ai,
-            SettingsCategory.Memory,
-            SettingsCategory.Tools,
-            SettingsCategory.Assistant,
-            SettingsCategory.Vault,
-            SettingsCategory.Notifications,
-            SettingsCategory.Appearance,
-            SettingsCategory.Servers,
-            SettingsCategory.Schedules,
-            SettingsCategory.QueryAudit,
-        )
+        // Every category opens a page of its own on a phone; General's is About.
         for (category in SettingsCategory.entries) {
-            if (category in fullCategories) {
-                assertTrue(isPhoneFullSettingsCategory(category))
-                assertTrue(resolvePhoneSettingsCategory(category) is PhoneSettingsRoute.FullPage)
-            } else {
-                assertFalse(
-                    "Expected ${category.id} to be tablet-only on phone",
-                    isPhoneFullSettingsCategory(category),
-                )
-                assertEquals(
-                    PhoneSettingsRoute.TabletOnlyPage(category),
-                    resolvePhoneSettingsCategory(category),
-                )
-            }
+            val route = resolvePhoneSettingsCategory(category)
+            assertTrue("Expected ${category.id} to open a page", route is PhoneSettingsRoute.FullPage)
+            assertEquals(category, (route as PhoneSettingsRoute.FullPage).section.category)
         }
+        assertEquals(PhoneSettingsRoute.FullPage(PhoneSettingsSection.About), resolvePhoneSettingsRoute("general"))
+        assertEquals(PhoneSettingsRoute.FullPage(PhoneSettingsSection.RemoteAccess), resolvePhoneSettingsRoute("remote-access"))
+        assertEquals(PhoneSettingsRoute.FullPage(PhoneSettingsSection.Shortcuts), resolvePhoneSettingsRoute("keybindings"))
+        assertEquals(PhoneSettingsRoute.FullPage(PhoneSettingsSection.Assistant), resolvePhoneSettingsRoute("ppmbot"))
+
+        // A server started with --minimal leaves out the sections it does not run, as the web's list does.
+        val minimal = PhoneSettingsGroup.entries.flatMap { PhoneSettingsSection.forGroup(it, minimalMode = true) }
+        assertTrue(PhoneSettingsSection.RemoteAccess in minimal && PhoneSettingsSection.Shortcuts in minimal)
+        assertFalse(PhoneSettingsSection.Jira in minimal || PhoneSettingsSection.Storage in minimal)
 
         // Tablet rail widths (Requirement 15.3)
         assertEquals(TABLET_RAIL_LANDSCAPE_WIDTH, tabletSettingsRailWidth(1280.dp))
@@ -128,23 +120,12 @@ class PhoneSettingsTest {
     }
 
     @Test
-    fun `phone settings home list renders the 6 everyday sections and tablet-only section page shows Open on a tablet`() {
+    fun `phone settings home list lists every section and a tap picks it`() {
         var selectedSection by mutableStateOf<PhoneSettingsSection?>(null)
-        var tabletOnlyCategory by mutableStateOf<SettingsCategory?>(null)
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
-                val cat = tabletOnlyCategory
-                if (cat != null) {
-                    PhoneTabletOnlySectionPage(
-                        category = cat,
-                        onBack = { tabletOnlyCategory = null },
-                    )
-                } else {
-                    PhoneSettingsHomeList(
-                        onSelectSection = { selectedSection = it },
-                    )
-                }
+                PhoneSettingsHomeList(onSelectSection = { selectedSection = it })
             }
         }
 
@@ -153,20 +134,18 @@ class PhoneSettingsTest {
         }
         composeRule.onNodeWithTag("phone-settings-row-accounts").performClick()
         assertEquals(PhoneSettingsSection.Accounts, selectedSection)
-
-        // Switch state to a non-phone section (Requirement 15.2)
-        tabletOnlyCategory = SettingsCategory.Jira
-        composeRule.waitForIdle()
-        composeRule.onNodeWithTag("phone-settings-tablet-only-jira").assertIsDisplayed()
-        composeRule.onNodeWithText("Open on a tablet").assertIsDisplayed()
+        composeRule.onNodeWithTag("phone-settings-row-jira").performScrollTo().performClick()
+        assertEquals(PhoneSettingsSection.Jira, selectedSection)
+        assertEquals(0, composeRule.onAllNodesWithText("on a tablet", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
     }
 
     @Test
-    fun `phone AI Provider page exposes model sheet, effort segments, permission mode sheet and tablet notice`() {
+    fun `phone AI Provider page exposes model sheet, effort segments, permission mode sheet and the row into all provider settings`() {
         var selectedProvider by mutableStateOf("claude")
         var selectedModel by mutableStateOf("claude-sonnet-4-6")
         var selectedEffort by mutableStateOf("high")
         var selectedPermission by mutableStateOf("bypassPermissions")
+        var openedAll = false
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
@@ -184,6 +163,7 @@ class PhoneSettingsTest {
                     onSelectModel = { selectedModel = it },
                     onSelectEffort = { selectedEffort = it },
                     onSelectPermissionMode = { selectedPermission = it },
+                    onOpenAllSettings = { openedAll = true },
                 )
             }
         }
@@ -201,6 +181,10 @@ class PhoneSettingsTest {
         composeRule.onNodeWithTag("phone-ai-permission-row").performClick()
         composeRule.onNodeWithTag("phone-ai-permission-option-plan", useUnmergedTree = true).performClick()
         assertEquals("plan", selectedPermission)
+
+        // Keys, budgets, MCP, teams and instructions: one level down.
+        composeRule.onNodeWithTag("phone-ai-all-settings").performScrollTo().performClick()
+        assertTrue(openedAll)
     }
 
     @Test

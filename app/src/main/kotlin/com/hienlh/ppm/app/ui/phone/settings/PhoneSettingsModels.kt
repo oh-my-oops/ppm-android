@@ -15,19 +15,22 @@ enum class PhoneSettingsGroup(val title: String) {
     AI("AI"),
     THIS_PHONE("This phone"),
     SERVER("Server"),
+    INTEGRATIONS("Integrations"),
+    ADVANCED("Advanced"),
 }
 
 /**
- * The full-page sections available in Phone Settings (Requirement 15.1):
- * - [Accounts] (sign in, usage, enable or disable)
- * - [AiProvider] (model, effort, permission mode)
- * - [Memory] (on or off, where memories live, sync from providers, search by meaning)
+ * Every Settings category, each a full page on a phone, as the web's narrow Settings drills from
+ * its list into one pane (`settings-category-list.tsx`). Some have a page of their own:
+ * - [Accounts] (sign in, usage, enable or disable; rotation, backup and token tests one level down)
+ * - [AiProvider] (model, effort, permission mode; every other provider setting one level down)
  * - [Notifications] (events, delay, push, Telegram, ntfy)
- * - [Theme] (Light / Dark / System mode + color theme grid)
+ * - [Theme] (Light / Dark / System mode + color theme grid, then the rest of Appearance)
  * - [Servers] (connected server, switch, remove, log out, add server)
- * - [Schedules] (run now / restart, on or off, run history and full log; editing stays on a tablet)
- * - [Storage] (what the database, backups, session trace and Query Audit take; read-only)
- * - [About] (server & app versions, server update, debug redesign toggle)
+ * - [Schedules] (run now / restart, on or off, run history and full log, new, edit, import, delete)
+ * - [Storage] (what the database, backups, session trace and Query Audit take, and their limits)
+ * - [About] (server & app versions, server update, then General: device name, password, Learn PPM)
+ * and every other one hosts the tablet's own section ([PhoneHostedSettingsPage]).
  */
 enum class PhoneSettingsSection(
     val id: String,
@@ -69,6 +72,22 @@ enum class PhoneSettingsSection(
         group = PhoneSettingsGroup.AI,
         category = SettingsCategory.Tools,
     ),
+    Mcp(
+        id = SettingsCategory.Mcp.id,
+        title = SettingsCategory.Mcp.label,
+        subtitle = SettingsCategory.Mcp.subtitle,
+        icon = SettingsCategory.Mcp.icon,
+        group = PhoneSettingsGroup.AI,
+        category = SettingsCategory.Mcp,
+    ),
+    AiResources(
+        id = SettingsCategory.AiResources.id,
+        title = SettingsCategory.AiResources.label,
+        subtitle = SettingsCategory.AiResources.subtitle,
+        icon = SettingsCategory.AiResources.icon,
+        group = PhoneSettingsGroup.AI,
+        category = SettingsCategory.AiResources,
+    ),
     Assistant(
         id = "assistant",
         title = "PPM Assistant",
@@ -85,6 +104,14 @@ enum class PhoneSettingsSection(
         group = PhoneSettingsGroup.AI,
         category = SettingsCategory.Vault,
     ),
+    Design(
+        id = SettingsCategory.Design.id,
+        title = SettingsCategory.Design.label,
+        subtitle = SettingsCategory.Design.subtitle,
+        icon = SettingsCategory.Design.icon,
+        group = PhoneSettingsGroup.AI,
+        category = SettingsCategory.Design,
+    ),
     Notifications(
         id = "notifications",
         title = "Notifications",
@@ -100,6 +127,22 @@ enum class PhoneSettingsSection(
         icon = ProductIcon.Palette,
         group = PhoneSettingsGroup.THIS_PHONE,
         category = SettingsCategory.Appearance,
+    ),
+    Voice(
+        id = SettingsCategory.Voice.id,
+        title = SettingsCategory.Voice.label,
+        subtitle = SettingsCategory.Voice.subtitle,
+        icon = SettingsCategory.Voice.icon,
+        group = PhoneSettingsGroup.THIS_PHONE,
+        category = SettingsCategory.Voice,
+    ),
+    Shortcuts(
+        id = SettingsCategory.Shortcuts.id,
+        title = SettingsCategory.Shortcuts.label,
+        subtitle = SettingsCategory.Shortcuts.subtitle,
+        icon = SettingsCategory.Shortcuts.icon,
+        group = PhoneSettingsGroup.THIS_PHONE,
+        category = SettingsCategory.Shortcuts,
     ),
     Servers(
         id = "servers",
@@ -132,70 +175,113 @@ enum class PhoneSettingsSection(
         subtitle = "PPM server & Android app versions",
         icon = ProductIcon.Info,
         group = PhoneSettingsGroup.SERVER,
-        category = null,
+        // The tablet's General: device name, password and Learn PPM sit under the versions.
+        category = SettingsCategory.General,
+    ),
+    RemoteAccess(
+        id = SettingsCategory.RemoteAccess.id,
+        title = SettingsCategory.RemoteAccess.label,
+        subtitle = SettingsCategory.RemoteAccess.subtitle,
+        icon = SettingsCategory.RemoteAccess.icon,
+        group = PhoneSettingsGroup.INTEGRATIONS,
+        category = SettingsCategory.RemoteAccess,
+    ),
+    Cloud(
+        id = SettingsCategory.Cloud.id,
+        title = SettingsCategory.Cloud.label,
+        subtitle = SettingsCategory.Cloud.subtitle,
+        icon = SettingsCategory.Cloud.icon,
+        group = PhoneSettingsGroup.INTEGRATIONS,
+        category = SettingsCategory.Cloud,
+    ),
+    Proxy(
+        id = SettingsCategory.Proxy.id,
+        title = SettingsCategory.Proxy.label,
+        subtitle = SettingsCategory.Proxy.subtitle,
+        icon = SettingsCategory.Proxy.icon,
+        group = PhoneSettingsGroup.INTEGRATIONS,
+        category = SettingsCategory.Proxy,
+    ),
+    Extensions(
+        id = SettingsCategory.Extensions.id,
+        title = SettingsCategory.Extensions.label,
+        subtitle = SettingsCategory.Extensions.subtitle,
+        icon = SettingsCategory.Extensions.icon,
+        group = PhoneSettingsGroup.INTEGRATIONS,
+        category = SettingsCategory.Extensions,
+    ),
+    Jira(
+        id = SettingsCategory.Jira.id,
+        title = SettingsCategory.Jira.label,
+        subtitle = SettingsCategory.Jira.subtitle,
+        icon = SettingsCategory.Jira.icon,
+        group = PhoneSettingsGroup.INTEGRATIONS,
+        category = SettingsCategory.Jira,
+    ),
+    Files(
+        id = SettingsCategory.Files.id,
+        title = SettingsCategory.Files.label,
+        subtitle = SettingsCategory.Files.subtitle,
+        icon = SettingsCategory.Files.icon,
+        group = PhoneSettingsGroup.ADVANCED,
+        category = SettingsCategory.Files,
+    ),
+    LanguageServers(
+        id = SettingsCategory.LanguageServers.id,
+        title = SettingsCategory.LanguageServers.label,
+        subtitle = SettingsCategory.LanguageServers.subtitle,
+        icon = SettingsCategory.LanguageServers.icon,
+        group = PhoneSettingsGroup.ADVANCED,
+        category = SettingsCategory.LanguageServers,
+    ),
+    DatabaseDrivers(
+        id = SettingsCategory.DatabaseDrivers.id,
+        title = SettingsCategory.DatabaseDrivers.label,
+        subtitle = SettingsCategory.DatabaseDrivers.subtitle,
+        icon = SettingsCategory.DatabaseDrivers.icon,
+        group = PhoneSettingsGroup.ADVANCED,
+        category = SettingsCategory.DatabaseDrivers,
+    ),
+    RemoteDesktop(
+        id = SettingsCategory.RemoteDesktop.id,
+        title = SettingsCategory.RemoteDesktop.label,
+        subtitle = SettingsCategory.RemoteDesktop.subtitle,
+        icon = SettingsCategory.RemoteDesktop.icon,
+        group = PhoneSettingsGroup.ADVANCED,
+        category = SettingsCategory.RemoteDesktop,
     ),
     ;
 
+    /** False for a section a server started with --minimal does not run (`settingsCategoryAvailable`). */
+    fun availableIn(minimalMode: Boolean): Boolean = !minimalMode || category?.minimalSafe != false
+
     companion object {
-        fun forGroup(group: PhoneSettingsGroup): List<PhoneSettingsSection> =
-            entries.filter { it.group == group }
+        fun forGroup(group: PhoneSettingsGroup, minimalMode: Boolean = false): List<PhoneSettingsSection> =
+            entries.filter { it.group == group && it.availableIn(minimalMode) }
+
+        /** The page a [category] opens on a phone: its own section, General's being About. */
+        fun forCategory(category: SettingsCategory): PhoneSettingsSection = entries.first { it.category == category }
     }
 }
 
 /**
- * Destination state for Phone Settings (Requirements 15.1 & 15.2).
+ * Destination state for Phone Settings: the list, a section's page, or the page one level below
+ * a section's own (the tablet's whole Accounts or AI Provider pane).
  */
 sealed interface PhoneSettingsRoute {
-    /** The Phone Settings home list showing the 6 everyday sections. */
+    /** The Phone Settings home list: every section, grouped. */
     data object Home : PhoneSettingsRoute
 
-    /** One of the 6 full phone settings pages (Requirement 15.1). */
+    /** A section's full page. */
     data class FullPage(val section: PhoneSettingsSection) : PhoneSettingsRoute
 
-    /**
-     * Any other settings section opened on a phone (Requirement 15.2):
-     * displays `"Open on a tablet"`.
-     */
-    data class TabletOnlyPage(val category: SettingsCategory) : PhoneSettingsRoute
+    /** Every setting of [section]'s category as the tablet shows it, under [title]; Back returns to [section]. */
+    data class AllSettings(val section: PhoneSettingsSection, val title: String) : PhoneSettingsRoute
 }
 
-/**
- * Returns `true` if [category] has a dedicated full page on a phone (Requirement 15.1),
- * or `false` if opening it on a phone must show `"Open on a tablet"` (Requirement 15.2).
- */
-fun isPhoneFullSettingsCategory(category: SettingsCategory): Boolean = when (category) {
-    SettingsCategory.Accounts,
-    SettingsCategory.Ai,
-    SettingsCategory.Memory,
-    SettingsCategory.Tools,
-    SettingsCategory.Assistant,
-    SettingsCategory.Vault,
-    SettingsCategory.Notifications,
-    SettingsCategory.Appearance,
-    SettingsCategory.Servers,
-    SettingsCategory.Schedules,
-    SettingsCategory.QueryAudit,
-    -> true
-    else -> false
-}
-
-/**
- * Maps a [SettingsCategory] to its [PhoneSettingsRoute] on a phone (Requirements 15.1 & 15.2).
- */
-fun resolvePhoneSettingsCategory(category: SettingsCategory): PhoneSettingsRoute = when (category) {
-    SettingsCategory.Accounts -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Accounts)
-    SettingsCategory.Ai -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.AiProvider)
-    SettingsCategory.Memory -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Memory)
-    SettingsCategory.Tools -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Tools)
-    SettingsCategory.Assistant -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Assistant)
-    SettingsCategory.Vault -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Vault)
-    SettingsCategory.Notifications -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Notifications)
-    SettingsCategory.Appearance -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Theme)
-    SettingsCategory.Servers -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Servers)
-    SettingsCategory.Schedules -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Schedules)
-    SettingsCategory.QueryAudit -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Storage)
-    else -> PhoneSettingsRoute.TabletOnlyPage(category)
-}
+/** Maps a [SettingsCategory] to its page on a phone: every category has one. */
+fun resolvePhoneSettingsCategory(category: SettingsCategory): PhoneSettingsRoute =
+    PhoneSettingsRoute.FullPage(PhoneSettingsSection.forCategory(category))
 
 /**
  * Resolves a raw category identifier (e.g. from `model.requestedSettingsCategory` or deep link)

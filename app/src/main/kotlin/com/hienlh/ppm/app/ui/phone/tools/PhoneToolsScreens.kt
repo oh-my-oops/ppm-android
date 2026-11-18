@@ -25,6 +25,9 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,9 +38,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.app.ui.ScheduleChatOption
+import com.hienlh.ppm.app.ui.ScheduleCreateFormContent
+import com.hienlh.ppm.app.ui.ScheduleImportFormContent
 import com.hienlh.ppm.app.ui.ScheduleSessionTarget
+import com.hienlh.ppm.app.ui.SettingsActionButton
+import com.hienlh.ppm.app.ui.scheduleFormTitle
 import com.hienlh.ppm.app.ui.ScheduleStatusPill
-import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
 import com.hienlh.ppm.chat.DeviceScheduleClock
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
@@ -76,6 +83,7 @@ import com.hienlh.ppm.state.tunnels.SetupState
 import com.hienlh.ppm.state.tunnels.TunnelEntry
 import java.util.Locale
 import com.hienlh.ppm.app.asksForTextFocus
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Look-only System Monitor for phone (`designs/ppm-mobile-tablet-redesign/phone/7-tools/index.html` Section 1,
@@ -962,8 +970,8 @@ internal fun logChatName(sid: String, titles: Map<String, String>): String =
  * Port Forwarding screen for phone (`designs/ppm-mobile-tablet-redesign/phone/7-tools/index.html` Section 3,
  * Requirement 14.2).
  *
- * - Shows Tailscale and Cloudflare status rows without `Set up` / `Manage` buttons.
- * - Shows `"Set up Tailscale or Cloudflare on a tablet."` when a transport is not configured.
+ * - Shows Tailscale and Cloudflare status rows, each with `Set up` (or `Manage` once done), which opens
+ *   Settings → Remote Access (`port-forwarding-panel.tsx`'s `SetupRow`).
  * - Lists active forwards with `:port`, `Tailnet`/`Public` badge, `Started outside PPM` badge, and
  *   44dp URL action strip (`Open in a tab`, `Open in the browser`, `Copy link`).
  * - Places `localhost:` port input, `Tailscale`/`Cloudflare` toggle, and `+ Forward` in `BottomActionCard`.
@@ -987,6 +995,8 @@ fun PhonePortForwardingScreen(
     onCopyLink: (TunnelEntry) -> Unit,
     onSelectTransport: (String) -> Unit = { state.transport = it },
     modifier: Modifier = Modifier,
+    /** Opens a transport's setup ("tailscale" or "cloudflare") in Settings → Remote Access; null offers no button. */
+    onOpenSetup: ((String) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val tailscaleReady = tailscaleSetup?.done == true
@@ -1014,6 +1024,7 @@ fun PhonePortForwardingScreen(
                     meta = transportMeta(tailscaleSetup, readyLabel = "Connected"),
                     dividerBottom = true,
                     modifier = Modifier.testTag("phone-tunnels-row-tailscale"),
+                    trailingContent = if (onOpenSetup != null) { { TransportSetupButton(tailscaleSetup, "tailscale", onOpenSetup) } } else null,
                 )
                 ListRow(
                     title = "Cloudflare",
@@ -1021,15 +1032,8 @@ fun PhonePortForwardingScreen(
                     meta = transportMeta(cloudflareSetup, readyLabel = "Ready"),
                     dividerBottom = true,
                     modifier = Modifier.testTag("phone-tunnels-row-cloudflare"),
+                    trailingContent = if (onOpenSetup != null) { { TransportSetupButton(cloudflareSetup, "cloudflare", onOpenSetup) } } else null,
                 )
-
-                val bothKnown = tailscaleSetup != null && cloudflareSetup != null
-                if (bothKnown && state.shouldShowTabletSetupNotice(tailscaleReady = tailscaleReady, cloudflareReady = cloudflareReady)) {
-                    OpenOnTabletNotice(
-                        text = state.tabletSetupNoticeText,
-                        modifier = Modifier.testTag("phone-tunnels-tablet-setup-notice"),
-                    )
-                }
 
                 SectionLabel(text = "Active Forwards (${tunnels.size})")
                 if (tunnels.isEmpty()) {
@@ -1234,14 +1238,14 @@ fun PhonePortForwardingScreen(
  *
  * - Reached from Settings → Schedules.
  * - Shows 64dp rows with enable/disable switch, status badge, expandable prompt/details and recent runs `#id`.
- * - Shows `"Edit a script or add a schedule on a tablet."` (`OpenOnTabletNotice`) — no script editor,
- *   no `+ New` or delete controls on phone.
+ * - `Import JSON` and `New schedule` under the list, and `Edit` / `Delete` in an expanded row, open the
+ *   schedule form (`schedule-form.tsx`, a bottom sheet below `md`) or the template import.
  * - Primary actions (`Full log` and `Run now` / `Restart`) sit in the `BottomActionCard` at the bottom.
  * - Tapping `Full log` opens `PhoneScheduleLogScreen` with `Last error` banner, monospace log lines,
  *   and bottom `Restart` / `Run now` card.
  */
 @Composable
-fun PhoneSchedulesScreen(
+internal fun PhoneSchedulesScreen(
     state: PhoneSchedulesState,
     /** A schedule's run history (`/api/schedules/:id/runs`); a missing key means it is still being read. */
     runsByScheduleId: Map<Int, List<ScheduleRunRow>> = emptyMap(),
@@ -1256,8 +1260,21 @@ fun PhoneSchedulesScreen(
     projects: List<ScheduleProjectOption> = emptyList(),
     /** Opens a chat schedule's chat. */
     onOpenChat: ((ScheduleRowState) -> Unit)? = null,
+    /** Creates a schedule from the form's body (`POST /api/schedules`); null offers no New. */
+    onCreate: ((JsonObject) -> Unit)? = null,
+    /** Saves an edited schedule (`PATCH /api/schedules/:id`); null offers no Edit. */
+    onUpdate: ((ScheduleRowState, JsonObject) -> Unit)? = null,
+    /** Deletes a schedule; null offers no Delete. */
+    onDelete: ((ScheduleRowState) -> Unit)? = null,
+    /** Imports a template (JSON, project name, trusted); null offers no Import. */
+    onImport: ((String, String, Boolean) -> Unit)? = null,
+    /** A project's recent chats, for a new chat schedule's picker. */
+    loadChats: (suspend (projectName: String) -> List<ScheduleChatOption>)? = null,
 ) {
     val tokens = LocalPpmTokens.current
+    var creating by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
+    var editingRow by remember { mutableStateOf<ScheduleRowState?>(null) }
 
     BackHandler(enabled = state.isViewingFullLog) {
         state.closeFullLog()
@@ -1395,16 +1412,51 @@ fun PhoneSchedulesScreen(
                                 for (run in runs.orEmpty().take(3)) {
                                     PhoneScheduleRunRow(run = run, scheduleId = schedule.id)
                                 }
+                                if (onUpdate != null || onDelete != null) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        if (onUpdate != null) {
+                                            SettingsActionButton(
+                                                label = "Edit",
+                                                outline = true,
+                                                icon = ProductIcon.Pencil,
+                                                modifier = Modifier.weight(1f).testTag("phone-schedule-edit-${schedule.id}"),
+                                            ) { editingRow = schedule }
+                                        }
+                                        if (onDelete != null) {
+                                            SettingsActionButton(
+                                                label = "Delete",
+                                                outline = true,
+                                                icon = ProductIcon.Trash2,
+                                                modifier = Modifier.weight(1f).testTag("phone-schedule-delete-${schedule.id}"),
+                                            ) { onDelete(schedule) }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                // Subtle tablet notice — no script editing or schedule creation on phone
-                OpenOnTabletNotice(
-                    text = state.tabletNoticeText,
-                    modifier = Modifier.testTag("phone-schedules-tablet-notice"),
-                )
+                // Import a template or start a new schedule (`schedules-settings-section.tsx`'s header buttons).
+                if (onImport != null || onCreate != null) {
+                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (onImport != null) {
+                            SettingsActionButton(
+                                label = "Import JSON",
+                                outline = true,
+                                icon = ProductIcon.Upload,
+                                modifier = Modifier.weight(1f).testTag("phone-schedules-import-btn"),
+                            ) { importing = true }
+                        }
+                        if (onCreate != null) {
+                            SettingsActionButton(
+                                label = "New schedule",
+                                icon = ProductIcon.Plus,
+                                modifier = Modifier.weight(1f).testTag("phone-schedules-new-btn"),
+                            ) { creating = true }
+                        }
+                    }
+                }
             }
 
             // Bottom action card acting on the selected schedule
@@ -1441,6 +1493,51 @@ fun PhoneSchedulesScreen(
             }
         }
     }
+
+    // The schedule form and the template import: bottom sheets, as the web's below `md`.
+    val editing = editingRow
+    if ((creating && onCreate != null) || (editing != null && onUpdate != null)) {
+        val close = {
+            creating = false
+            editingRow = null
+        }
+        Sheet(title = scheduleFormTitle(editing), onDismiss = close, forceBottomSheet = true, modifier = Modifier.testTag("phone-schedule-form-sheet")) {
+            ScheduleCreateFormContent(
+                projects = projects,
+                loadChats = loadChats,
+                editing = editing,
+                framed = false,
+                onDismiss = close,
+                onSubmit = { body ->
+                    close()
+                    if (editing != null) onUpdate?.invoke(editing, body) else onCreate?.invoke(body)
+                },
+            )
+        }
+    }
+    if (importing && onImport != null) {
+        Sheet(title = "Import Schedule Template", onDismiss = { importing = false }, forceBottomSheet = true, modifier = Modifier.testTag("phone-schedule-import-sheet")) {
+            ScheduleImportFormContent(
+                projects = projects,
+                framed = false,
+                onDismiss = { importing = false },
+                onImport = { json, project, trust ->
+                    importing = false
+                    onImport(json, project, trust)
+                },
+            )
+        }
+    }
+}
+
+/** A transport row's button: Set up while something is missing, Manage once it is done (`SetupRow`). */
+@Composable
+private fun TransportSetupButton(setup: SetupState?, transport: String, onOpen: (String) -> Unit) {
+    SettingsActionButton(
+        label = if (setup?.done == true) "Manage" else "Set up",
+        outline = setup?.done != true,
+        modifier = Modifier.testTag("phone-tunnels-setup-" + transport),
+    ) { onOpen(transport) }
 }
 
 /** SQLite's `YYYY-MM-DD HH:MM:SS` (UTC) or ISO-8601, as `schedule-runs.tsx` reads a run's times. */

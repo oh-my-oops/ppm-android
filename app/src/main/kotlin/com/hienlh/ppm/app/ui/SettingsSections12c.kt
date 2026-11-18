@@ -162,6 +162,7 @@ import com.hienlh.ppm.state.settings.applyNamedTunnelDisableResult
 import com.hienlh.ppm.state.settings.applyNamedTunnelLoginSnapshot
 import com.hienlh.ppm.state.settings.applyNamedTunnelSetupResult
 import com.hienlh.ppm.state.settings.applyPublicTunnelEnabledResult
+import com.hienlh.ppm.state.settings.scheduleEditBody
 import com.hienlh.ppm.state.settings.applyTailscaleLoginSnapshot
 import com.hienlh.ppm.state.settings.blockingTailscaleSetupStep
 import com.hienlh.ppm.state.settings.buildProxyEndpointUrl
@@ -258,12 +259,15 @@ private fun FilterChip12c(
     val shape = RoundedCornerShape(6.dp)
     Box(
         Modifier
+            // A phone's chip is a 44 dp target (`min-h-11`).
+            .heightIn(min = if (LocalPpmMobile.current) 44.dp else 0.dp)
             .clip(shape)
             .background(if (selected) tokens.accent.opacity(0.16).color else tokens.bgSolid.color)
             .cssBorder((if (selected) tokens.accent else tokens.border).color, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 5.dp)
             .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
+        contentAlignment = Alignment.Center,
     ) {
         BasicText(
             label,
@@ -3070,6 +3074,17 @@ internal fun SchedulesSettingsSection(model: AppModel) {
                     .onFailure { statusMessage = it.message ?: "Failed to create schedule" }
             }
         },
+        onUpdateSchedule = { id, body ->
+            val client = api ?: return@SchedulesSettingsContent
+            scope.launch {
+                runCatchingNonCancelled { client.schedulesUpdate(id, body) }
+                    .onSuccess {
+                        statusMessage = "Schedule saved"
+                        reload()
+                    }
+                    .onFailure { statusMessage = it.message ?: "Failed to save schedule" }
+            }
+        },
         onExportTemplate = { id ->
             val client = api ?: return@SchedulesSettingsContent
             scope.launch {
@@ -3153,6 +3168,8 @@ internal fun SchedulesSettingsContent(
     onToggleScheduleEnabled: (Int, Boolean) -> Unit,
     onDeleteSchedule: (Int) -> Unit,
     onCreateSchedule: (kotlinx.serialization.json.JsonObject) -> Unit,
+    /** Saves an edited schedule (`PATCH /api/schedules/:id`); null offers no Edit. */
+    onUpdateSchedule: ((Int, kotlinx.serialization.json.JsonObject) -> Unit)? = null,
     onExportTemplate: (Int) -> Unit,
     onImportTemplate: (String, String) -> Unit,
     onImportTemplateWithTrust: (String, String, Boolean) -> Unit = { raw, proj, _ -> onImportTemplate(raw, proj) },
@@ -3166,6 +3183,7 @@ internal fun SchedulesSettingsContent(
     val tokens = LocalPpmTokens.current
     var showCreateDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var editingRow by remember { mutableStateOf<ScheduleRowState?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (!statusMessage.isNullOrBlank()) {
@@ -3263,6 +3281,13 @@ internal fun SchedulesSettingsContent(
                                 modifier = Modifier.testTag("schedule-run-${row.id}"),
                                 onClick = { onRunNow(row.id) },
                             )
+                            if (onUpdateSchedule != null) {
+                                SettingsButton(
+                                    label = "Edit",
+                                    modifier = Modifier.testTag("schedule-edit-${row.id}"),
+                                    onClick = { editingRow = row },
+                                )
+                            }
                             if (row.kind == "script") {
                                 SettingsButton(
                                     label = "Logs",
@@ -3301,6 +3326,20 @@ internal fun SchedulesSettingsContent(
         )
     }
 
+    val editing = editingRow
+    if (editing != null && onUpdateSchedule != null) {
+        ScheduleCreateDialog(
+            projects = projects,
+            loadChats = loadChats,
+            editing = editing,
+            onDismiss = { editingRow = null },
+            onSubmit = { body ->
+                editingRow = null
+                onUpdateSchedule(editing.id, body)
+            },
+        )
+    }
+
     if (showImportDialog) {
         ScheduleImportDialog(
             projects = projects,
@@ -3327,6 +3366,7 @@ private fun ScheduleCreateDialog(
     loadChats: (suspend (projectName: String) -> List<ScheduleChatOption>)?,
     onDismiss: () -> Unit,
     onSubmit: (kotlinx.serialization.json.JsonObject) -> Unit,
+    editing: ScheduleRowState? = null,
 ) {
     Dialog(onDismissRequest = onDismiss) {
         ScheduleCreateFormContent(
@@ -3334,6 +3374,7 @@ private fun ScheduleCreateDialog(
             loadChats = loadChats,
             onDismiss = onDismiss,
             onSubmit = onSubmit,
+            editing = editing,
         )
     }
 }
@@ -3346,20 +3387,30 @@ internal fun ScheduleCreateFormContent(
     onSubmit: (kotlinx.serialization.json.JsonObject) -> Unit,
     /** A project's recent chats, for the "Chat" kind's picker (`SessionChatPicker`). */
     loadChats: (suspend (projectName: String) -> List<ScheduleChatOption>)? = null,
+    /**
+     * The schedule being edited (`schedule-form.tsx` with a `schedule`): the form opens on its
+     * values, its kind (and a chat schedule's chat) cannot change, and [onSubmit] gets the PATCH
+     * body. Null creates one.
+     */
+    editing: ScheduleRowState? = null,
+    /** False inside a sheet, which draws its own surface and title: the form drops its card and heading. */
+    framed: Boolean = true,
 ) {
     val tokens = LocalPpmTokens.current
-    var name by remember { mutableStateOf("") }
-    var selectedProjectPath by remember(projects) { mutableStateOf(projects.firstOrNull()?.path.orEmpty()) }
-    var kind by remember { mutableStateOf("prompt") } // "prompt" | "script" | "session"
-    var mode by remember { mutableStateOf("tick") } // "tick" | "always-on"
-    var cron by remember { mutableStateOf("0 * * * *") }
-    var prompt by remember { mutableStateOf("") }
-    var script by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(editing?.name.orEmpty()) }
+    var selectedProjectPath by remember(projects) { mutableStateOf(editing?.projectPath ?: projects.firstOrNull()?.path.orEmpty()) }
+    var kind by remember { mutableStateOf(editing?.kind ?: "prompt") } // "prompt" | "script" | "session"
+    var mode by remember { mutableStateOf(editing?.mode ?: "tick") } // "tick" | "always-on"
+    var cron by remember { mutableStateOf(editing?.cronExpr ?: "0 * * * *") }
+    var prompt by remember { mutableStateOf(editing?.prompt.orEmpty()) }
+    var script by remember { mutableStateOf(editing?.script.orEmpty()) }
     // A chat schedule's own fields: its chat, the zone its cron is read in, and whether it runs once.
-    var targetSessionId by remember { mutableStateOf("") }
-    var timezone by remember { mutableStateOf("") }
-    var runOnce by remember { mutableStateOf(false) }
+    var targetSessionId by remember { mutableStateOf(editing?.targetSessionId.orEmpty()) }
+    var timezone by remember { mutableStateOf(editing?.timezone.orEmpty()) }
+    var runOnce by remember { mutableStateOf(editing?.recurring == false) }
     val isSession = kind == "session"
+    // A chat schedule's chat, and so its project, is fixed once it exists.
+    val chatFixed = isSession && editing != null
     val projectName = projects.firstOrNull { it.path == selectedProjectPath }?.name
     var chats by remember { mutableStateOf<List<ScheduleChatOption>?>(null) }
     LaunchedEffect(isSession, projectName, loadChats) {
@@ -3392,7 +3443,7 @@ internal fun ScheduleCreateFormContent(
             cron = cron,
             prompt = prompt,
             script = script,
-            timeoutMs = 900_000,
+            timeoutMs = editing?.timeoutMs ?: 900_000,
         )
     }
 
@@ -3400,21 +3451,29 @@ internal fun ScheduleCreateFormContent(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(tokens.panel.color)
-            .cssBorder(tokens.border.color, shape)
+            .then(
+                if (framed) {
+                    Modifier
+                        .clip(shape)
+                        .background(tokens.panel.color)
+                        .cssBorder(tokens.border.color, shape)
+                } else {
+                    Modifier
+                },
+            )
             .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(rememberScrollState())
+            .testTag("schedule-form"),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        SettingsSectionTitle("New Scheduled Task")
+        if (framed) SettingsSectionTitle(scheduleFormTitle(editing))
         SettingsTextInput(
             value = name,
             onValueChange = { name = it },
             placeholder = if (isSession) "Optional — the prompt's first line" else "Schedule name",
             modifier = Modifier.fillMaxWidth().testTag("schedule-form-name"),
         )
-        if (projects.isNotEmpty()) {
+        if (projects.isNotEmpty() && !chatFixed) {
             BasicText("Project", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -3434,31 +3493,34 @@ internal fun ScheduleCreateFormContent(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip12c(
-                label = "Prompt",
-                selected = kind == "prompt",
-                testTag = "schedule-kind-prompt",
-                onClick = {
-                    kind = "prompt"
-                    mode = "tick"
-                },
-            )
-            FilterChip12c(
-                label = "Script",
-                selected = kind == "script",
-                testTag = "schedule-kind-script",
-                onClick = { kind = "script" },
-            )
-            FilterChip12c(
-                label = "Chat",
-                selected = isSession,
-                testTag = "schedule-kind-session",
-                onClick = {
-                    kind = "session"
-                    mode = "tick"
-                },
-            )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // A schedule keeps its kind: editing offers only a script's mode.
+            if (editing == null) {
+                FilterChip12c(
+                    label = "Prompt",
+                    selected = kind == "prompt",
+                    testTag = "schedule-kind-prompt",
+                    onClick = {
+                        kind = "prompt"
+                        mode = "tick"
+                    },
+                )
+                FilterChip12c(
+                    label = "Script",
+                    selected = kind == "script",
+                    testTag = "schedule-kind-script",
+                    onClick = { kind = "script" },
+                )
+                FilterChip12c(
+                    label = "Chat",
+                    selected = isSession,
+                    testTag = "schedule-kind-session",
+                    onClick = {
+                        kind = "session"
+                        mode = "tick"
+                    },
+                )
+            }
             if (kind == "script") {
                 FilterChip12c(
                     label = if (mode == "always-on") "Always-On" else "Cron Tick",
@@ -3472,12 +3534,14 @@ internal fun ScheduleCreateFormContent(
                 "Sends the prompt into an existing chat, on that chat's own model and permissions, once it is idle.",
                 style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
             )
-            SessionChatPicker(
-                chats = if (projectName == null) emptyList() else chats,
-                projectPicked = projectName != null,
-                value = targetSessionId,
-                onChange = { targetSessionId = it },
-            )
+            if (!chatFixed) {
+                SessionChatPicker(
+                    chats = if (projectName == null) emptyList() else chats,
+                    projectPicked = projectName != null,
+                    value = targetSessionId,
+                    onChange = { targetSessionId = it },
+                )
+            }
         }
         if (mode != "always-on") {
             if (isSession) BasicText("Cron expression (in the time zone below)", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
@@ -3544,11 +3608,15 @@ internal fun ScheduleCreateFormContent(
             SettingsButton(label = "Cancel", onClick = onDismiss)
             Spacer(Modifier.width(8.dp))
             SettingsButton(
-                label = "Create",
+                label = if (editing != null) "Save changes" else "Create",
                 primary = true,
                 enabled = problems.isEmpty(),
                 modifier = Modifier.testTag("schedule-form-submit"),
                 onClick = {
+                    if (editing != null) {
+                        onSubmit(scheduleEditBody(editing, name, selectedProjectPath, mode, cron, prompt, script, timezone, !runOnce))
+                        return@SettingsButton
+                    }
                     if (isSession) {
                         onSubmit(sessionForm.requestBody())
                         return@SettingsButton
@@ -3570,6 +3638,10 @@ internal fun ScheduleCreateFormContent(
         }
     }
 }
+
+/** The form's heading: `Edit: <name>` for a schedule being edited (`schedule-form.tsx`). */
+internal fun scheduleFormTitle(editing: ScheduleRowState?): String =
+    if (editing != null) "Edit: " + editing.name else "New Scheduled Task"
 
 /**
  * Which of the project's chats a chat schedule sends into (`SessionChatPicker`): its recent chats,
@@ -3683,6 +3755,8 @@ internal fun ScheduleImportFormContent(
     projects: List<ScheduleProjectOption>,
     onDismiss: () -> Unit,
     onImport: (String, String, Boolean) -> Unit,
+    /** False inside a sheet, which draws its own surface and title. */
+    framed: Boolean = true,
 ) {
     val tokens = LocalPpmTokens.current
     var jsonText by remember { mutableStateOf("") }
@@ -3699,14 +3773,21 @@ internal fun ScheduleImportFormContent(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(tokens.panel.color)
-            .cssBorder(tokens.border.color, shape)
+            .then(
+                if (framed) {
+                    Modifier
+                        .clip(shape)
+                        .background(tokens.panel.color)
+                        .cssBorder(tokens.border.color, shape)
+                } else {
+                    Modifier
+                },
+            )
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        SettingsSectionTitle("Import Schedule Template")
+        if (framed) SettingsSectionTitle("Import Schedule Template")
         if (projects.isNotEmpty()) {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),

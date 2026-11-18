@@ -34,7 +34,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
+import com.hienlh.ppm.app.ui.settings.SessionTraceLimitsForm
 import com.hienlh.ppm.client.QueryAuditUsage
 import com.hienlh.ppm.client.StorageBackups
 import com.hienlh.ppm.client.StorageOverview
@@ -104,7 +104,7 @@ internal fun storageNewestBackup(backups: StorageBackups, nowMs: Long = System.c
 
 /**
  * Settings → Storage on a phone (`storage-settings-section.tsx`): what PPM's own files take on the
- * server, read-only. The limits are changed, and the Query Audit log cleared, on a tablet.
+ * server, the session trace's and the Query Audit log's limits, and clearing that log.
  */
 @Composable
 fun PhoneStoragePage(model: AppModel, onBack: () -> Unit) {
@@ -146,7 +146,16 @@ fun PhoneStoragePage(model: AppModel, onBack: () -> Unit) {
                 }
             },
         )
-        PhoneStorageContent(overview, overviewError, audit, auditError)
+        PhoneStorageContent(
+            overview,
+            overviewError,
+            audit,
+            auditError,
+            editTrace = { trace ->
+                SessionTraceLimitsForm(model, trace) { saved -> overview = overview?.copy(sessionTrace = saved) }
+            },
+            editAudit = { usage -> PhoneQueryAuditLimits(model, usage) { audit = it } },
+        )
     }
 }
 
@@ -165,6 +174,10 @@ fun PhoneStorageContent(
     audit: QueryAuditUsage?,
     auditError: String?,
     modifier: Modifier = Modifier,
+    /** The session trace's limits as fields; null shows them as text. */
+    editTrace: (@Composable (StorageSessionTrace) -> Unit)? = null,
+    /** The Query Audit log's limits as fields, with Clear; null shows them as text. */
+    editAudit: (@Composable (QueryAuditUsage) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val note = ppmText(12f, lineHeight = 17f).copy(color = tokens.text2.color)
@@ -193,7 +206,7 @@ fun PhoneStorageContent(
                     StorageFact("Folder", b.dir)
                 }
                 StorageCard("Session trace", "Every chat turn's inputs and events, kept for debugging.", "phone-storage-trace") {
-                    SessionTraceFacts(overview.sessionTrace)
+                    SessionTraceFacts(overview.sessionTrace, editTrace)
                 }
             }
             overviewError != null -> BasicText(
@@ -213,9 +226,13 @@ fun PhoneStorageContent(
                             "sample of the result. Entries are pruned once they pass either limit below — whichever comes first.",
                         style = note,
                     )
-                    StorageFact("Keep for", "${count(audit.retentionDays)} days")
-                    StorageFact("Max size", "${count(audit.maxSizeMb)} MB")
-                    BasicText("${count(audit.entryCount)} entries · ${queryAuditSize(audit.sizeBytes)} on disk", style = note)
+                    if (editAudit != null) {
+                        editAudit(audit)
+                    } else {
+                        StorageFact("Keep for", "${count(audit.retentionDays)} days")
+                        StorageFact("Max size", "${count(audit.maxSizeMb)} MB")
+                        BasicText("${count(audit.entryCount)} entries · ${queryAuditSize(audit.sizeBytes)} on disk", style = note)
+                    }
                 }
                 auditError != null -> BasicText(
                     "Could not load the Query Audit log: $auditError",
@@ -224,13 +241,12 @@ fun PhoneStorageContent(
                 else -> PpmIcon(ProductIcon.Loader2, 16.dp, tokens.text3.color, spinning = true)
             }
         }
-        OpenOnTabletNotice(text = "Changing the limits and clearing the Query Audit log open on a tablet.")
         Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
-private fun SessionTraceFacts(trace: StorageSessionTrace) {
+private fun SessionTraceFacts(trace: StorageSessionTrace, edit: (@Composable (StorageSessionTrace) -> Unit)?) {
     val tokens = LocalPpmTokens.current
     val usage = traceUsage(trace.sizeBytes, trace.maxSizeMb)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -262,6 +278,10 @@ private fun SessionTraceFacts(trace: StorageSessionTrace) {
             )
         }
         BasicText(trace.path, style = ppmText(11f).copy(color = tokens.text3.color))
+    }
+    if (edit != null) {
+        edit(trace)
+        return
     }
     StorageFact("Keep for", "${count(trace.retentionDays)} days")
     StorageFact("Max size", "${count(trace.maxSizeMb)} MB")

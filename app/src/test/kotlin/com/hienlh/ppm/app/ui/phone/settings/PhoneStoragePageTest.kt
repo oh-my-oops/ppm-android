@@ -7,6 +7,8 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.withComposeActivity
@@ -32,7 +34,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.util.Locale
 
-/** Settings → Storage on a phone (`storage-settings-section.tsx`), read-only. */
+/** Settings → Storage on a phone (`storage-settings-section.tsx`): the sizes, and the two logs' limits. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w400dp-h2400dp-xxhdpi")
 class PhoneStoragePageTest {
@@ -44,13 +46,17 @@ class PhoneStoragePageTest {
     private val server = MockWebServer()
     @Volatile private var overviewAnswers = true
     @Volatile private var storageReads = 0
+    private val writes = java.util.concurrent.CopyOnWriteArrayList<String>()
     private lateinit var model: AppModel
 
     @Before
     fun start() {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.method != "GET") writes += request.method + " " + request.url.encodedPath + " " + (request.body?.utf8() ?: "")
                 val (status, body) = when (request.url.encodedPath) {
+                    "/api/settings/session-trace" -> 200 to """{"ok":true,"data":{"path":"/home/me/.ppm/session-trace.db","sizeBytes":786432000,"oldestTs":null,"retention_days":7,"max_size_mb":500}}"""
+                    "/api/settings/query-audit/logs" -> 200 to """{"ok":true,"data":{}}"""
                     "/api/settings/storage" -> {
                         storageReads++
                         if (overviewAnswers) {
@@ -109,6 +115,29 @@ class PhoneStoragePageTest {
         composeRule.waitUntil(5_000) { shown("phone-storage-error") && textShown("entries") }
         assertTrue(textShown("Could not load storage details: Not found"))
         assertFalse(shown("phone-storage-app-db"))
+    }
+
+    @Test
+    fun `the limits are changed and the Query Audit log cleared on the phone`() {
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) { PhoneStoragePage(model = model, onBack = {}) }
+        }
+        composeRule.waitUntil(5_000) { shown("session-trace-days") && shown("phone-query-audit-days") }
+        assertFalse(textShown("on a tablet"))
+
+        composeRule.onNodeWithTag("session-trace-days").performScrollTo().performTextReplacement("7")
+        composeRule.onNodeWithTag("session-trace-save").performScrollTo().performClick()
+        composeRule.waitUntil(5_000) { writes.any { it.startsWith("PUT /api/settings/session-trace") } }
+        assertTrue(writes.first { it.startsWith("PUT /api/settings/session-trace") }.contains("\"retention_days\":7"))
+
+        composeRule.onNodeWithTag("phone-query-audit-days").performScrollTo().performTextReplacement("45")
+        composeRule.onNodeWithTag("phone-query-audit-save").performScrollTo().performClick()
+        composeRule.waitUntil(5_000) { writes.any { it.startsWith("PUT /api/settings/query-audit") } }
+        assertTrue(writes.first { it.startsWith("PUT /api/settings/query-audit") }.contains("\"retention_days\":45"))
+
+        composeRule.onNodeWithTag("phone-query-audit-clear").performScrollTo().performClick()
+        composeRule.onNodeWithTag("phone-query-audit-clear-confirm").performClick()
+        composeRule.waitUntil(5_000) { writes.any { it.startsWith("DELETE /api/settings/query-audit/logs") } }
     }
 
     @Test

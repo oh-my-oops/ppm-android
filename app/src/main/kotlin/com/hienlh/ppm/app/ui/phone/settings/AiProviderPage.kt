@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.htmlNumberValue
 import com.hienlh.ppm.app.ui.jsParseInt
-import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
 import com.hienlh.ppm.client.aiSettings
 import com.hienlh.ppm.client.probeProvider
 import com.hienlh.ppm.client.providerStatuses
@@ -130,6 +129,8 @@ fun PhoneAiProviderPage(
     model: AppModel,
     onBack: () -> Unit,
     onOpenAccounts: () -> Unit = {},
+    /** Opens the tablet's whole AI Provider pane: keys, budgets, MCP, teams and instructions. */
+    onOpenAllSettings: (() -> Unit)? = null,
 ) {
     val api = model.api
     val scope = rememberCoroutineScope()
@@ -271,6 +272,7 @@ fun PhoneAiProviderPage(
                 }
             },
             onOpenAccounts = onOpenAccounts,
+            onOpenAllSettings = onOpenAllSettings,
             // Not offered until the settings are read: a field showing the default would save it.
             maxTurns = if (isSdk && settings != null) currentConfig?.maxTurns ?: PHONE_DEFAULT_MAX_TURNS else null,
             onSaveMaxTurns = { turns ->
@@ -332,6 +334,8 @@ fun PhoneAiProviderContent(
     /** `leftover_processes_idle_minutes`, for every provider; null hides the field. */
     leftoverIdleMinutes: Int? = null,
     onSaveLeftoverIdleMinutes: (Int) -> Unit = {},
+    /** Opens the provider's other settings (keys, budgets, MCP, teams, instructions); null leaves the row out. */
+    onOpenAllSettings: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     var modelSheetOpen by remember { mutableStateOf(false) }
@@ -559,10 +563,15 @@ fun PhoneAiProviderContent(
             }
         }
 
-        // Tablet-only notice for advanced AI settings
-        OpenOnTabletNotice(
-            text = "Keys, budgets, MCP, teams and instructions open on a tablet.",
-        )
+        // The provider's other settings, one level down.
+        if (onOpenAllSettings != null) {
+            PhoneAllSettingsRow(
+                title = PHONE_AI_ALL_TITLE,
+                subtitle = "Keys, budgets, MCP, teams and instructions",
+                tag = "phone-ai-all-settings",
+                onClick = onOpenAllSettings,
+            )
+        }
 
         Spacer(Modifier.height(16.dp))
     }

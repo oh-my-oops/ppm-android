@@ -36,8 +36,6 @@ import com.hienlh.ppm.app.BuildConfig
 import com.hienlh.ppm.app.ui.MemorySettingsSection
 import com.hienlh.ppm.app.ui.Separator
 import com.hienlh.ppm.app.ui.SettingsCategory
-import com.hienlh.ppm.app.ui.phone.OpenOnTablet
-import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
 import com.hienlh.ppm.app.ui.phone.PhoneSchedulesAreaHost
 import com.hienlh.ppm.client.aiSettings
 import com.hienlh.ppm.client.notificationsGetNtfy
@@ -54,14 +52,12 @@ import com.hienlh.ppm.design.kit.ListRow
 import com.hienlh.ppm.design.ppmText
 
 /**
- * Phone Settings screen (`designs/ppm-mobile-tablet-redesign/phone/6-settings/`,
- * Requirements 15.1 & 15.2).
+ * Phone Settings screen (`designs/ppm-mobile-tablet-redesign/phone/6-settings/`), the web's
+ * narrow Settings (`settings-body.tsx`): the list of every section, and a tap drills into that
+ * section's full page; Back returns to the list.
  *
- * - Home list displays the 6 everyday phone sections ([PhoneSettingsSection.Accounts],
- *   [PhoneSettingsSection.AiProvider], [PhoneSettingsSection.Notifications],
- *   [PhoneSettingsSection.Theme], [PhoneSettingsSection.Servers], [PhoneSettingsSection.About]).
- * - Opening any of the 6 sections shows its full phone page.
- * - Opening any other [SettingsCategory] shows `"Open on a tablet"` ([PhoneTabletOnlySectionPage]).
+ * A link into Settings ([initialRoute] other than the list, e.g. Port Forwarding's Set up) opens
+ * its page even while Settings is already showing, and is consumed once followed.
  */
 @Composable
 fun PhoneSettingsScreen(
@@ -70,7 +66,14 @@ fun PhoneSettingsScreen(
     onRouteChanged: (PhoneSettingsRoute) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    var route by remember(initialRoute) { mutableStateOf(initialRoute) }
+    var route by remember { mutableStateOf(initialRoute) }
+    LaunchedEffect(initialRoute) {
+        if (initialRoute != PhoneSettingsRoute.Home) {
+            route = initialRoute
+            // Followed: the same link asked for again later must open its page again.
+            model.requestedSettingsCategory = null
+        }
+    }
 
     val navigate: (PhoneSettingsRoute) -> Unit = { next ->
         route = next
@@ -85,7 +88,10 @@ fun PhoneSettingsScreen(
     }
 
     BackHandler(enabled = route != PhoneSettingsRoute.Home) {
-        goHome()
+        when (val current = route) {
+            is PhoneSettingsRoute.AllSettings -> navigate(PhoneSettingsRoute.FullPage(current.section))
+            else -> goHome()
+        }
     }
 
     // The home rows' summaries say what the server holds; until it answers (or when it cannot), each row keeps its
@@ -120,6 +126,7 @@ fun PhoneSettingsScreen(
         when (val current = route) {
             PhoneSettingsRoute.Home -> {
                 PhoneSettingsHomeList(
+                    minimalMode = model.info?.minimalMode == true,
                     accountsSummary = accountsSummary ?: PhoneSettingsSection.Accounts.subtitle,
                     aiProviderSummary = aiSummary ?: PhoneSettingsSection.AiProvider.subtitle,
                     notificationsSummary = notificationsSummary ?: PhoneSettingsSection.Notifications.subtitle,
@@ -140,12 +147,18 @@ fun PhoneSettingsScreen(
                     PhoneSettingsSection.Accounts -> PhoneAccountsPage(
                         model = model,
                         onBack = goHome,
+                        onOpenAllSettings = {
+                            navigate(PhoneSettingsRoute.AllSettings(PhoneSettingsSection.Accounts, PHONE_ACCOUNTS_ALL_TITLE))
+                        },
                     )
                     PhoneSettingsSection.AiProvider -> PhoneAiProviderPage(
                         model = model,
                         onBack = goHome,
                         onOpenAccounts = {
                             navigate(PhoneSettingsRoute.FullPage(PhoneSettingsSection.Accounts))
+                        },
+                        onOpenAllSettings = {
+                            navigate(PhoneSettingsRoute.AllSettings(PhoneSettingsSection.AiProvider, PHONE_AI_ALL_TITLE))
                         },
                     )
                     PhoneSettingsSection.Memory -> Column(
@@ -167,15 +180,6 @@ fun PhoneSettingsScreen(
                         ) {
                             MemorySettingsSection(model)
                         }
-                    }
-                    PhoneSettingsSection.Tools -> PhoneHostedSettingsPage("Tools", "phone-settings-tools-page", goHome) {
-                        com.hienlh.ppm.app.ui.ToolsSettingsSection(model)
-                    }
-                    PhoneSettingsSection.Assistant -> PhoneHostedSettingsPage("PPM Assistant", "phone-settings-assistant-page", goHome) {
-                        com.hienlh.ppm.app.ui.settings.assistant.AssistantSettingsSection(model)
-                    }
-                    PhoneSettingsSection.Vault -> PhoneHostedSettingsPage("Vault", "phone-settings-vault-page", goHome) {
-                        com.hienlh.ppm.app.ui.settings.vault.VaultSettingsSection(model)
                     }
                     PhoneSettingsSection.Notifications -> NotificationsPage(
                         model = model,
@@ -213,14 +217,21 @@ fun PhoneSettingsScreen(
                         model = model,
                         onBack = goHome,
                     )
+                    // Every other section is the tablet's own pane, which sizes its targets for a phone.
+                    else -> PhoneHostedSettingsPage(current.section.title, "phone-settings-" + current.section.id + "-page", goHome) {
+                        current.section.category?.let { PhoneHostedSectionContent(model, it) }
+                    }
                 }
             }
 
-            is PhoneSettingsRoute.TabletOnlyPage -> {
-                PhoneTabletOnlySectionPage(
-                    category = current.category,
-                    onBack = goHome,
-                )
+            is PhoneSettingsRoute.AllSettings -> key(phoneSettingsLiveRevision(model, current.section.category, false)) {
+                PhoneHostedSettingsPage(
+                    title = current.title,
+                    tag = "phone-settings-" + current.section.id + "-all-page",
+                    onBack = { navigate(PhoneSettingsRoute.FullPage(current.section)) },
+                ) {
+                    current.section.category?.let { PhoneHostedSectionContent(model, it) }
+                }
             }
         }
     }
@@ -228,6 +239,7 @@ fun PhoneSettingsScreen(
 
 @Composable
 fun PhoneSettingsHomeList(
+    minimalMode: Boolean = false,
     accountsSummary: String = PhoneSettingsSection.Accounts.subtitle,
     aiProviderSummary: String = PhoneSettingsSection.AiProvider.subtitle,
     notificationsSummary: String = PhoneSettingsSection.Notifications.subtitle,
@@ -250,7 +262,7 @@ fun PhoneSettingsHomeList(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         for (group in PhoneSettingsGroup.entries) {
-            val sections = PhoneSettingsSection.forGroup(group)
+            val sections = PhoneSettingsSection.forGroup(group, minimalMode)
             if (sections.isEmpty()) continue
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PhoneGroupLabel(group.title)
@@ -258,16 +270,10 @@ fun PhoneSettingsHomeList(
                     sections.forEachIndexed { idx, section ->
                         if (idx > 0) Separator()
                         val trailingValue = when (section) {
-                            PhoneSettingsSection.Accounts -> null
-                            PhoneSettingsSection.AiProvider -> null
-                            PhoneSettingsSection.Memory -> null
-                            PhoneSettingsSection.Tools, PhoneSettingsSection.Assistant, PhoneSettingsSection.Vault -> null
-                            PhoneSettingsSection.Notifications -> null
                             PhoneSettingsSection.Theme -> themeLabel
                             PhoneSettingsSection.Servers -> serverLabel
-                            PhoneSettingsSection.Schedules -> null
-                            PhoneSettingsSection.Storage -> null
                             PhoneSettingsSection.About -> aboutLabel
+                            else -> null
                         }
                         val subtitleText = when (section) {
                             PhoneSettingsSection.Accounts -> accountsSummary
@@ -312,43 +318,15 @@ fun PhoneSettingsHomeList(
             }
         }
 
-        OpenOnTabletNotice(
-            text = "Tools, Remote Access, Keyboard Shortcuts and the other sections open on a tablet.",
-        )
-
         Spacer(Modifier.height(16.dp))
     }
 }
 
-/**
- * Shown when any non-phone [SettingsCategory] is opened on a phone (Requirement 15.2):
- * displays `"Open on a tablet"`.
- */
-@Composable
-fun PhoneTabletOnlySectionPage(
-    category: SettingsCategory,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(LocalPpmTokens.current.bgSolid.color)
-            .testTag("phone-settings-tablet-only-${category.id}"),
-    ) {
-        PhoneSettingsSubPageHeader(
-            title = category.label,
-            onBack = onBack,
-        )
-        OpenOnTablet(
-            title = category.label,
-            notice = "Open on a tablet",
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-        )
-    }
-}
+/** The title of the page under Accounts holding the tablet's whole pane. */
+internal const val PHONE_ACCOUNTS_ALL_TITLE = "All account settings"
+
+/** The title of the page under AI Provider holding the tablet's whole pane. */
+internal const val PHONE_AI_ALL_TITLE = "All provider settings"
 
 /** The value of [block], or null when it failed; a cancellation still cancels. */
 private suspend fun <T> runCatchingNonCancel(block: suspend () -> T): T? = try {

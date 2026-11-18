@@ -93,6 +93,7 @@ import com.hienlh.ppm.client.settingsQueryAudit
 import com.hienlh.ppm.client.settingsRenameTheme
 import com.hienlh.ppm.client.upgradeStatus
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -163,6 +164,19 @@ import kotlinx.coroutines.withContext
 
 @Composable
 internal fun GeneralSection(model: AppModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        GeneralDeviceBlocks(model)
+        Separator()
+        AboutBlock(model)
+    }
+}
+
+/**
+ * General's own settings above About: Learn PPM, the device name, Keep Screen Awake and the
+ * password. The phone's About page shows them under its versions.
+ */
+@Composable
+internal fun GeneralDeviceBlocks(model: AppModel) {
     val tokens = LocalPpmTokens.current
     val api = model.api
     val scope = rememberCoroutineScope()
@@ -277,11 +291,6 @@ internal fun GeneralSection(model: AppModel) {
                 model.updateActiveServerPassword(nextToken)
             },
         )
-
-        Separator()
-
-        // About
-        AboutBlock(model)
     }
 }
 
@@ -2415,9 +2424,12 @@ internal fun SettingsToggleRow(
     testTag: String? = null,
 ) {
     val tokens = LocalPpmTokens.current
+    // A phone row is a 44 dp target, as the web's `min-h-11`.
+    val mobile = LocalPpmMobile.current
     Row(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = if (mobile) 44.dp else 0.dp)
             .clickable { onCheckedChange(!checked) }
             .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2505,7 +2517,7 @@ internal fun SettingsButton(
     val shape = RoundedCornerShape(8.dp)
     Box(
         modifier
-            .heightIn(min = 32.dp)
+            .heightIn(min = if (LocalPpmMobile.current) 44.dp else 32.dp)
             .clip(shape)
             .background(bg.color)
             .cssBorder((if (primary && enabled) tokens.accent else tokens.border).color, shape)
@@ -2535,14 +2547,17 @@ internal fun SettingsTextInput(
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
+    val mobile = LocalPpmMobile.current
+    val size = if (mobile) 16f else 12f
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = singleLine,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        textStyle = ppmText(12f, kind = if (mono) FontKind.MONO else FontKind.SANS).copy(color = tokens.text.color),
+        textStyle = ppmText(size, kind = if (mono) FontKind.MONO else FontKind.SANS).copy(color = tokens.text.color),
         cursorBrush = SolidColor(tokens.accent.color),
         modifier = modifier
+            .heightIn(min = if (mobile) 44.dp else 0.dp)
             .clip(shape)
             .background(tokens.bgSolid.color)
             .cssBorder(tokens.border.color, shape)
@@ -2552,7 +2567,7 @@ internal fun SettingsTextInput(
                 if (value.isEmpty()) {
                     BasicText(
                         placeholder,
-                        style = ppmText(12f, kind = if (mono) FontKind.MONO else FontKind.SANS).copy(color = tokens.text3.color),
+                        style = ppmText(size, kind = if (mono) FontKind.MONO else FontKind.SANS).copy(color = tokens.text3.color),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -2575,12 +2590,15 @@ internal fun SettingsPasswordInput(
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
+    val mobile = LocalPpmMobile.current
+    val size = if (mobile) 16f else 12f
     Row(
         modifier
+            .heightIn(min = if (mobile) 44.dp else 0.dp)
             .clip(shape)
             .background(tokens.bgSolid.color)
             .cssBorder(tokens.border.color, shape)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = if (mobile) 0.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -2589,7 +2607,7 @@ internal fun SettingsPasswordInput(
             onValueChange = onValueChange,
             singleLine = true,
             visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-            textStyle = ppmText(12f).copy(color = tokens.text.color),
+            textStyle = ppmText(size).copy(color = tokens.text.color),
             cursorBrush = SolidColor(tokens.accent.color),
             modifier = Modifier
                 .weight(1f)
@@ -2599,7 +2617,7 @@ internal fun SettingsPasswordInput(
                     if (value.isEmpty()) {
                         BasicText(
                             placeholder,
-                            style = ppmText(12f).copy(color = tokens.text3.color),
+                            style = ppmText(size).copy(color = tokens.text3.color),
                             maxLines = 1,
                         )
                     }
@@ -2609,9 +2627,11 @@ internal fun SettingsPasswordInput(
         )
         Box(
             Modifier
+                .then(if (mobile) Modifier.heightIn(min = 44.dp) else Modifier)
                 .clip(RoundedCornerShape(4.dp))
                 .clickable(onClick = onToggleVisible)
                 .padding(horizontal = 6.dp, vertical = 2.dp),
+            contentAlignment = Alignment.Center,
         ) {
             BasicText(
                 if (visible) "Hide" else "Show",

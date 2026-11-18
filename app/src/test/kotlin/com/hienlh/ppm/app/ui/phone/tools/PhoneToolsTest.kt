@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -298,10 +300,11 @@ class PhoneToolsTest {
     }
 
     @Test
-    fun phonePortForwarding_showsTabletSetupNotice_forwardsPort_andConfirmsExternalStop() {
+    fun phonePortForwarding_opensSetup_forwardsPort_andConfirmsExternalStop() {
         val state = PhonePortForwardingState(initialTransport = "tailscale", initialPortInput = "5173")
         var forwardedPort: Int? = null
         var stoppedPid: Int? = null
+        val openedSetups = mutableListOf<String>()
         val externalTunnel = TunnelEntry(
             pid = 909,
             port = 8080,
@@ -322,13 +325,17 @@ class PhoneToolsTest {
                     onOpenInTab = {},
                     onOpenInBrowser = {},
                     onCopyLink = {},
+                    onOpenSetup = { openedSetups += it },
                 )
             }
         }
 
-        // Shows "Set up Tailscale or Cloudflare on a tablet." when Cloudflare is not configured
-        composeRule.onNodeWithTag("phone-tunnels-tablet-setup-notice").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Set up Tailscale or Cloudflare on a tablet.").assertIsDisplayed()
+        // Each transport opens its setup in Settings → Remote Access: Manage once done, Set up while missing.
+        composeRule.onNodeWithTag("phone-tunnels-setup-tailscale").assertTextContains("Manage")
+        composeRule.onNodeWithTag("phone-tunnels-setup-cloudflare").assertTextContains("Set up").performClick()
+        composeRule.onNodeWithTag("phone-tunnels-setup-tailscale").performClick()
+        assertEquals(listOf("cloudflare", "tailscale"), openedSetups)
+        assertEquals(0, composeRule.onAllNodesWithText("on a tablet", substring = true).fetchSemanticsNodes().size)
 
         // Forward port from bottom action card
         composeRule.onNodeWithTag("phone-tunnels-forward-btn").performClick()
@@ -343,7 +350,7 @@ class PhoneToolsTest {
     }
 
     @Test
-    fun phoneSchedulesScreen_togglesRunsAndReadsLogs_withoutScriptEditing() {
+    fun phoneSchedulesScreen_togglesRunsAndReadsLogs() {
         val schedules = listOf(
             ScheduleRowState(
                 id = 1,
@@ -360,8 +367,6 @@ class PhoneToolsTest {
             ),
         )
         val state = PhoneSchedulesState(initialSchedules = schedules)
-        assertFalse(state.canEditScript)
-        assertFalse(state.canCreateOrDeleteSchedule)
 
         var ranId: Int? = null
         composeRule.setContent {
@@ -389,10 +394,9 @@ class PhoneToolsTest {
             }
         }
 
-        // Shows tablet notice for script editing and no script editor input
-        composeRule.onNodeWithTag("phone-schedules-tablet-notice").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Edit a script or add a schedule on a tablet.").assertIsDisplayed()
-        assertEquals(0, composeRule.onAllNodesWithTag("tablet-schedule-script-editor").fetchSemanticsNodes().size)
+        // Without the write callbacks there is nothing to create, import, edit or delete.
+        assertEquals(0, composeRule.onAllNodesWithTag("phone-schedules-new-btn").fetchSemanticsNodes().size)
+        assertEquals(0, composeRule.onAllNodesWithTag("phone-schedule-edit-1").fetchSemanticsNodes().size)
 
         // Toggle enable switch
         composeRule.onNodeWithTag("phone-schedule-switch-1", useUnmergedTree = true).performClick()

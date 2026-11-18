@@ -184,6 +184,11 @@ internal fun PhonePortForwardingAreaHost(
                 )
             }.onFailure { model.toast(ErrorToastMessage("No browser is available to open this link")) }
         },
+        // Set up and Manage open Settings → Remote Access, which a phone opens too.
+        onOpenSetup = {
+            model.openSettings("remote-access")
+            model.activeTabId?.let(nav::visitTab)
+        },
         onCopyLink = { entry ->
             val url = entry.url?.takeIf { it.isNotBlank() } ?: return@PhonePortForwardingScreen
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
