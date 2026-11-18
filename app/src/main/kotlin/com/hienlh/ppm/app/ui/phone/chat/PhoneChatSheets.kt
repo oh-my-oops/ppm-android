@@ -57,7 +57,9 @@ import kotlinx.coroutines.launch
  * Phone tool-card scope policy (`designs/ppm-mobile-tablet-redesign/phone/1-chat/index.html`,
  * Section 3 C1 & Note 77):
  * - `open_preview` on phone omits the `Open` tab button and expands inline (`"no problems"` / `"N problems"`).
- * - `open_query` with write SQL on phone shows `"Open on a tablet to run it with write access"`.
+ *
+ * An `open_query` tab runs on a phone as on a tablet, a readonly connection's refused script
+ * included: the query tab offers "Run with write access (once)" there (`write-once-dialog.tsx`).
  */
 object PhoneToolCardPolicy {
     fun canOpenPreviewInTabOnPhone(toolName: String): Boolean {
@@ -67,16 +69,6 @@ object PhoneToolCardPolicy {
 
     fun inlinePreviewDiagnosticSummary(problemCount: Int): String =
         if (problemCount <= 0) "no problems" else "$problemCount problem${if (problemCount == 1) "" else "s"}"
-
-    fun openQueryWriteNoticeOnPhone(toolName: String, isWriteSql: Boolean): String? {
-        val clean = toolName.trim()
-        val isOpenQuery = clean == "open_query" || clean.endsWith("__open_query")
-        return if (isOpenQuery && isWriteSql) {
-            "Open on a tablet to run it with write access"
-        } else {
-            null
-        }
-    }
 }
 
 /**
