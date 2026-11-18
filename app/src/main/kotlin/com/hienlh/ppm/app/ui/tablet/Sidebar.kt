@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.toSize
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.tasks
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.app.FocusAnchor
 import com.hienlh.ppm.app.FocusStartAnchor
@@ -301,6 +302,7 @@ private fun SidebarSectionBody(model: AppModel, onChooseProject: () -> Unit) {
         sec == "git" -> com.hienlh.ppm.app.ui.git.GitStatusPanel(model)
         sec == "database" -> com.hienlh.ppm.app.ui.database.DatabaseSidebarPane(model)
         sec == "designs" -> com.hienlh.ppm.app.ui.design.DesignsSidebarPane(model)
+        sec == "tasks" -> com.hienlh.ppm.app.ui.tasks.TasksPanel(model)
         sec == "specs" -> SpecsSidebarPanel(model)
         sec == "tunnels" -> com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model)
         sec == "ai-resources" -> com.hienlh.ppm.app.ui.AiResourcesSidebarPanel(model)
@@ -556,6 +558,7 @@ private fun HistorySection(model: AppModel, onChooseProject: () -> Unit = {}) {
  */
 internal val DEFAULT_RAIL_SECTIONS = listOf(
     "history",
+    "tasks",
     "teams",
     "designs",
     "specs",
@@ -659,6 +662,7 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier, portr
                         )
                         "database" -> RailSectionSpec(ProductIcon.Database, "Database", 0, null, null)
                         "designs" -> RailSectionSpec(ProductIcon.Palette, "Designs", 0, FeatureBadgeKind.NEW, null)
+                        "tasks" -> RailSectionSpec(ProductIcon.ListTodo, "Tasks", model.tasks.railCount(), null, null)
                         "specs" -> RailSectionSpec(ProductIcon.ClipboardList, "Specs", 0, null, null)
                         "teams" -> RailSectionSpec(ProductIcon.Users, "Teams", 0, FeatureBadgeKind.BETA, null)
                         "tunnels" -> RailSectionSpec(ProductIcon.Globe, "Port Forwarding", 0, null, null)

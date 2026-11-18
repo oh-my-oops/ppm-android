@@ -20,13 +20,15 @@ data class UrlState(
     val tabIdentifier: String?,
     /** The legacy `?openChat=` parameter: a chat to open, `provider/session` or a session alone. */
     val openChat: String? = null,
+    /** `?openTask=<id>` (Telegram's "Open in PPM" on a task card): the task to open; null when not a task id. */
+    val openTask: String? = null,
 )
 
 /** The tab types an address can name (`VALID_TAB_TYPES`). */
 val URL_TAB_TYPES = setOf(
     "terminal", "chat", "editor", "database", "db-structure", "db-sql", "sqlite",
     "git-diff", "settings",
-    "extension", "group", "design",
+    "extension", "group", "design", "task",
 )
 
 private val PROJECT_PATH = Regex("""^/project/([^/]+)(?:/([^/]+)(/.*)?)?""")
@@ -76,6 +78,7 @@ fun buildMetadataFromUrl(type: String, identifier: String?, projectName: String)
         "settings" -> EMPTY_OBJECT
         "extension" -> id?.let { buildJsonObject { put("viewType", it); put("projectName", projectName) } }
         "group" -> id?.let { buildJsonObject { put("groupId", it); put("projectName", projectName) } }
+        "task" -> id?.takeIf { SESSION_UUID.matches(it) }?.let { buildJsonObject { put("taskId", it); put("projectName", projectName) } }
         // `designTabMetadata`: the design tab resolves its provider itself, so it is pending.
         "design" -> id?.takeIf(::isValidDesignSlug)?.let {
             buildJsonObject { put("projectName", projectName); put("designSlug", it); put("providerPending", true) }
@@ -96,6 +99,7 @@ fun buildTitleFromUrl(type: String, identifier: String?): String = when (type) {
     "extension" -> identifier?.split("-")?.joinToString(" ") { it.replaceFirstChar(Char::uppercaseChar) } ?: "Extension"
     "group" -> "Group"
     "design" -> "Design"
+    "task" -> "Task"
     else -> type
 }
 
@@ -144,7 +148,9 @@ fun parsePpmLink(link: String): PpmLink? {
     if (host.isEmpty()) return null
     val openChat = query.split('&').firstOrNull { it.substringBefore('=') == "openChat" }
         ?.substringAfter('=', "")?.let { decodeQueryValue(it) }?.takeIf { it.isNotEmpty() }
-    val state = parseUrlState(path, openChat).let { it.copy(tabIdentifier = it.tabIdentifier?.let(::decodePathSegment)) }
+    val openTask = query.split('&').firstOrNull { it.substringBefore('=') == "openTask" }
+        ?.substringAfter('=', "")?.let { decodeQueryValue(it) }?.takeIf { SESSION_UUID.matches(it) }
+    val state = parseUrlState(path, openChat).let { it.copy(tabIdentifier = it.tabIdentifier?.let(::decodePathSegment), openTask = openTask) }
     return PpmLink(host.lowercase(), port.toIntOrNull(), state)
 }
 

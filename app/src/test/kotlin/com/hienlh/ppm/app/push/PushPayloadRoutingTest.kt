@@ -217,6 +217,28 @@ class PushPayloadRoutingTest {
     }
 
     @Test
+    fun `a push about a task opens the task, beside the chat it also names`() {
+        val task = "11111111-1111-4111-8111-111111111111"
+        val payload = WebPushPayload(
+            title = "Task · Mini PC",
+            body = "#12 waits on you",
+            url = "/?openTask=$task",
+            project = "ppm",
+            sessionId = "550e8400-e29b-41d4-a716-446655440000",
+            providerId = "claude",
+        )
+        val link = buildPpmDeepLink(payload, fallbackServerUrl = "http://100.64.0.2:8080")!!
+        assertEquals("ppm://100.64.0.2:8080/project/ppm?openChat=claude%2F550e8400-e29b-41d4-a716-446655440000&openTask=$task", link)
+        val parsed = parsePpmLink(link)!!
+        assertEquals("ppm", parsed.state.projectName)
+        assertEquals(task, parsed.state.openTask)
+        // A project address that already carries it is left as it is.
+        val direct = buildPpmDeepLink(payload.copy(url = "/project/ppm?openTask=$task", sessionId = null), fallbackServerUrl = "http://h:8080")!!
+        assertEquals("ppm://h:8080/project/ppm?openTask=$task", direct)
+        assertEquals(task, parsePpmLink(direct)!!.state.openTask)
+    }
+
+    @Test
     fun `ApiClientPush subscribe sends endpoint, p256dh, auth, label and server origin to POST push subscribe`() = runBlocking {
         val server = MockWebServer()
         server.enqueue(

@@ -77,6 +77,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "git-log" -> GitLogBody(model, tab)
         "git-diff" -> GitDiffBody(model, tab)
         "design" -> com.hienlh.ppm.app.ui.design.DesignTabBody(model, tab)
+        "task" -> com.hienlh.ppm.app.ui.tasks.TaskTabBody(model, tab)
         "extension" -> ExtensionWebviewBody(model, tab)
         else -> {
             TabPlaceholder(tabTypeIcon(tab.type), tab.title, "This tab is not in the Android app yet.")
@@ -194,6 +195,7 @@ fun tabTypeIcon(type: String): ImageVector = when (type) {
     "group" -> ProductIcon.Users.vector
     "problems" -> ProductIcon.CircleX.vector
     "design" -> ProductIcon.Palette.vector
+    "task" -> ProductIcon.ListTodo.vector
     "android" -> ProductIcon.Smartphone.vector
     "web-preview" -> ProductIcon.Globe.vector
     "logs" -> ProductIcon.ScrollText.vector

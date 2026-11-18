@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.PrefsStore
+import com.hienlh.ppm.app.tasks
 import com.hienlh.ppm.app.ui.phone.notifications.NotificationsSheet
 import com.hienlh.ppm.app.ui.phone.onboarding.PhoneOnboardingController
 import com.hienlh.ppm.app.ui.phone.onboarding.PhoneOnboardingHost
@@ -131,6 +132,7 @@ fun PhoneShell(
                 "database" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.DATABASE))
                 "tunnels" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.PORT_FORWARDING))
                 "specs" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.SPECS))
+                "tasks" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.TASKS))
                 "history" -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.CHAT))
                 else -> nav.openDrawer()
             }
@@ -353,6 +355,17 @@ fun PhoneShell(
                     onClick = {
                         nav.closeDrawer()
                         handleDrawerSelection(model, PhoneArea.CHAT.id, openTabs, nav)
+                    },
+                ),
+                DrawerNavItem(
+                    id = PhoneArea.TASKS.id,
+                    label = PhoneArea.TASKS.title,
+                    icon = ProductIcon.ListTodo,
+                    selected = activeArea == PhoneArea.TASKS,
+                    countBadge = model.tasks.railCount().takeIf { it > 0 }?.toString(),
+                    onClick = {
+                        nav.closeDrawer()
+                        handleDrawerSelection(model, PhoneArea.TASKS.id, openTabs, nav)
                     },
                 ),
                 DrawerNavItem(
@@ -798,6 +811,7 @@ private fun handleDrawerSelection(
             model.specs.closeSpec()
             nav.visitTab(PhoneNav.areaTabId(PhoneArea.SPECS))
         }
+        PhoneArea.TASKS -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.TASKS))
         PhoneArea.SETTINGS -> {
             model.openSettings()
             model.activeTabId?.let(nav::visitTab)

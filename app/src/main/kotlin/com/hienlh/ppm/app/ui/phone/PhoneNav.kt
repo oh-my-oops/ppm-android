@@ -35,6 +35,9 @@ enum class PhoneArea(
 
     /** Spec mode's specs (the web's sidebar Specs panel), and the one opened from them or from a chat. */
     SPECS("specs", "Specs", "specs"),
+
+    /** PPM Tasks (the web's sidebar Tasks panel); a task picked from it or opened by link shows its page here. */
+    TASKS("tasks", "Tasks", "tasks"),
     ;
 
     companion object {
@@ -78,6 +81,7 @@ enum class PhoneArea(
             "tunnels", "cloud-share" -> CLOUD_AND_SHARE
             "settings" -> SETTINGS
             "specs" -> SPECS
+            "task", "tasks" -> TASKS
             else -> null
         }
 

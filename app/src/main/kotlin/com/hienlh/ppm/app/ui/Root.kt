@@ -76,6 +76,7 @@ import com.hienlh.ppm.app.FocusStartAnchor
 import com.hienlh.ppm.app.LightboxRequest
 import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.leavesTextOnTap
+import com.hienlh.ppm.app.tasks
 import com.hienlh.ppm.app.ui.extensions.ExtensionOverlays
 import com.hienlh.ppm.app.ui.phone.PhoneShell
 import com.hienlh.ppm.app.ui.tablet.TabletShell
@@ -181,6 +182,8 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             // PPM's own approvals are answered over HTTP, and a from-session bubble or turn chip opens its session.
             LocalPpmApprovals provides model.api?.let(::ServerPpmApprovals),
             LocalChatSessionOpener provides remember(model) { ChatSessionOpener { model.openLinkedSession(it.projectName, it.sessionId, it.providerId, it.title) } },
+            // A task chip on a sent message shows the task's quick view.
+            com.hienlh.ppm.chat.LocalTaskRefOpener provides remember(model) { com.hienlh.ppm.app.ui.tasks.taskRefOpener(model) },
         ) {
             PpmThemeProvider(theme, mobile) {
                 // Chrome's own word on a download, which the web leaves to the browser.
@@ -211,6 +214,8 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                 ExtensionOverlays(model)
                 model.explorerSheetPath?.let { com.hienlh.ppm.app.ui.osexplorer.HostExplorerSheet(model, it) }
                 model.agentSheet?.let { AgentSessionSheet(model, it) }
+                model.tasks.peek?.let { key(it.id) { com.hienlh.ppm.app.ui.tasks.TaskPeekHost(model, it) } }
+                com.hienlh.ppm.app.ui.tasks.TaskConfirmHost(model)
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
                 if (mobile && model.cloudShareOpen) {
                     BottomSheet(onDismiss = { model.cloudShareOpen = false }) {

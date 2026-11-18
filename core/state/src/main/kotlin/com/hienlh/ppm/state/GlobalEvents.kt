@@ -126,6 +126,7 @@ class GlobalEvents(
     private val featureIntrosListeners = LinkedHashSet<(change: String, id: String?) -> Unit>()
     private val memoryChangedListeners = LinkedHashSet<() -> Unit>()
     private val schedulesChangedListeners = LinkedHashSet<() -> Unit>()
+    private val tasksListeners = LinkedHashSet<(JsonElement) -> Unit>()
     private val memoryInstallListeners = LinkedHashSet<(status: JsonElement) -> Unit>()
     private var socket: SocketConnection? = null
 
@@ -307,6 +308,12 @@ class GlobalEvents(
         return { schedulesChangedListeners -= listener }
     }
 
+    /** A PPM Tasks push (`tasks:changed`, `tasks:project_changed`, `tasks:link_states`): the whole frame. */
+    fun onTasksEvent(listener: (frame: JsonElement) -> Unit): () -> Unit {
+        tasksListeners += listener
+        return { tasksListeners -= listener }
+    }
+
     /** The local embedding model's install moved (`memory:embed-install`): its `status` object. */
     fun onMemoryEmbedInstall(listener: (status: JsonElement) -> Unit): () -> Unit {
         memoryInstallListeners += listener
@@ -374,6 +381,7 @@ class GlobalEvents(
             "feature-intros:changed" -> featureIntrosListeners.toList().forEach { it(frame["change"].string.orEmpty(), frame["id"].string) }
             "memory:changed" -> memoryChangedListeners.toList().forEach { it() }
             "schedules:changed" -> schedulesChangedListeners.toList().forEach { it() }
+            "tasks:changed", "tasks:project_changed", "tasks:link_states" -> tasksListeners.toList().forEach { it(frame) }
             "memory:embed-install" -> frame["status"]?.takeIf { it.obj != null }?.let { status ->
                 memoryInstallListeners.toList().forEach { it(status) }
             }

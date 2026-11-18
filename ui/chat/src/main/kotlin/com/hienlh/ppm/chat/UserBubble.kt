@@ -236,6 +236,8 @@ internal fun UserBubble(
             parsed.replyTo?.let { ReplyCard(it, replies.jump(it), Modifier.padding(bottom = 8.dp)) }
             // Drawn from the message's own block: no request, and the same size on every render.
             parsed.turnRefs?.takeIf { it.isNotEmpty() }?.let { TurnRefChipRow(it) }
+            // The task PPM attached (the chat was opened from it, or the task was picked on Telegram).
+            parsed.taskRefs?.takeIf { it.isNotEmpty() }?.let { TaskRefChipRow(it, LocalAgentSessionOpener.current?.identity?.projectName?.takeIf { p -> p.isNotEmpty() }) }
             if (parsed.tags.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (tag in parsed.tags) {

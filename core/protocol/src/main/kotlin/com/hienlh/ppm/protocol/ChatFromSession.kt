@@ -313,15 +313,18 @@ object ChatMessageBlocks {
         val fromSession: FromSessionReference?,
         /** Set when a session schedule sent the message; never with another session as sender. */
         val scheduleRun: ScheduleRunReference? = null,
+        /** The PPM tasks the message is about (`taskRefs`), drawn as chips. */
+        val taskRefs: List<TaskReference>? = null,
     )
 
     fun decode(content: String): Decoded {
         val reply = ChatReply.decode(content)
         val refs = ChatTurnRefs.decode(reply.content)
-        val from = ChatFromSession.decode(refs.content)
+        val tasks = ChatTaskRefs.decode(refs.content)
+        val from = ChatFromSession.decode(tasks.content)
         // A schedule's run is never another session's message.
         val run = if (from.fromSession != null) ChatScheduleRun.Decoded(from.content, null) else ChatScheduleRun.decode(from.content)
-        return Decoded(run.content, reply.replyTo, refs.turnRefs, from.fromSession, run.scheduleRun)
+        return Decoded(run.content, reply.replyTo, refs.turnRefs, from.fromSession, run.scheduleRun, tasks.taskRefs)
     }
 }
 
