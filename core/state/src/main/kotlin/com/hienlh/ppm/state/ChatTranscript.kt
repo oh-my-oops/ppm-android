@@ -6,6 +6,7 @@ import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.ChatReply
+import com.hienlh.ppm.protocol.ChatTurnRefs
 import com.hienlh.ppm.protocol.EffortStatusReport
 import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.HistoryPage
@@ -21,6 +22,7 @@ import com.hienlh.ppm.protocol.TurnSnapshot
 import com.hienlh.ppm.protocol.TurnStop
 import com.hienlh.ppm.protocol.TurnUsage
 import com.hienlh.ppm.protocol.VersionGroup
+import com.hienlh.ppm.protocol.generated.TurnReference
 import kotlinx.serialization.json.JsonElement
 import java.time.Instant
 
@@ -44,7 +46,13 @@ sealed interface ChatEffect {
 }
 
 /** A message the server refused: what was typed, what it quoted, and why ([message]). */
-data class RejectedSend(val content: String, val replyTo: ReplyReference?, val message: String)
+data class RejectedSend(
+    val content: String,
+    val replyTo: ReplyReference?,
+    val message: String,
+    /** The turn chips it carried, which go back to the composer with it. */
+    val turnRefs: List<TurnReference>? = null,
+)
 
 /**
  * What one chat shows, rebuilt from history pages and chat-socket frames. No I/O: frames go in,
@@ -105,6 +113,24 @@ class ChatTranscript(var providerId: String? = null) {
     /** What decides the effort the session runs at, as the server last said; null while nothing is known. */
     var effortStatus: EffortStatusReport? = null
         private set
+
+    /**
+     * Which turn each message sent in this chat opened or joined, by the id it was sent under
+     * (`turn-binding-store.ts`): from `turn_started`, or replayed in `session_state` to a socket
+     * that joined late. Covers the stretch between a send and the history reload that stamps the
+     * message with its turn. Newest last, at most [MAX_TURN_BINDINGS].
+     */
+    var turnBindings: Map<String, String> = emptyMap()
+        private set
+
+    private fun bindTurn(clientMessageId: String, turnId: String) {
+        if (turnBindings[clientMessageId] == turnId) return
+        val next = LinkedHashMap(turnBindings)
+        next.remove(clientMessageId)
+        next[clientMessageId] = turnId
+        while (next.size > MAX_TURN_BINDINGS) next.remove(next.keys.first())
+        turnBindings = next
+    }
 
     /** Messages sent while a turn ran, not yet read by the AI: the server's list. */
     val queue = MessageQueue()
@@ -196,7 +222,7 @@ class ChatTranscript(var providerId: String? = null) {
                     items = items.toMutableList().also { it.removeAt(index) }
                     if (index == items.size && live == null && phase == SessionPhase.INITIALIZING) phase = SessionPhase.IDLE
                 }
-                if (sent != null) rejected = RejectedSend(sent.content, sent.replyTo, frame.message)
+                if (sent != null) rejected = RejectedSend(sent.content, sent.replyTo, frame.message, sent.turnRefs ?: frame.turnRefs)
             }
             is ChatFrame.UserMessage -> {
                 // One sent from another device, or a queued message (this device's too) that the AI
@@ -226,6 +252,7 @@ class ChatTranscript(var providerId: String? = null) {
             is ChatFrame.TabOpen -> effects += ChatEffect.OpenTab(frame.request)
             is ChatFrame.BackgroundRegistry -> backgroundShells = frame.shells
             is ChatFrame.McpStatus -> mcpNeedsAuth = frame.needsAuth
+            is ChatFrame.TurnStarted -> frame.clientMessageId?.let { bindTurn(it, frame.turnId) }
         }
         return effects
     }
@@ -247,24 +274,27 @@ class ChatTranscript(var providerId: String? = null) {
         images: List<InlineImage> = emptyList(),
         imagePaths: List<String> = emptyList(),
         sendNow: Boolean = false,
+        turnRefs: List<TurnReference> = emptyList(),
+        /** The chat's project, which the bubble's references block names as this one's. */
+        ownProject: String? = null,
     ): ChatClientMessage.Message {
         localCounter++
         val id = "local-user-$localCounter-$now"
         activity++
         turnStop = null
         unanswered.values.removeAll { now - it.sentAt >= 60_000 }
-        unanswered[id] = Unanswered(content, replyTo, now)
+        unanswered[id] = Unanswered(content, replyTo, now, turnRefs.takeIf { it.isNotEmpty() })
         if (unanswered.size > 20) unanswered.remove(unanswered.keys.first())
         if (phase.isRunning) {
             // A refusal still finds it in [unanswered] and gives its text back.
-            return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths, queued = true, sendNow = sendNow)
+            return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths, queued = true, sendNow = sendNow, turnRefs = turnRefs)
         }
         // The server skips a pending approval when a message arrives.
         pendingApproval = null
         phase = SessionPhase.INITIALIZING
         turnFinalized = false
-        appendUser(ChatReply.encode(content, replyTo), id, now)
-        return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths)
+        appendUser(ChatReply.encode(ChatTurnRefs.encode(content, turnRefs, ownProject), replyTo), id, now)
+        return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths, turnRefs = turnRefs)
     }
 
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null): ChatClientMessage.ApprovalResponse {
@@ -399,6 +429,7 @@ class ChatTranscript(var providerId: String? = null) {
 
     private fun applySessionState(state: SessionStateFrame, now: Long, effects: MutableList<ChatEffect>) {
         mcpNeedsAuth = state.mcpNeedsAuth
+        for (binding in state.turnBindings) bindTurn(binding.clientMessageId, binding.turnId)
         // Answers that do not carry the queue leave it as it was.
         state.queue?.let(queue::replace)
         (state.effortStatus as? Reported.Value)?.let { effortStatus = it.value }
@@ -613,5 +644,10 @@ class ChatTranscript(var providerId: String? = null) {
         items = items + ChatItem(id ?: "local-user-$localCounter", ChatItem.Role.USER, listOf(ChatBlock.Text(content)), Instant.ofEpochMilli(now))
     }
 
-    private class Unanswered(val content: String, val replyTo: ReplyReference?, val sentAt: Long)
+    private class Unanswered(val content: String, val replyTo: ReplyReference?, val sentAt: Long, val turnRefs: List<TurnReference>? = null)
+
+    companion object {
+        /** Bindings kept per chat; old ones are only ever asked about by a Copy turn link (`MAX_BINDINGS`). */
+        const val MAX_TURN_BINDINGS = 500
+    }
 }

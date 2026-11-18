@@ -985,6 +985,12 @@ open class ExtensionClient(
         sendRaw(ExtClientMessages.notificationAction(id, action))
     }
 
+    /** The contributions as `GET /api/extensions/contributions` answered them, read again after `extensions:changed`. */
+    fun takeContributions(json: JsonElement?) {
+        if (json == null) return
+        _contributions.value = ExtensionContributes.from(json)
+    }
+
     internal fun handle(msg: ExtServerMessage) {
         when (msg) {
             is ExtServerMessage.ContributionsUpdate -> {

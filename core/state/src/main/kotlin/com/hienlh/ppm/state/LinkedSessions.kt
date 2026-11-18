@@ -11,6 +11,7 @@ import com.hienlh.ppm.protocol.SessionLinkRelation
 import com.hienlh.ppm.protocol.SessionUnread
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.array
+import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.jsTrim
 import com.hienlh.ppm.protocol.obj
@@ -36,6 +37,8 @@ data class LinkedSession(
     val title: String,
     val providerId: String,
     val relations: List<SessionLinkRelation>,
+    /** When the two last interacted with each other (epoch ms); null when nothing says. */
+    val lastInteractionAt: Long? = null,
 )
 
 /** Linked session paired with its live status (`LinkedSessionView`). */
@@ -45,6 +48,8 @@ data class LinkedSessionView(
     val providerId: String,
     val relations: List<SessionLinkRelation>,
     val status: LinkedSessionStatus,
+    /** When the two last interacted with each other (epoch ms); null when nothing says. */
+    val lastInteractionAt: Long? = null,
 )
 
 /** Visible vs unlinked split (`splitUnlinked`). */
@@ -70,8 +75,13 @@ data class SessionCollabState(
     val announced: Map<String, AnnouncedSession> = emptyMap(),
     /** `sessionId -> pendingApprovalRequestId`. */
     val pendingApprovals: Map<String, String> = emptyMap(),
+    /**
+     * `sessionId -> (otherSessionId -> epoch ms)`: when the two last interacted, as the server's
+     * seeded links and live events said. Symmetric.
+     */
+    val interactedAt: Map<String, Map<String, Long>> = emptyMap(),
 ) {
-    fun onSessionCreated(event: SessionCreatedPush): SessionCollabState {
+    fun onSessionCreated(event: SessionCreatedPush, now: Long = System.currentTimeMillis()): SessionCollabState {
         val nextAnnounced = LinkedHashMap(announced)
         if (!event.spawnedBy.isNullOrEmpty() && !event.parentTitle.isNullOrEmpty() && !event.parentProviderId.isNullOrEmpty()) {
             nextAnnounced[event.spawnedBy!!] = AnnouncedSession(
@@ -90,20 +100,30 @@ data class SessionCollabState(
         } else {
             links
         }
-        return copy(links = nextLinks, announced = nextAnnounced)
+        // A session's creation is its creator's first interaction with it.
+        val nextTimes = if (!event.spawnedBy.isNullOrEmpty()) {
+            stampInteraction(interactedAt, event.spawnedBy!!, event.sessionId, isoMillis(event.createdAt) ?: now)
+        } else {
+            interactedAt
+        }
+        return copy(links = nextLinks, announced = nextAnnounced, interactedAt = nextTimes)
     }
 
-    fun onLinkChanged(event: SessionLinkChangedPush): SessionCollabState {
+    /** The sessions named together are the ones whose link changed: they just talked. */
+    fun onLinkChanged(event: SessionLinkChangedPush, now: Long = System.currentTimeMillis()): SessionCollabState {
         var nextLinks = links
+        var nextTimes = interactedAt
         val ids = event.sessionIds.filter { it.isNotEmpty() }
         for (a in ids) {
             for (b in ids) {
-                if (a < b && nextLinks[a]?.get(b).isNullOrEmpty()) {
+                if (a >= b) continue
+                if (nextLinks[a]?.get(b).isNullOrEmpty()) {
                     nextLinks = addSymmetricLink(nextLinks, a, b, SessionLinkRelation.MESSAGED)
                 }
+                nextTimes = stampInteraction(nextTimes, a, b, now)
             }
         }
-        return if (nextLinks === links) this else copy(links = nextLinks)
+        return if (nextLinks === links && nextTimes === interactedAt) this else copy(links = nextLinks, interactedAt = nextTimes)
     }
 
     fun onApprovalChanged(event: SessionCollabApprovalPush): SessionCollabState = when {
@@ -114,15 +134,27 @@ data class SessionCollabState(
 
     fun seedLinks(sessionId: String, seeded: List<SessionLink>): SessionCollabState {
         var nextLinks = links
+        var nextTimes = interactedAt
         for (link in seeded) {
             for (relation in link.relations) {
                 nextLinks = addSymmetricLink(nextLinks, sessionId, link.sessionId, relation)
             }
+            link.lastInteractionAt?.let { nextTimes = stampInteraction(nextTimes, sessionId, link.sessionId, it) }
         }
-        return if (nextLinks === links) this else copy(links = nextLinks)
+        return if (nextLinks === links && nextTimes === interactedAt) this else copy(links = nextLinks, interactedAt = nextTimes)
     }
 
     companion object {
+        /** Records that [a] and [b] interacted at [at], unless a later time is already known. */
+        private fun stampInteraction(times: Map<String, Map<String, Long>>, a: String, b: String, at: Long): Map<String, Map<String, Long>> {
+            if (a == b || at <= 0) return times
+            fun put(from: String, to: String, acc: Map<String, Map<String, Long>>): Map<String, Map<String, Long>> {
+                if ((acc[from]?.get(to) ?: 0L) >= at) return acc
+                return acc + (from to (acc[from].orEmpty() + (to to at)))
+            }
+            return put(b, a, put(a, b, times))
+        }
+
         private fun addSymmetricLink(
             links: Map<String, Map<String, List<SessionLinkRelation>>>,
             a: String,
@@ -179,6 +211,35 @@ fun linkedSessionStatus(
 fun byAttention(sessions: List<LinkedSessionView>): List<LinkedSessionView> =
     sessions.sortedBy { it.status.attentionRank }
 
+/**
+ * The sessions waiting on the person first — work only they can unblock — then the newest
+ * interaction with this session; sessions with no known time go last (`byRecentInteraction`).
+ * Running is not pinned: it needs nothing from the person. Stable, so equals keep their order.
+ */
+fun byRecentInteraction(sessions: List<LinkedSessionView>): List<LinkedSessionView> =
+    sessions.sortedWith(
+        compareBy<LinkedSessionView> { if (it.status == LinkedSessionStatus.NEEDS_APPROVAL) 0 else 1 }
+            .thenByDescending { it.lastInteractionAt ?: 0L },
+    )
+
+/** Rows above which the Sessions list offers a filter by name (`LINKED_FILTER_MIN_ROWS`). */
+const val LINKED_FILTER_MIN_ROWS = 8
+
+/** Lower case with accents gone, so "tu dong" finds "tự động". */
+private fun foldForFilter(text: String): String =
+    java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}"), "")
+        .replace('đ', 'd').replace('Đ', 'd')
+        .lowercase()
+
+/** Whether a title holds every word of the query, in any order, ignoring case and accents (`matchesLinkedFilter`). */
+fun matchesLinkedFilter(title: String, query: String): Boolean {
+    val words = foldForFilter(query).split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (words.isEmpty()) return true
+    val haystack = foldForFilter(title)
+    return words.all { haystack.contains(it) }
+}
+
 /** Idle and finished sessions can be hidden; one still working or waiting on the person cannot (`canUnlink`). */
 fun canUnlink(status: LinkedSessionStatus): Boolean =
     status == LinkedSessionStatus.IDLE || status == LinkedSessionStatus.NEW_MESSAGE
@@ -193,32 +254,39 @@ fun collectLinkedSessions(
     items: List<ChatItem>,
     liveLinks: Map<String, List<SessionLinkRelation>> = emptyMap(),
     announced: Map<String, AnnouncedSession> = emptyMap(),
+    /** Other session → when it last interacted with this one, as the server and live events said. */
+    interactedAt: Map<String, Long> = emptyMap(),
 ): List<LinkedSession> {
     class Entry {
         val relations = LinkedHashSet<SessionLinkRelation>()
         var title: String? = null
         var providerId: String? = null
+        var at: Long? = null
     }
 
     val found = LinkedHashMap<String, Entry>()
-    fun add(id: String?, relation: SessionLinkRelation, title: String? = null, providerId: String? = null) {
+    fun add(id: String?, relation: SessionLinkRelation, title: String? = null, providerId: String? = null, at: Long? = null) {
         if (id.isNullOrEmpty() || id == sessionId) return
         val entry = found.getOrPut(id) { Entry() }
         entry.relations.add(relation)
         if (entry.title == null && !title.isNullOrEmpty()) entry.title = title
         if (entry.providerId == null && !providerId.isNullOrEmpty()) entry.providerId = providerId
+        if (at != null && at > 0 && at > (entry.at ?: 0L)) entry.at = at
     }
 
+    // A session's creation is its creator's first interaction with it.
     val self = list.firstOrNull { it.id == sessionId }
-    add(self?.spawnedBy, SessionLinkRelation.PARENT, self?.parentTitle)
+    add(self?.spawnedBy, SessionLinkRelation.PARENT, self?.parentTitle, at = self?.createdAt?.toEpochMilli())
     for (s in list) {
-        if (s.spawnedBy == sessionId) add(s.id, SessionLinkRelation.CHILD, s.title, s.providerId)
+        if (s.spawnedBy == sessionId) add(s.id, SessionLinkRelation.CHILD, s.title, s.providerId, s.createdAt?.toEpochMilli())
     }
 
     for (item in items) {
+        val itemAt = isoMillis(item.timestampText) ?: item.timestamp?.toEpochMilli()
         if (item.role == ChatItem.Role.USER) {
             val from = ChatFromSession.decodeFromMessage(item.text)
-            if (from != null) add(from.sessionId, SessionLinkRelation.MESSAGED, from.title, from.providerId)
+            // The PPM Assistant belongs to no project, so this list could not open it; its bubble does.
+            if (from != null) add(from.sessionId, SessionLinkRelation.MESSAGED, from.title, from.providerId, isoMillis(from.sentAt) ?: itemAt)
             continue
         }
         if (item.role != ChatItem.Role.ASSISTANT) continue
@@ -231,14 +299,16 @@ fun collectLinkedSessions(
             val args = (inputObj["arguments"] as? JsonObject) ?: inputObj
             val outcome = tool.result
             val parsedResult = if (outcome != null && !outcome.isError) parseCollabToolResult(outcome.output) else null
+            // A reply that came back is later than the call that waited for it.
+            val at = parsedResult?.replySentAt ?: itemAt
             if (toolKind == "create_session") {
                 val callTitle = args["title"].string?.takeIf { it.jsTrim().isNotEmpty() } ?: "New session"
-                add(parsedResult?.sessionId, SessionLinkRelation.CHILD, parsedResult?.title ?: callTitle, parsedResult?.providerId)
+                add(parsedResult?.sessionId, SessionLinkRelation.CHILD, parsedResult?.title ?: callTitle, parsedResult?.providerId, at)
             } else if (toolKind == "send_to_session") {
                 val callSessionId = args["session_id"].string?.takeIf { it.jsTrim().isNotEmpty() } ?: continue
                 // Only a send the server accepted: a refused one names whatever id the AI wrote.
                 if (parsedResult != null) {
-                    add(parsedResult.sessionId ?: callSessionId, SessionLinkRelation.MESSAGED, parsedResult.title, parsedResult.providerId)
+                    add(parsedResult.sessionId ?: callSessionId, SessionLinkRelation.MESSAGED, parsedResult.title, parsedResult.providerId, at)
                 }
             }
         }
@@ -266,11 +336,13 @@ fun collectLinkedSessions(
         val providerId = known?.providerId?.takeIf(String::isNotEmpty)
             ?: ann?.providerId?.takeIf(String::isNotEmpty)
             ?: entry.providerId.orEmpty()
+        val at = maxOf(entry.at ?: 0L, interactedAt[id] ?: 0L)
         out += LinkedSession(
             sessionId = id,
             title = title,
             providerId = providerId,
             relations = kept,
+            lastInteractionAt = at.takeIf { it > 0 },
         )
     }
     return out.sortedBy { it.relations.first().order }
@@ -280,6 +352,8 @@ private data class ParsedCollabResult(
     val sessionId: String?,
     val title: String?,
     val providerId: String?,
+    /** When the reply the call waited for was sent, when one came back. */
+    val replySentAt: Long? = null,
 )
 
 private fun parseCollabToolResult(output: String): ParsedCollabResult? {
@@ -292,12 +366,14 @@ private fun parseCollabToolResult(output: String): ParsedCollabResult? {
     val title = parsed["title"].string ?: validStatus?.get("title").string
     val providerId = parsed["providerId"].string ?: validStatus?.get("providerId").string?.takeIf(String::isNotEmpty)
     val delivered = parsed["delivered"].string?.takeIf { it == "inserted" || it == "queued" || it == "started" }
-    val hasReply = (parsed["reply"] as? JsonObject) != null
+    val reply = parsed["reply"] as? JsonObject
+    val hasReply = reply != null
+    val replySentAt = if (reply?.get("replied").bool == true) isoMillis(reply["sentAt"].string) else null
     val hasSessions = parsed["sessions"].array != null
     if (sessionId == null && title == null && providerId == null && delivered == null && validStatus == null && !hasReply && !hasSessions) {
         return null
     }
-    return ParsedCollabResult(sessionId = sessionId, title = title, providerId = providerId)
+    return ParsedCollabResult(sessionId = sessionId, title = title, providerId = providerId, replySentAt = replySentAt)
 }
 
 private fun stripToolResultWrapper(output: String): String {

@@ -272,7 +272,8 @@ class LinkedSessionsTest {
         assertEquals(
             listOf(
                 LinkedSession(child, "Tests", "antigravity", listOf(SessionLinkRelation.CHILD)),
-                LinkedSession(peer, "Agy", "antigravity", listOf(SessionLinkRelation.MESSAGED)),
+                // Last talked when its message was sent.
+                LinkedSession(peer, "Agy", "antigravity", listOf(SessionLinkRelation.MESSAGED), java.time.Instant.parse("2026-11-15T00:00:00Z").toEpochMilli()),
             ),
             collectLinkedSessions(me, emptyList(), listOf(call, from)),
         )

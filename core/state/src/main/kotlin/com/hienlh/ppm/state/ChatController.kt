@@ -1,6 +1,7 @@
 package com.hienlh.ppm.state
 
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.ChatClientId
 import com.hienlh.ppm.client.SocketConnection
 import com.hienlh.ppm.client.teamMessages
 import com.hienlh.ppm.client.teams
@@ -25,6 +26,7 @@ import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnStop
 import com.hienlh.ppm.protocol.VersionGroup
 import com.hienlh.ppm.protocol.WireJson
+import com.hienlh.ppm.protocol.generated.TurnReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +99,8 @@ data class ChatState(
     val effortStatus: EffortStatusReport? = null,
     /** A queued message this device asked back, for the composer ([ChatController.queueAnswerTaken]). */
     val queueAnswer: QueueTakeBackAnswer? = null,
+    /** What [ChatTranscript.turnBindings] holds: the turn each message sent here opened, by the id it went under. */
+    val turnBindings: Map<String, String> = emptyMap(),
 ) {
     val isRunning: Boolean get() = phase.isRunning
     /** The socket is open. A message sent while it is not shows at once and goes out once it is. */
@@ -127,6 +131,12 @@ class ChatController(
     providerId: String = session?.providerId ?: "claude",
     /** What the chat it takes over from showed, shown until [session]'s history is in ([ChatTranscript.showStale]). */
     stale: List<ChatItem> = emptyList(),
+    /**
+     * The chat tab this chat belongs to (`?clientId=`): sent on every connect and kept across
+     * reconnects, so the server knows the device a message came from. A tab hands the same id to
+     * every chat it shows; a chat made on its own mints one.
+     */
+    val clientId: String = ChatClientId.mint(),
 ) {
     sealed interface Connection {
         data object Connecting : Connection
@@ -251,11 +261,13 @@ class ChatController(
         images: List<InlineImage> = emptyList(),
         imagePaths: List<String> = emptyList(),
         sendNow: Boolean = false,
+        /** Turns of other sessions the message points at, shown as chips (`turnRefs`). */
+        turnRefs: List<TurnReference> = emptyList(),
     ) {
         val content = text.trim()
         if ((content.isEmpty() && images.isEmpty()) || sessionId == null || stopped) return
         val reply = replyTo?.takeIf { it.sessionId == sessionId && it.providerId == providerId }
-        transmit(transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths, sendNow))
+        transmit(transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths, sendNow, turnRefs, project))
         onAttention?.invoke(ChatAttention.Answered)
         publish()
     }
@@ -403,7 +415,7 @@ class ChatController(
     private fun connect() {
         val session = sessionId ?: return
         if (stopped) return
-        val socket = SocketConnection(api.chatSocketUrl(project, session, providerId))
+        val socket = SocketConnection(api.chatSocketUrl(project, session, providerId, clientId))
         this.socket = socket
         closeReason = null
         lastFrameAt = clock()
@@ -695,6 +707,7 @@ class ChatController(
             queue = transcript.queue.messages,
             queueAnswer = transcript.queue.answer,
             effortStatus = transcript.effortStatus,
+            turnBindings = transcript.turnBindings,
         )
     }
 
