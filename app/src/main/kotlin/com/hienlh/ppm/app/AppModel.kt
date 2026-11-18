@@ -3286,6 +3286,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         if (wide == value) return
         wide = value
         if (!value) workspace?.redockAllWindows()
+        if (!value) moveWindowsToPhone()
         workspace?.state?.value?.let(::syncChats)
         reconcileWindowPanels()
     }
