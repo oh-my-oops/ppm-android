@@ -316,6 +316,10 @@ data class HistoryMessage(
     val timestampText: String? = null,
     /** Set on the compact summary that opens a segment: what that compaction did. */
     val compaction: Compaction? = null,
+    /** The turn the message belongs to, as the server stamps every history message (`turnId`). */
+    val turnId: String? = null,
+    /** That turn's number in the session (`turnN`). */
+    val turnN: Int? = null,
 ) {
     enum class Role(val wire: String) { USER("user"), ASSISTANT("assistant"), SYSTEM("system") }
 
@@ -332,6 +336,8 @@ data class HistoryMessage(
                 sdkUuid = json["sdkUuid"].string,
                 timestampText = json["timestamp"].string,
                 compaction = json["compaction"]?.let(Compaction::from),
+                turnId = json["turnId"].string?.takeIf { FromSessionReference.TURN_ID_RE.matches(it) },
+                turnN = json["turnN"].int,
             )
         }
     }
