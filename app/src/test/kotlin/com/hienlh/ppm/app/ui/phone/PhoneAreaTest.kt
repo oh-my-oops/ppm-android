@@ -19,7 +19,7 @@ import org.junit.Test
 class PhoneAreaTest {
 
     @Test
-    fun `PhoneArea enum contains the closed set of 16 phone areas, Specs, Tasks, the Assistant and Jira included`() {
+    fun `PhoneArea enum contains the closed set of 22 phone areas, Specs, Tasks, the Assistant, Jira and the tablet features included`() {
         val expectedIds = setOf(
             "chat",
             "projects",
@@ -37,9 +37,15 @@ class PhoneAreaTest {
             "tasks",
             "assistant",
             "jira",
+            "designs",
+            "teams",
+            "ai-resources",
+            "extensions",
+            "remote-desktop",
+            "android",
         )
         assertEquals(expectedIds, PhoneArea.entries.map { it.id }.toSet())
-        assertEquals(16, PhoneArea.entries.size)
+        assertEquals(22, PhoneArea.entries.size)
     }
 
     @Test
@@ -60,6 +66,17 @@ class PhoneAreaTest {
             "web-preview" to PhoneArea.PORT_FORWARDING,
             "settings" to PhoneArea.SETTINGS,
             "jira" to PhoneArea.JIRA,
+            "design" to PhoneArea.DESIGNS,
+            "designs" to PhoneArea.DESIGNS,
+            "group" to PhoneArea.TEAMS,
+            "teams" to PhoneArea.TEAMS,
+            "ai-resource" to PhoneArea.AI_RESOURCES,
+            "ai-resources" to PhoneArea.AI_RESOURCES,
+            "extension" to PhoneArea.EXTENSIONS,
+            "extensions" to PhoneArea.EXTENSIONS,
+            "remote-desktop" to PhoneArea.REMOTE_DESKTOP,
+            "android" to PhoneArea.ANDROID,
+            "android-device" to PhoneArea.ANDROID,
         )
 
         for ((type, expectedArea) in phoneTabCases) {
@@ -84,12 +101,6 @@ class PhoneAreaTest {
             "db-connection",
             "db-structure",
             "db-impexp",
-            "remote-desktop",
-            "android",
-            "extension",
-            "design",
-            "group",
-            "ai-resource",
             "problems",
             "os-explorer",
             "search",
@@ -151,8 +162,12 @@ class PhoneAreaTest {
         assertEquals("Review changes opens on a tablet.", (route as PhoneTabRoute.TabletOnly).notice)
 
         // Switching across tablet-only and phone tabs on phone never drops any tablet-only tab from WorkspaceStore
-        store.setActiveTab(designTab.id)
+        store.setActiveTab(structureTab.id)
         assertTrue(resolvePhoneTabRoute(store.state.value.activeGridTab!!) is PhoneTabRoute.TabletOnly)
+
+        // A design opens full screen on the phone now
+        store.setActiveTab(designTab.id)
+        assertTrue(resolvePhoneTabRoute(store.state.value.activeGridTab!!) is PhoneTabRoute.Area)
 
         store.setActiveTab(chatTab.id)
         assertTrue(resolvePhoneTabRoute(store.state.value.activeGridTab!!) is PhoneTabRoute.Area)

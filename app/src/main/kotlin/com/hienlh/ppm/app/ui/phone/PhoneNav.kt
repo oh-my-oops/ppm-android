@@ -43,6 +43,24 @@ enum class PhoneArea(
 
     /** The Jira section (the web's sidebar Jira panel), offered while Jira is turned on. */
     JIRA("jira", "Jira", "jira"),
+
+    /** The Designs list (the web's drawer Designs section); a design opens its tab here. */
+    DESIGNS("designs", "Designs", "design"),
+
+    /** The Teams list (the web's drawer Teams section); a group opens its chat here. */
+    TEAMS("teams", "Teams", "group"),
+
+    /** AI Resources (the web's drawer AI Resources section); a resource opens its editor here. */
+    AI_RESOURCES("ai-resources", "AI Resources", "ai-resource"),
+
+    /** The extensions manager, an extension's sidebar view (`phone:ext:<view>`) and its webview panels. */
+    EXTENSIONS("extensions", "Extensions", "extension"),
+
+    /** Remote Desktop, full screen (the web's mobile sheet). */
+    REMOTE_DESKTOP("remote-desktop", "Remote Desktop", "remote-desktop"),
+
+    /** The Android device tab, full screen. */
+    ANDROID("android", "Android", "android"),
     ;
 
     companion object {
@@ -89,8 +107,17 @@ enum class PhoneArea(
             "task", "tasks" -> TASKS
             "assistant" -> ASSISTANT
             "jira" -> JIRA
-            else -> null
+            "design", "designs" -> DESIGNS
+            "group", "teams" -> TEAMS
+            "ai-resource", "ai-resources" -> AI_RESOURCES
+            "extension", "extensions" -> EXTENSIONS
+            "remote-desktop" -> REMOTE_DESKTOP
+            "android", "android-device" -> ANDROID
+            else -> if (type.trim().startsWith(EXTENSION_VIEW_PREFIX)) EXTENSIONS else null
         }
+
+        /** An extension's sidebar view as a drawer section id (`ext:<view id>`), as the web's `SidebarActiveTab`. */
+        const val EXTENSION_VIEW_PREFIX: String = "ext:"
 
         /**
          * The areas a server in minimal mode offers (`--minimal`): the chat, its files and Settings,
