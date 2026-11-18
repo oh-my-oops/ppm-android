@@ -71,6 +71,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -1446,7 +1448,8 @@ internal fun AndroidLiveViewer(
     }
 
     Column(modifier.fillMaxSize()) {
-        // 1. Viewer Header (`android-viewer.tsx:75-102`)
+        // 1. Viewer Header (`android-viewer.tsx:75-102`): on a phone the web's icon buttons, labels as names.
+        val iconOnly = LocalPpmMobile.current
         Row(
             Modifier
                 .fillMaxWidth()
@@ -1458,8 +1461,9 @@ internal fun AndroidLiveViewer(
         ) {
             SmallActionButton(
                 label = "All devices",
-                icon = ProductIcon.ArrowLeft,
+                icon = if (iconOnly) ProductIcon.ChevronLeft else ProductIcon.ArrowLeft,
                 tag = "android-back-to-list",
+                iconOnly = iconOnly,
                 onClick = onBackToList,
             )
             BasicText(
@@ -1474,6 +1478,7 @@ internal fun AndroidLiveViewer(
                 icon = ProductIcon.Image,
                 enabled = !shooting,
                 tag = "android-screenshot",
+                iconOnly = iconOnly,
                 onClick = {
                     scope.launch {
                         shooting = true
@@ -1498,6 +1503,7 @@ internal fun AndroidLiveViewer(
                     label = tool.label,
                     icon = tool.icon,
                     primary = activeTool == tool,
+                    iconOnly = iconOnly,
                     tag = "android-tool-${tool.wire}",
                     onClick = { activeTool = if (activeTool == tool) null else tool },
                 )
@@ -2745,9 +2751,12 @@ private fun SmallActionButton(
     danger: Boolean = false,
     enabled: Boolean = true,
     tag: String? = null,
+    iconOnly: Boolean = false,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    // A phone's targets are 44px (`size-11 md:size-9`, `h-11 md:h-9`).
+    val mobile = LocalPpmMobile.current
     val bg: Color = when {
         !enabled -> tokens.panel2.color.copy(alpha = 0.5f)
         danger -> tokens.error.color.copy(alpha = 0.16f)
@@ -2765,9 +2774,25 @@ private fun SmallActionButton(
         primary -> tokens.accent.color
         else -> tokens.border.color
     }
+    if (iconOnly && icon != null) {
+        // The web's ghost icon button (`variant="ghost" size="icon"`), named by its label.
+        Box(
+            Modifier
+                .size(if (mobile) 44.dp else 36.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(if (primary) tokens.panel2.color else Color.Transparent)
+                .clickable(enabled = enabled, onClickLabel = label, onClick = onClick)
+                .semantics { contentDescription = label }
+                .then(if (tag != null) Modifier.testTag(tag) else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            PpmIcon(icon, 16.dp, if (enabled) tokens.text.color else tokens.text3.color.copy(alpha = 0.5f))
+        }
+        return
+    }
     Row(
         Modifier
-            .heightIn(min = 34.dp)
+            .heightIn(min = if (mobile) 44.dp else 34.dp)
             .clip(RoundedCornerShape(7.dp))
             .background(bg)
             .border(1.dp, borderColor, RoundedCornerShape(7.dp))
