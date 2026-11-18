@@ -278,6 +278,7 @@ private fun ChatHistoryRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    com.hienlh.ppm.app.ui.assistant.ManagerChatBadge(model, session.id)
                 }
                 HistoryRowActionIcon(
                     icon = if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin,

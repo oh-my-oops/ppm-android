@@ -179,7 +179,17 @@ import kotlinx.coroutines.launch
  * directly over the single-bar composer, with floating `/` and `@` pickers and footer popovers.
  */
 @Composable
-fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
+fun ChatPane(
+    model: AppModel,
+    tab: ChatTab,
+    modifier: Modifier = Modifier,
+    /** What a host draws among the messages (the PPM Assistant's cards). */
+    timeline: com.hienlh.ppm.chat.ChatTimeline? = null,
+    /** Stands where the composer is while set (the Assistant's reply-to-card bar). */
+    composerOverride: (@Composable () -> Unit)? = null,
+    /** First in the context row (the Assistant's Waiting chip). */
+    contextChip: (@Composable () -> Unit)? = null,
+) {
     val chat = tab.controller ?: return
     val state by chat.state.collectAsState()
     val mobile = LocalPpmMobile.current
@@ -189,7 +199,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
     LaunchedEffect(state.title) {
         state.title?.takeIf { it.isNotEmpty() }?.let {
             tab.session?.let { session -> model.renameSession(session.id, it) }
-            model.retitleTab(tab.tabId, it)
+            // The Assistant's tab keeps its own name whatever the session is called.
+            if (!com.hienlh.ppm.protocol.isAssistantProject(tab.project)) model.retitleTab(tab.tabId, it)
         }
     }
     // Text the tab was opened with is in the box now: once connected, the tab stops offering it.
@@ -410,6 +421,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             ) {
                 CssColumn(Modifier.fillMaxSize()) {
                     if (tab.providerPending) NewChatGateLine(model, tab)
+                    com.hienlh.ppm.app.ui.assistant.ManagerChatBars(model, tab)
                     BackgroundCommandBar(
                         state.backgroundShells,
                         onViewOutput = { model.openBackgroundOutput(tab.tabId, it.shellId) },
@@ -509,6 +521,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                         edits = edits,
                                         bottomFade = true,
                                         overlappedByFooter = footerDirectlyAfterList,
+                                        timeline = timeline,
                                     )
                                 }
                             }
@@ -563,6 +576,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                     horizontalArrangement = Arrangement.spacedBy(if (narrow || mobile) 4.dp else 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
+                                    contextChip?.invoke()
                                     ActivityChip(
                                         sessionId = currentSessionId,
                                         running = runningAgents,
@@ -659,7 +673,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                     images = images,
                                 )
                                 if (tab.editFork != null) EditingLine(onCancel = tab::cancelEdit)
-                                ChatComposer(
+                                if (composerOverride != null) composerOverride() else ChatComposer(
                                     model = model,
                                     tab = tab,
                                     chat = chat,

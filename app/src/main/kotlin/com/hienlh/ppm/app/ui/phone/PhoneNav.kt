@@ -35,6 +35,9 @@ enum class PhoneArea(
 
     /** Spec mode's specs (the web's sidebar Specs panel), and the one opened from them or from a chat. */
     SPECS("specs", "Specs", "specs"),
+
+    /** The PPM Assistant's tab, full screen. */
+    ASSISTANT("assistant", "PPM Assistant", "assistant"),
     ;
 
     companion object {
@@ -78,6 +81,7 @@ enum class PhoneArea(
             "tunnels", "cloud-share" -> CLOUD_AND_SHARE
             "settings" -> SETTINGS
             "specs" -> SPECS
+            "assistant" -> ASSISTANT
             else -> null
         }
 

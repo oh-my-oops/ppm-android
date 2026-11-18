@@ -82,5 +82,6 @@ internal fun PhoneWorkspaceAreaBody(
             model = model,
             nav = nav,
         )
+        PhoneArea.ASSISTANT -> tab?.let { TabBody(model = model, tab = it) }
     }
 }

@@ -93,6 +93,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.LocalRedesign
+import com.hienlh.ppm.app.openAssistant
 import com.hienlh.ppm.app.liftsAsTap
 import com.hienlh.ppm.app.ui.editor.DeviceLspPreference
 import com.hienlh.ppm.app.ui.editor.SharedCompareStore
@@ -302,6 +303,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                     },
                 ))
             }
+            add(action("PPM Assistant", ProductIcon.BotMessageSquare, words = "assistant agent helper control ppm ai claude codex", run = run { model.openAssistant() }))
             add(action("Settings", ProductIcon.Settings, words = "config preferences theme", shortcut = formatShortcut(bindings.binding("open-settings")), run = run { model.openSettings() }))
             add(action("Open File Explorer", ProductIcon.AppWindow, words = "open file explorer finder browse files folders disk drive window", run = run { model.openExplorer() }))
             add(action("System Monitor", ProductIcon.Cpu, words = "task manager activity monitor cpu memory ram disk network gpu processes services apps performance resources", run = run { model.openSystemMonitor() }))

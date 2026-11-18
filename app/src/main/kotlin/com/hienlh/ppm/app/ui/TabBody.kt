@@ -57,6 +57,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "remote-desktop" -> com.hienlh.ppm.app.ui.remotedesktop.RemoteDesktopTab(model, tab.id)
         "android" -> com.hienlh.ppm.app.ui.androiddevice.AndroidTabBody(model, tab)
         "chat" -> model.chat(tab.id)?.let { chat -> key(chat) { ChatPane(model, chat) } }
+        "assistant" -> com.hienlh.ppm.app.ui.assistant.AssistantTabBody(model, tab)
         "session-review" -> SessionReviewBody(model, tab)
         "web-preview" -> WebPreviewBody(model, tab)
         "group" -> GroupChatBody(model, tab)
@@ -125,6 +126,7 @@ internal fun TabPlaceholder(icon: ImageVector, title: String, detail: String) {
 /** A tab's title as its tab bar shows it: a chat's comes from the session list, which carries a rename made anywhere. */
 fun tabTitle(model: AppModel, tab: WorkspaceTab): String {
     if (tab.type == "design") return tab.title.ifEmpty { tab.metaString("designSlug") ?: "Design" }
+    if (tab.type == "assistant") return tab.title.ifEmpty { "PPM Assistant" }
     val chat = model.chat(tab.id) ?: return tab.title.ifEmpty { if (tab.type == "chat") "New Chat" else tab.type }
     return model.title(chat, chat.controller?.state?.value?.title)
 }
@@ -179,6 +181,7 @@ private fun Modifier.onLine(line: IconLine, size: Dp): Modifier {
 fun tabTypeIcon(type: String): ImageVector = when (type) {
     "terminal" -> ProductIcon.Terminal.vector
     "chat" -> ProductIcon.MessageSquare.vector
+    "assistant" -> ProductIcon.BotMessageSquare.vector
     "editor" -> ProductIcon.FileCode.vector
     "database" -> ProductIcon.Table.vector
     "db-structure" -> ProductIcon.FolderTree.vector
