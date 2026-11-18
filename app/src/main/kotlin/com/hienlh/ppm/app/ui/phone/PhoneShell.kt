@@ -141,7 +141,7 @@ fun PhoneShell(
                 "tasks" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.TASKS))
                 "jira" -> if (!minimal && model.jiraEnabled) nav.visitTab(PhoneNav.areaTabId(PhoneArea.JIRA))
                 "history" -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.CHAT))
-                else -> nav.openDrawer()
+                else -> if (minimal || !com.hienlh.ppm.app.ui.phone.areas.showPhoneFeatureSection(drawerRequest, nav)) nav.openDrawer()
             }
         }
     }
@@ -427,11 +427,14 @@ fun PhoneShell(
                         handleDrawerSelection(model, PhoneArea.DATABASE.id, openTabs, nav)
                     },
                 ),
-            ) + com.hienlh.ppm.app.ui.jira.jiraDrawerItems(model, activeArea == PhoneArea.JIRA) {
+            ) + com.hienlh.ppm.app.ui.phone.areas.phoneFeatureDrawerItems(model, activeArea, nav.currentTabId) { id ->
+                nav.closeDrawer()
+                com.hienlh.ppm.app.ui.phone.areas.openPhoneFeatureItem(model, id, nav)
+            } + com.hienlh.ppm.app.ui.jira.jiraDrawerItems(model, activeArea == PhoneArea.JIRA) {
                 nav.closeDrawer()
                 handleDrawerSelection(model, PhoneArea.JIRA.id, openTabs, nav)
             }).filter { item -> PhoneArea.fromId(item.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true },
-            toolTiles = listOf(
+            toolTiles = (listOf(
                 DrawerToolTileItem(
                     id = PhoneArea.PORT_FORWARDING.id,
                     title = "Ports",
@@ -482,7 +485,10 @@ fun PhoneShell(
                     nav.closeDrawer()
                     handleDrawerSelection(model, PhoneArea.SCHEDULES.id, openTabs, nav)
                 },
-            ).filter { tile -> PhoneArea.fromId(tile.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true } +
+            ) + com.hienlh.ppm.app.ui.phone.areas.phoneFeatureDrawerTiles(model) { id ->
+                nav.closeDrawer()
+                com.hienlh.ppm.app.ui.phone.areas.openPhoneFeatureItem(model, id, nav)
+            }).filter { tile -> PhoneArea.fromId(tile.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true } +
                 listOfNotNull(
                     // The host's File Explorer, a sheet over the app (the web drawer's Files tile); none in minimal mode.
                     com.hienlh.ppm.app.ui.phone.files.fileExplorerDrawerTile {
@@ -725,6 +731,9 @@ internal fun phoneTabIconVector(type: String): ImageVector = when (type) {
     "extension" -> ProductIcon.Puzzle.vector
     "group" -> ProductIcon.Users.vector
     "design" -> ProductIcon.Palette.vector
+    "ai-resource" -> ProductIcon.Sparkles.vector
+    "remote-desktop" -> ProductIcon.MonitorSmartphone.vector
+    "android", "android-device" -> ProductIcon.Smartphone.vector
     "problems" -> ProductIcon.AlertTriangle.vector
     "web-preview" -> ProductIcon.Globe.vector
     else -> ProductIcon.FileText.vector
@@ -828,6 +837,9 @@ private fun handleDrawerSelection(
         }
         PhoneArea.TASKS -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.TASKS))
         PhoneArea.JIRA -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.JIRA))
+        PhoneArea.DESIGNS, PhoneArea.TEAMS, PhoneArea.AI_RESOURCES, PhoneArea.EXTENSIONS,
+        PhoneArea.REMOTE_DESKTOP, PhoneArea.ANDROID,
+        -> com.hienlh.ppm.app.ui.phone.areas.openPhoneFeatureItem(model, itemId, nav)
         PhoneArea.SETTINGS -> {
             model.openSettings()
             model.activeTabId?.let(nav::visitTab)

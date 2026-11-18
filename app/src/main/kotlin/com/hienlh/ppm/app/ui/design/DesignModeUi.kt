@@ -60,6 +60,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -1658,6 +1659,44 @@ fun DesignTabBody(
         }
     }
 
+    // The canvas toolbar's actions, shared by the tablet's bar and the phone's More sheet.
+    fun togglePicker() {
+        val next = !pickerEnabled
+        pickerEnabled = next
+        if (next) transformModeOn = false
+        frameChannel?.post(pickerEnvelope(next))
+    }
+
+    fun toggleTransform() {
+        val next = !transformModeOn
+        transformModeOn = next
+        if (next) pickerEnabled = false
+        lastParentGestureAt = System.currentTimeMillis()
+        transformModeEnvelope(next, scale = zoom.toDouble())?.let { frameChannel?.post(it) }
+    }
+
+    fun undoLastEdit() {
+        val undoId = undoStack.pop() ?: return
+        syncUndoCount()
+        if (api != null) {
+            scope.launch {
+                when (val res = api.designUndoEdit(projectName, slug, undoId)) {
+                    is DesignUndoEditResult.Undone -> {
+                        fileGens[activeVariant] = res.gen
+                        mintAndLoadPreview(resetRecovery = true)
+                    }
+                    is DesignUndoEditResult.Rejected -> {
+                        model.toast(ErrorToastMessage("Cannot undo", res.message))
+                    }
+                }
+            }
+        }
+    }
+
+    // A phone has no toolbar: its items are the More sheet's rows (`DesignToolbarList`).
+    val mobile = LocalPpmMobile.current
+    var moreOpen by remember(tab.id) { mutableStateOf(false) }
+
     // Measure the TAB's own width (not window width!) via BoxWithConstraints
     BoxWithConstraints(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
         val tabWidthDp = maxWidth.value.roundToInt()
@@ -1668,7 +1707,7 @@ fun DesignTabBody(
 
         Column(Modifier.fillMaxSize()) {
             // Top Design Header & Toolbar
-            DesignHeaderToolbar(
+            if (!mobile) DesignHeaderToolbar(
                 detail = detail,
                 activeVariant = activeVariant,
                 onSelectVariant = { activeVariant = it },
@@ -1686,39 +1725,12 @@ fun DesignTabBody(
                     }
                 },
                 pickerEnabled = pickerEnabled,
-                onTogglePicker = {
-                    val next = !pickerEnabled
-                    pickerEnabled = next
-                    if (next) transformModeOn = false
-                    frameChannel?.post(pickerEnvelope(next))
-                },
+                onTogglePicker = ::togglePicker,
                 transformModeOn = transformModeOn,
-                onToggleTransform = {
-                    val next = !transformModeOn
-                    transformModeOn = next
-                    if (next) pickerEnabled = false
-                    lastParentGestureAt = System.currentTimeMillis()
-                    transformModeEnvelope(next, scale = zoom.toDouble())?.let { frameChannel?.post(it) }
-                },
+                onToggleTransform = ::toggleTransform,
                 undoCount = undoCount,
                 isStreaming = isStreaming,
-                onUndo = {
-                    val undoId = undoStack.pop() ?: return@DesignHeaderToolbar
-                    syncUndoCount()
-                    if (api != null) {
-                        scope.launch {
-                            when (val res = api.designUndoEdit(projectName, slug, undoId)) {
-                                is DesignUndoEditResult.Undone -> {
-                                    fileGens[activeVariant] = res.gen
-                                    mintAndLoadPreview(resetRecovery = true)
-                                }
-                                is DesignUndoEditResult.Rejected -> {
-                                    model.toast(ErrorToastMessage("Cannot undo", res.message))
-                                }
-                            }
-                        }
-                    }
-                },
+                onUndo = ::undoLastEdit,
                 openCommentsCount = comments.count { !it.resolved && it.file == activeVariant },
                 sidePanel = sidePanel,
                 onToggleSidePanel = { target ->
@@ -1747,6 +1759,44 @@ fun DesignTabBody(
                         shareOpen = false
                         model.openSettings(category)
                     },
+                )
+            }
+
+            if (mobile && moreOpen) {
+                fun toggle(panel: DesignSidePanel) {
+                    sidePanel = if (sidePanel == panel) DesignSidePanel.NONE else panel
+                }
+                DesignPhoneMoreSheet(
+                    frame = deviceFrame,
+                    onFrame = { deviceFrame = it },
+                    variants = detail.summary.variants,
+                    activeVariant = activeVariant,
+                    onVariant = { activeVariant = it },
+                    items = listOf(
+                        DesignMoreItem("reload", "Reload canvas", ProductIcon.RefreshCw) { mintAndLoadPreview(resetRecovery = true) },
+                        DesignMoreItem("history", "Version history", ProductIcon.History, active = sidePanel == DesignSidePanel.HISTORY) {
+                            toggle(DesignSidePanel.HISTORY)
+                        },
+                        DesignMoreItem("select", "Select element", ProductIcon.MousePointerClick, active = pickerEnabled) { togglePicker() },
+                        DesignMoreItem(
+                            "comments",
+                            "Comments",
+                            ProductIcon.MessageSquarePlus,
+                            active = sidePanel == DesignSidePanel.COMMENTS,
+                            badge = comments.count { !it.resolved && it.file == activeVariant },
+                        ) { toggle(DesignSidePanel.COMMENTS) },
+                        DesignMoreItem("share", "Share for review", ProductIcon.Share2, active = shareOpen) { shareOpen = true },
+                        DesignMoreItem("tweaks", "Tweaks", ProductIcon.SlidersHorizontal, active = sidePanel == DesignSidePanel.TWEAKS) {
+                            toggle(DesignSidePanel.TWEAKS)
+                        },
+                        DesignMoreItem("move", "Move and resize", ProductIcon.Move, active = transformModeOn) { toggleTransform() },
+                        DesignMoreItem("undo", "Undo canvas edit", ProductIcon.Undo2, enabled = undoCount > 0 && !isStreaming) { undoLastEdit() },
+                        DesignMoreItem("export", "Export", ProductIcon.Download, active = sidePanel == DesignSidePanel.EXPORT) {
+                            toggle(DesignSidePanel.EXPORT)
+                        },
+                        DesignMoreItem("build-in-new-chat", "Build in new chat", ProductIcon.Send) { triggerBuildInNewChat() },
+                    ),
+                    onDismiss = { moreOpen = false },
                 )
             }
 
@@ -1874,14 +1924,7 @@ fun DesignTabBody(
 
                 // Side Panel / Sheet Overlay for Comments, Tweaks, History, Export
                 if (sidePanel != DesignSidePanel.NONE) {
-                    Box(
-                        Modifier
-                            .align(Alignment.CenterEnd)
-                            .widthIn(min = 280.dp, max = 360.dp)
-                            .fillMaxHeight()
-                            .background(tokens.panel.color)
-                            .cssBorder(tokens.border.color, sides = CssSides.Start),
-                    ) {
+                    val panelBody: @Composable () -> Unit = {
                         when (sidePanel) {
                             DesignSidePanel.COMMENTS -> DesignCommentsPanel(
                                 slug = slug,
@@ -2107,11 +2150,47 @@ fun DesignTabBody(
                             DesignSidePanel.NONE -> Unit
                         }
                     }
+                    when {
+                        !mobile -> Box(
+                            Modifier
+                                .align(Alignment.CenterEnd)
+                                .widthIn(min = 280.dp, max = 360.dp)
+                                .fillMaxHeight()
+                                .background(tokens.panel.color)
+                                .cssBorder(tokens.border.color, sides = CssSides.Start),
+                        ) { panelBody() }
+                        // Docked under the canvas rather than in a sheet: a sheet's backdrop would dim the
+                        // very colours being tweaked (`h-[45%] border-t`).
+                        sidePanel == DesignSidePanel.TWEAKS -> Box(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .fillMaxHeight(0.45f)
+                                .background(tokens.panel.color)
+                                .cssBorder(tokens.border.color, sides = CssSides.Top)
+                                .testTag("design-phone-tweaks"),
+                        ) { panelBody() }
+                        else -> DesignPhonePanelSheet(
+                            tag = "design-phone-panel-${sidePanel.name.lowercase()}",
+                            onDismiss = { sidePanel = DesignSidePanel.NONE },
+                        ) { panelBody() }
+                    }
                 }
             }
 
-            // Single-pane bottom switch bar (Canvas | Chat | More)
-            if (resolution.mode == "single") {
+            // Single-pane bottom switch bar (Canvas | Chat | More): the thumb-zone bar on a phone.
+            if (mobile && resolution.mode == "single") {
+                DesignPhonePaneBar(
+                    pane = resolution.activePane,
+                    moreOpen = moreOpen,
+                    onPaneChange = { pane ->
+                        singlePane = pane
+                        if (pane == DesignPane.CANVAS && layoutOverride == DesignLayoutOverride.CHAT) layoutOverride = DesignLayoutOverride.AUTO
+                        if (pane == DesignPane.CHAT && layoutOverride == DesignLayoutOverride.CANVAS) layoutOverride = DesignLayoutOverride.AUTO
+                    },
+                    onMore = { moreOpen = true },
+                )
+            } else if (resolution.mode == "single") {
                 Row(
                     Modifier
                         .fillMaxWidth()

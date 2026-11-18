@@ -82,12 +82,6 @@ fun tabletOnlyNoticeForType(type: String, title: String = ""): String = when (ty
     "db-connection" -> "Add or edit connections on a tablet."
     "db-structure" -> "Database structure opens on a tablet."
     "db-impexp" -> "Database import and export open on a tablet."
-    "remote-desktop" -> "Remote Desktop opens on a tablet."
-    "android", "android-device" -> "Android device opens on a tablet."
-    "extension", "extensions" -> "Extensions open on a tablet."
-    "design", "designs" -> "Designs open on a tablet."
-    "group", "teams" -> "Teams opens on a tablet."
-    "ai-resource", "ai-resources" -> "AI Resources open on a tablet."
     else -> {
         val label = title.trim().ifEmpty { type.trim().ifEmpty { "This feature" } }
         "$label opens on a tablet."

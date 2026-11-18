@@ -88,5 +88,8 @@ internal fun PhoneWorkspaceAreaBody(
         }
         PhoneArea.ASSISTANT -> tab?.let { TabBody(model = model, tab = it) }
         PhoneArea.JIRA -> com.hienlh.ppm.app.ui.jira.JiraPanel(model)
+        PhoneArea.DESIGNS, PhoneArea.TEAMS, PhoneArea.AI_RESOURCES, PhoneArea.EXTENSIONS,
+        PhoneArea.REMOTE_DESKTOP, PhoneArea.ANDROID,
+        -> com.hienlh.ppm.app.ui.phone.areas.PhoneFeatureAreaBody(model, area, tab, nav)
     }
 }
