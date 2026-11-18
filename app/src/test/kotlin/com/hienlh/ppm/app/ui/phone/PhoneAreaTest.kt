@@ -180,12 +180,9 @@ class PhoneAreaTest {
     }
 
     @Test
-    fun `phone settings sections vs tablet-only settings sections are classified accurately`() {
-        for (section in listOf("connection", "appearance", "notifications", "about")) {
+    fun `every settings section opens on a phone`() {
+        for (section in listOf("appearance", "notifications", "about", "ai", "accounts", "remote-access", "shortcuts", "jira", "storage")) {
             assertFalse("Expected $section to be supported on phone", PhoneArea.isTabletOnlySettingsSection(section))
-        }
-        for (section in listOf("ai-providers", "accounts", "ssh-keys", "tunnels", "db-backup")) {
-            assertTrue("Expected $section to be tablet-only", PhoneArea.isTabletOnlySettingsSection(section))
         }
     }
 

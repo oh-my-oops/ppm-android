@@ -30,7 +30,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.BuildConfig
 import com.hienlh.ppm.app.ui.Separator
 import com.hienlh.ppm.app.ui.SettingsToggleRow
-import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
+import com.hienlh.ppm.app.ui.GeneralDeviceBlocks
 import com.hienlh.ppm.client.ReleaseNotes
 import com.hienlh.ppm.client.applyUpgrade
 import com.hienlh.ppm.client.upgradeStatus
@@ -132,6 +132,7 @@ fun PhoneAboutPage(
                     }
                 }
             },
+            extras = { GeneralDeviceBlocks(model) },
         )
     }
 }
@@ -151,6 +152,8 @@ fun PhoneAboutContent(
     installedVersion: String? = null,
     /** The recent CHANGELOG sections; null hides Release notes. */
     loadReleaseNotes: (suspend () -> List<ChangelogSection>)? = null,
+    /** General's settings (device name, screen wake, password, Learn PPM); null leaves them out. */
+    extras: (@Composable () -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     var confirmUpdateSheetOpen by remember { mutableStateOf(false) }
@@ -262,9 +265,11 @@ fun PhoneAboutContent(
             }
         }
 
-        OpenOnTabletNotice(
-            text = "Device name, server password and onboarding guide open on a tablet.",
-        )
+        if (extras != null) {
+            PhoneSectionCard(Modifier.testTag("phone-about-general")) {
+                Column(Modifier.fillMaxWidth().padding(14.dp)) { extras() }
+            }
+        }
 
         Spacer(Modifier.height(16.dp))
     }

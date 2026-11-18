@@ -46,28 +46,6 @@ enum class PhoneArea(
     ;
 
     companion object {
-        /** Settings categories supported on a phone (Requirement 3.1). */
-        val PHONE_SETTINGS_SECTIONS: Set<String> = setOf(
-            "connection",
-            "appearance",
-            "notifications",
-            "about",
-        )
-
-        /** Settings categories that require a tablet (Requirement 3.2). */
-        val TABLET_ONLY_SETTINGS_SECTIONS: Set<String> = setOf(
-            "ai",
-            "ai-providers",
-            "providers",
-            "accounts",
-            "ssh",
-            "ssh-keys",
-            "tunnel",
-            "tunnels",
-            "backup",
-            "db-backup",
-        )
-
         /**
          * Maps a `WorkspaceTab.type` (or synthetic phone area id) to the [PhoneArea] that renders
          * it on a phone, or `null` when the tab type is tablet-only (Requirement 3.1, 3.2).
@@ -120,12 +98,9 @@ enum class PhoneArea(
         /** True when [tab] is a tablet-only tab that should render [OpenOnTablet] on phone. */
         fun isTabletOnly(tab: WorkspaceTab): Boolean = isTabletOnlyTabType(tab.type)
 
-        /** True when a settings [section] is tablet-only (AI Providers, Accounts, SSH, Tunnel, Backup). */
-        fun isTabletOnlySettingsSection(section: String): Boolean {
-            val normalized = section.lowercase().trim()
-            if (normalized in PHONE_SETTINGS_SECTIONS) return false
-            return normalized in TABLET_ONLY_SETTINGS_SECTIONS || normalized.isNotEmpty()
-        }
+        /** True when a settings [section] cannot open on a phone: none, every section has a phone page. */
+        @Suppress("UNUSED_PARAMETER")
+        fun isTabletOnlySettingsSection(section: String): Boolean = false
     }
 }
 

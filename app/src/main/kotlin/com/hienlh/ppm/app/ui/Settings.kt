@@ -80,8 +80,7 @@ import kotlinx.serialization.json.put
 
 /**
  * Settings as a tab:
- * - On a phone (`< 600.dp`), shows [PhoneSettingsScreen] with the 6 everyday phone sections
- *   as full pages and `"Open on a tablet"` for any other section (Requirements 15.1 & 15.2).
+ * - On a phone (`< 600.dp`), shows [PhoneSettingsScreen]: the list of every section, each a full page.
  * - On a tablet (`>= 600.dp`), shows the list–detail layout with every section in the left rail
  *   beside the selected section's detail (Requirement 15.3).
  */
@@ -166,8 +165,6 @@ internal fun SettingsBody(
                 onRouteChanged = { route ->
                     if (route is PhoneSettingsRoute.FullPage) {
                         route.section.category?.let(onCategoryChange)
-                    } else if (route is PhoneSettingsRoute.TabletOnlyPage) {
-                        onCategoryChange(route.category)
                     }
                 },
             )

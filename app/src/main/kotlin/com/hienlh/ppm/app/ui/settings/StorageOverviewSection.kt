@@ -145,13 +145,7 @@ private fun Fact(label: String, value: String) {
 @Composable
 private fun SessionTraceBlock(model: AppModel, trace: StorageSessionTrace, onSaved: (StorageSessionTrace) -> Unit) {
     val tokens = LocalPpmTokens.current
-    val scope = rememberCoroutineScope()
-    var days by remember(trace.retentionDays) { mutableStateOf(trace.retentionDays.toString()) }
-    var sizeMb by remember(trace.maxSizeMb) { mutableStateOf(trace.maxSizeMb.toString()) }
-    var saving by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
     val usage = traceUsage(trace.sizeBytes, trace.maxSizeMb)
-    val dirty = days != trace.retentionDays.toString() || sizeMb != trace.maxSizeMb.toString()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             BasicText(usage.label, style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color))
@@ -174,6 +168,24 @@ private fun SessionTraceBlock(model: AppModel, trace: StorageSessionTrace, onSav
             Box(Modifier.fillMaxWidth(usage.fraction).fillMaxHeight().clip(RoundedCornerShape(50)).background((if (usage.over) tokens.error else tokens.accent).color))
         }
         BasicText(trace.path, style = ppmText(11f).copy(color = tokens.text3.color))
+        SessionTraceLimitsForm(model, trace, onSaved)
+    }
+}
+
+/**
+ * The session trace's two limits and Save (`StorageSessionTraceBlock`'s form): under the tablet's
+ * size bar, and on the phone's Storage page under its own.
+ */
+@Composable
+internal fun SessionTraceLimitsForm(model: AppModel, trace: StorageSessionTrace, onSaved: (StorageSessionTrace) -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val scope = rememberCoroutineScope()
+    var days by remember(trace.retentionDays) { mutableStateOf(trace.retentionDays.toString()) }
+    var sizeMb by remember(trace.maxSizeMb) { mutableStateOf(trace.maxSizeMb.toString()) }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val dirty = days != trace.retentionDays.toString() || sizeMb != trace.maxSizeMb.toString()
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 BasicText("Keep for (days)", style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color))

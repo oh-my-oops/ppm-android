@@ -27,7 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
+import com.hienlh.ppm.app.ui.AppearanceExtrasSection
+import com.hienlh.ppm.app.ui.Separator
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -65,6 +66,7 @@ fun PhoneThemePage(
             onSelectTheme = { theme ->
                 model.scope.launch { model.pickTheme(theme) }
             },
+            extras = { AppearanceExtrasSection(model) },
         )
     }
 }
@@ -77,6 +79,8 @@ fun PhoneThemeContent(
     onSelectMode: (String) -> Unit,
     onSelectTheme: (PpmTheme) -> Unit,
     modifier: Modifier = Modifier,
+    /** Imported themes, tab style, word wrap and explorer skin, under the themes; null leaves them out. */
+    extras: (@Composable () -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -121,9 +125,10 @@ fun PhoneThemeContent(
             }
         }
 
-        OpenOnTabletNotice(
-            text = "Imported themes, tab style, word wrap and explorer skin open on a tablet.",
-        )
+        if (extras != null) {
+            Separator()
+            Column(Modifier.testTag("phone-theme-extras")) { extras() }
+        }
 
         Spacer(Modifier.height(16.dp))
     }
