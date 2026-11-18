@@ -18,36 +18,47 @@ enum class GitChangeGroup {
 }
 
 /**
- * Contextual actions offered in the long-press sheet for a single changed file on phone
- * (Requirements 9.2, 9.3, 9.4, 9.6 — whole-file operations only).
+ * Contextual actions offered in the long-press sheet for a single changed file on phone, in the
+ * web row's context-menu order (`git-change-row.tsx`).
  */
 enum class PhoneFileActionKind {
+    /** "Review changes": the Review changes tab on this file. */
+    REVIEW_CHANGES,
     OPEN_DIFF,
     OPEN_FILE,
     STAGE_FILE,
     UNSTAGE_FILE,
+    /** "Stage lines…": pick the lines of this file's unstaged changes. */
+    STAGE_LINES,
+    /** "Unstage lines…": pick the lines of this file's staged changes. */
+    UNSTAGE_LINES,
     DISCARD_CHANGES,
+    /** "Resolve conflict": the conflict editor on this file. */
+    RESOLVE_CONFLICT,
+    /** "Mark as resolved": stage the conflicted file as it is. */
+    MARK_RESOLVED,
 }
 
 /**
  * Capability flags and copy constants for Source Control on phone (Requirement 9.6).
  *
- * Phone intentionally omits hunk/line staging, hunk/line discard, Discard all, Review changes,
- * Git Graph, stash, worktrees, conflict resolution, and blame.
+ * A phone resolves conflicts, reviews changes and branches, opens the Git Graph and stages or
+ * discards lines as a tablet does; it still leaves out Discard all, stash, worktrees and blame.
  */
 object PhoneGitCapabilities {
-    const val ALLOWS_BLOCK_OR_LINE_STAGING: Boolean = false
-    const val ALLOWS_BLOCK_OR_LINE_DISCARD: Boolean = false
+    const val ALLOWS_BLOCK_OR_LINE_STAGING: Boolean = true
+    const val ALLOWS_BLOCK_OR_LINE_DISCARD: Boolean = true
     const val ALLOWS_DISCARD_ALL: Boolean = false
-    const val ALLOWS_REVIEW_CHANGES: Boolean = false
-    const val ALLOWS_GIT_GRAPH: Boolean = false
+    const val ALLOWS_REVIEW_CHANGES: Boolean = true
+    const val ALLOWS_GIT_GRAPH: Boolean = true
     const val ALLOWS_STASH: Boolean = false
     const val ALLOWS_WORKTREES: Boolean = false
-    const val ALLOWS_CONFLICT_RESOLUTION: Boolean = false
+    const val ALLOWS_CONFLICT_RESOLUTION: Boolean = true
     const val ALLOWS_BLAME: Boolean = false
 
+    /** Shown while conflicts are left and no merge, rebase or cherry-pick is stopped part way. */
     const val CONFLICT_PAUSE_BANNER: String =
-        "Resolve conflicts on a tablet. Commit and Pull are paused until then."
+        "Resolve the conflicts, then mark them resolved. Commit and Pull are paused until then."
 
     const val PART_OF_FILE_LABEL: String = "part of the file"
     const val REST_OF_FILE_LABEL: String = "rest of the file"
@@ -60,19 +71,22 @@ object PhoneGitCapabilities {
     fun actionsFor(change: FileChange): List<PhoneFileActionKind> {
         if (change.conflict) {
             return listOf(
-                PhoneFileActionKind.OPEN_DIFF,
+                PhoneFileActionKind.RESOLVE_CONFLICT,
                 PhoneFileActionKind.OPEN_FILE,
+                PhoneFileActionKind.MARK_RESOLVED,
             )
         }
-        val stageAction = if (change.group == GitChangeGroup.STAGED) {
-            PhoneFileActionKind.UNSTAGE_FILE
-        } else {
-            PhoneFileActionKind.STAGE_FILE
-        }
+        val staged = change.group == GitChangeGroup.STAGED
         return buildList {
+            add(PhoneFileActionKind.REVIEW_CHANGES)
             add(PhoneFileActionKind.OPEN_DIFF)
             add(PhoneFileActionKind.OPEN_FILE)
-            add(stageAction)
+            add(if (staged) PhoneFileActionKind.UNSTAGE_FILE else PhoneFileActionKind.STAGE_FILE)
+            // A phone row is one side of the file, so it picks lines on that side (`file.unstaged` / `file.staged`).
+            val side = if (staged) change.source?.staged else change.source?.unstaged
+            if (side != null || change.source == null) {
+                add(if (staged) PhoneFileActionKind.UNSTAGE_LINES else PhoneFileActionKind.STAGE_LINES)
+            }
             if (change.canDiscard) {
                 add(PhoneFileActionKind.DISCARD_CHANGES)
             }
