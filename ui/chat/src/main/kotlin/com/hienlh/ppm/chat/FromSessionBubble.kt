@@ -124,7 +124,7 @@ internal fun FromSessionBubble(
             // Folds like the person's own bubble; raw HTML off, as another session's AI wrote it.
             if (text.isNotEmpty()) CollapsibleMarkdown(text, toggle = info)
         }
-        MessageActionBar(timestamp, plainContent)
+        MessageActionBar(timestamp, plainContent) { CopyTurnLinkButton() }
     }
 }
 
@@ -174,47 +174,7 @@ private fun CollapsibleMarkdown(text: String, toggle: com.hienlh.ppm.design.Rgba
 internal fun TurnRefChipRow(refs: List<TurnReference>, modifier: Modifier = Modifier) {
     val project = currentProject()
     FlowRow(modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (ref in refs) TurnRefChip(ref, project)
+        for (ref in refs) TurnRefChipView(ref, project)
     }
 }
 
-/**
- * One turn of another session as a chip (`TurnRefChipView`): the provider's logo, the session's
- * title, "Turn N", and the project when it is not the one being read. A tap opens the session.
- */
-@Composable
-private fun TurnRefChip(ref: TurnReference, currentProject: String?) {
-    val tokens = LocalPpmTokens.current
-    val opener = LocalChatSessionOpener.current
-    val shape = RoundedCornerShape(6.dp)
-    val showProject = currentProject != null && ref.projectName != currentProject
-    val xs = ppmText(12f, lineHeight = 16f)
-    Row(
-        Modifier
-            .heightIn(min = if (LocalPpmMobile.current) 44.dp else 28.dp)
-            .widthIn(max = 288.dp)
-            .clip(shape)
-            .background(tokens.accent.opacity(0.1).color)
-            .then(
-                if (opener != null) {
-                    Modifier.ppmClickable(pressedColor = tokens.accent.opacity(0.1).color) {
-                        opener.open(ChatSessionTarget(ref.projectName, ref.providerId, ref.sessionId, ref.title, ref.turnId))
-                    }
-                } else {
-                    Modifier
-                },
-            )
-            .cssBorder(tokens.accent.opacity(0.3).color, shape)
-            .semantics { contentDescription = "Turn ${ref.n.toLong()} of ${ref.title}" }
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        ProviderLogo(ref.providerId, 16.dp, tokens.text.color)
-        BasicText(ref.title, Modifier.weight(1f, fill = false), xs.copy(color = tokens.text.color, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicText("Turn ${ref.n.toLong()}", style = xs.copy(color = tokens.text3.color), maxLines = 1)
-        if (showProject) {
-            BasicText("· ${ref.projectName}", Modifier.widthIn(max = 96.dp), xs.copy(color = tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}

@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -107,6 +108,9 @@ import com.hienlh.ppm.protocol.VersionGroup
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatJumpRequest
 import com.hienlh.ppm.state.ChatItem
+import com.hienlh.ppm.state.HistoryView
+import com.hienlh.ppm.state.HistoryWindowController
+import com.hienlh.ppm.state.HistoryWindowModel
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.MessageReply
 import com.hienlh.ppm.state.MessageVersions
@@ -178,8 +182,17 @@ fun ChatTranscriptView(
     bottomFade: Boolean = true,
     /** `[data-chat-list]:has(+ [data-chat-footer])`: lifts the scroll navigator `24.dp` when the footer overlaps the `12.dp` fade band. */
     overlappedByFooter: Boolean = bottomFade,
+    /** Copy turn link and the history window a jump to an unloaded turn opens; null leaves both out. */
+    turnTools: ChatTurnTools? = null,
 ) {
+    val sessionId = state.sessionId
+    val providerId = state.providerId
+    val turnLinks = remember(turnTools, sessionId, providerId, state.turnBindings) {
+        if (turnTools == null || sessionId.isNullOrEmpty() || providerId.isNullOrEmpty()) null
+        else TurnLinkContext(turnTools, sessionId, providerId, state.turnBindings)
+    }
     Box(modifier.fillMaxSize()) {
+      CompositionLocalProvider(LocalTurnLinkContext provides turnLinks) {
         when {
             // A new chat has nothing to load until its first message makes the session.
             state.sessionId != null && !state.hasLoadedHistory && state.items.isEmpty() && state.historyError == null ->
@@ -194,11 +207,13 @@ fun ChatTranscriptView(
                         state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken,
                         bottomFade = bottomFade,
                         overlappedByFooter = overlappedByFooter,
+                        turnTools = turnTools,
                     )
                 }
                 selecting?.let { text -> SelectTextDialog(text) { selecting = null } }
             }
         }
+      }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
         }
@@ -219,6 +234,7 @@ private fun TranscriptList(
     onJumpTaken: (ChatJumpRequest) -> Unit,
     bottomFade: Boolean,
     overlappedByFooter: Boolean,
+    turnTools: ChatTurnTools?,
 ) {
     val rollups = remember { TurnRollups() }
     val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning, rollups) }
@@ -324,10 +340,45 @@ private fun TranscriptList(
     // asked for it when the card is not drawn (a sub-agent's call). Waits for the tab to be laid out
     // and its history to load, since the request is made just before the tab opens.
     val taken by rememberUpdatedState(onJumpTaken)
+    val historyView = turnTools?.history?.view?.collectAsState()?.value ?: HistoryView.Live
+    val currentHistoryView by rememberUpdatedState(historyView)
+    var windowLanding by remember { mutableStateOf<WindowLanding?>(null) }
+    var landings by remember { mutableIntStateOf(0) }
+    // Every block the window opens on lands on its turn once.
+    LaunchedEffect((historyView as? HistoryView.Window)?.landing) {
+        val window = historyView as? HistoryView.Window ?: return@LaunchedEffect
+        windowLanding = WindowLanding(window.targetTurnId, ++landings)
+    }
+    val currentState by rememberUpdatedState(state)
     LaunchedEffect(jumpRequest) {
         val request = jumpRequest ?: return@LaunchedEffect
+        val turnId = request.turnId
+        // A tool card or a message is in the live list: the window goes first.
+        if (turnId == null && currentHistoryView is HistoryView.Window) turnTools?.history?.exit()
         while (true) {
-            if (list.layoutInfo.viewportSize.height > 0) {
+            if (turnId != null && list.layoutInfo.viewportSize.height > 0) {
+                val window = currentHistoryView as? HistoryView.Window
+                if (window != null && window.items.any { it.turnId == turnId }) {
+                    windowLanding = WindowLanding(turnId, ++landings)
+                    return@LaunchedEffect taken(request)
+                }
+                val bindings = currentState.turnBindings
+                val row = currentRows.indexOfFirst { it.item.role == ChatItem.Role.USER && (it.item.turnId ?: bindings[it.item.id]) == turnId }
+                if (window == null && row >= 0) {
+                    showMessage(currentRows[row].item.id, row)
+                    return@LaunchedEffect taken(request)
+                }
+                val tools = turnTools
+                if (tools != null && currentState.hasLoadedHistory && !currentState.loadingEarlier) {
+                    when (tools.history.open(turnId)) {
+                        HistoryWindowController.OpenResult.GONE -> tools.toast("This turn is no longer available")
+                        HistoryWindowController.OpenResult.FAILED -> tools.toast("Could not load this turn")
+                        else -> {}
+                    }
+                    return@LaunchedEffect taken(request)
+                }
+            }
+            if (turnId == null && list.layoutInfo.viewportSize.height > 0) {
                 val call = request.toolUseId
                 if (call != null && currentRows.any { r -> r.item.blocks.any { (it as? ChatBlock.Tool)?.tool?.toolUseId == call } }) {
                     jump("$call-0")
@@ -339,7 +390,8 @@ private fun TranscriptList(
                     return@LaunchedEffect taken(request)
                 }
             }
-            if (monotonicMillis() - request.at > ChatJumpRequest.GIVE_UP_MILLIS) return@LaunchedEffect taken(request)
+            val wait = if (turnId != null) ChatJumpRequest.MAX_WAIT_MILLIS else ChatJumpRequest.GIVE_UP_MILLIS
+            if (monotonicMillis() - request.at > wait) return@LaunchedEffect taken(request)
             delay(150)
         }
     }
@@ -500,8 +552,34 @@ private fun TranscriptList(
                     }
                 }
             }
+            val window = historyView as? HistoryView.Window
+            if (window != null && turnTools != null) {
+                // What the live chat had when the window opened, to tell when it has moved on.
+                val openedWith = remember(window.landing) { state.items.size to state.isRunning }
+                val canMerge = remember(window, state.items, state.isRunning) { HistoryWindowModel.canMergeToLive(window, state.items, state.isRunning) }
+                HistoryWindowOverlay(
+                    view = window,
+                    controller = turnTools.history,
+                    landing = windowLanding,
+                    canMerge = canMerge,
+                    liveActivity = state.items.size != openedWith.first || (state.isRunning && !openedWith.second),
+                    horizontalPadding = horizPad,
+                    onMerge = { turnId ->
+                        turnTools.history.exit()
+                        val row = turnId?.let { id -> currentRows.indexOfFirst { it.item.role == ChatItem.Role.USER && it.item.turnId == id } } ?: -1
+                        scope.launch {
+                            scroll.release()
+                            if (row >= 0) list.scrollToItem(currentHead + row) else scroll.toEnd()
+                        }
+                    },
+                    onBackToLatest = {
+                        turnTools.history.exit()
+                        scope.launch { scroll.toEnd() }
+                    },
+                )
+            }
             val hasPendingApproval = state.pendingApproval != null
-            if (!hasPendingApproval) {
+            if (!hasPendingApproval && window == null) {
                 ScrollNavigator(
                     nav,
                     goUp = { scope.launch { list.toPreviousMessage(userItems, density, scroll::release) } },
