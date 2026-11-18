@@ -180,9 +180,15 @@ class TaskRulesTest {
 
     @Test
     fun `decision delivery messages`() {
-        assertEquals("Choice sent to Login chat: it started working on it", decisionDeliveredMessage("started", "Login chat"))
-        assertEquals("Choice sent to the chat: queued behind its current turn or a card waiting on you", decisionDeliveredMessage("queued", null))
-        assertEquals("Choice recorded", decisionDeliveredMessage(null, "x"))
+        val chat = TaskWorkingSession("session", TaskSessionState("c", "idle", "Login chat", null, null, null))
+        assertEquals("Choice sent to \"Login chat\": it started working on it", decisionDeliveredMessage("started", chat))
+        assertEquals("Choice sent to the manager chat: queued behind its current turn or a card waiting on you", decisionDeliveredMessage("queued", chat.copy(kind = "manager")))
+        assertEquals("Choice sent to the chat: it reads it in the turn running now", decisionDeliveredMessage("inserted", TaskWorkingSession.START_CHAT))
+        assertEquals("Choice recorded", decisionDeliveredMessage(null, chat))
+        assertTrue(startChatReplaces(chat))
+        assertFalse(startChatReplaces(chat.copy(session = chat.session!!.copy(state = "gone"))))
+        assertEquals("Manager told", notifyOutcomeMessage(true, null, null))
+        assertEquals("Could not reach the manager: it will see this on its next turn (x)", notifyOutcomeMessage(false, "error", "x"))
         assertEquals("C", optionLetter(2))
     }
 

@@ -466,14 +466,32 @@ fun linkStateView(link: TaskLink, live: TaskLinkState?): LinkStateView {
 
 // Writes
 
-/** The toast after a decision is sent ("Choice sent to X: …"), by how the chat took it. */
-fun decisionDeliveredMessage(delivered: String?, sessionTitle: String?): String {
-    val to = sessionTitle?.trim()?.ifEmpty { null } ?: "the chat"
+/** Where a choice went, in the toast's words (`decisionDeliveredMessage`). */
+fun decisionDeliveredMessage(delivered: String?, working: TaskWorkingSession): String {
+    val where = when (working.kind) {
+        "manager" -> "the manager chat"
+        "session" -> "\"${working.session?.title?.trim()?.ifEmpty { null } ?: "the working chat"}\""
+        else -> "the chat"
+    }
     return when (delivered) {
-        "started" -> "Choice sent to $to: it started working on it"
-        "inserted" -> "Choice sent to $to: it reads it in the turn running now"
-        "queued" -> "Choice sent to $to: queued behind its current turn or a card waiting on you"
+        "started" -> "Choice sent to $where: it started working on it"
+        "inserted" -> "Choice sent to $where: it reads it in the turn running now"
+        "queued" -> "Choice sent to $where: queued behind its current turn or a card waiting on you"
         else -> "Choice recorded"
+    }
+}
+
+/** Whether Start chat would replace a chat that still exists. */
+fun startChatReplaces(w: TaskWorkingSession): Boolean = w.kind == "session" && w.session?.state != "gone"
+
+/** What to tell the user after "Tell now", from the server's answer (`notifyOutcomeMessage`). */
+fun notifyOutcomeMessage(sent: Boolean, reason: String?, error: String?): String {
+    if (sent) return "Manager told"
+    return when (reason) {
+        "nothing_pending" -> "Nothing new to tell the manager"
+        "no_manager" -> "This project has no manager chat"
+        "budget" -> "The manager's message limit is reached: it will see this on its next turn"
+        else -> "Could not reach the manager: it will see this on its next turn${if (error != null) " ($error)" else ""}"
     }
 }
 

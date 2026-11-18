@@ -26,6 +26,8 @@ data class ParsedUserMessage(
     val fromSession: FromSessionReference? = null,
     /** Set when one of the chat's session schedules sent it: drawn as one line, not the person's bubble. */
     val scheduleRun: ScheduleRunReference? = null,
+    /** The PPM tasks the message is about (`taskRefs`), as chips. */
+    val taskRefs: List<TaskReference>? = null,
 ) {
     data class SystemTag(val name: String, val label: String, val content: String) {
         /** The text of `<[tag]>…</[tag]>` inside, such as a task notification's `status`; null when absent or blank. */
@@ -69,7 +71,7 @@ data class ParsedUserMessage(
             val (agent, body) = agentTag(afterCommand)
             val args = command?.args
             val text = if (args != null) (if (body.isNotEmpty()) "$args\n\n$body" else args) else body
-            return ParsedUserMessage(decoded.replyTo, files, text, body, tags, command, blocks, idePath, agent, decoded.turnRefs, decoded.fromSession, scheduleRun)
+            return ParsedUserMessage(decoded.replyTo, files, text, body, tags, command, blocks, idePath, agent, decoded.turnRefs, decoded.fromSession, scheduleRun, decoded.taskRefs)
         }
 
         /**

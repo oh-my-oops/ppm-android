@@ -136,6 +136,7 @@ fun deriveTabId(type: String, metadata: JsonObject, randomId: () -> String = ::w
         "group" -> "group:${m("groupId") ?: "unknown"}"
         "design" -> "design:${m("designSlug") ?: "unknown"}"
         "web-preview" -> "web-preview:${m("url") ?: "unknown"}"
+        "task" -> "task:${m("taskId") ?: "unknown"}"
         else -> "$type:${randomId()}"
     }
 }
