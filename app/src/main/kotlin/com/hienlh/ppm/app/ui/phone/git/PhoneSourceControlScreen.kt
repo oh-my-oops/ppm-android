@@ -32,7 +32,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -62,6 +61,8 @@ import com.hienlh.ppm.client.gitDiscard
 import com.hienlh.ppm.client.gitDiscardUndo
 import com.hienlh.ppm.client.gitFetch
 import com.hienlh.ppm.client.gitHunks
+import com.hienlh.ppm.client.gitOperation
+import com.hienlh.ppm.client.readProjectFile
 import com.hienlh.ppm.client.gitPublish
 import com.hienlh.ppm.client.gitPull
 import com.hienlh.ppm.client.gitPush
@@ -191,6 +192,8 @@ fun PhoneSourceControlScreen(
     chosenRepoPath: String? = null,
     onRepoChosen: (GitRepo) -> Unit = {},
     onStageHunks: (suspend (FileChange, List<DiffHunk>) -> Unit)? = null,
+    tabActions: PhoneGitTabActions = PhoneGitTabActions(),
+    onNotice: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var reloadTick by remember { mutableIntStateOf(0) }
@@ -217,6 +220,7 @@ fun PhoneSourceControlScreen(
     var diffError by remember { mutableStateOf<String?>(null) }
 
     var aiState by remember { mutableStateOf<WriteWithAi>(WriteWithAi.Idle) }
+    var gitConfirm by remember { mutableStateOf<PhoneGitConfirm?>(null) }
 
     val discardController = remember(projectName) { DiscardUndoController() }
     var discardUiTick by remember { mutableIntStateOf(0) }
@@ -548,6 +552,75 @@ fun PhoneSourceControlScreen(
         }
     }
 
+    /** Run [block] as the panel's one git write [key], then read the changes again (`runGit`). */
+    fun runGitWrite(key: String, failure: String, block: suspend (ApiClient) -> Unit) {
+        val client = api ?: return
+        scope.launch {
+            busyAction = key
+            bannerError = null
+            try {
+                block(client)
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                bannerError = "$failure: ${error.message ?: "unknown error"}"
+            } finally {
+                busyAction = null
+                refreshGitState()
+                onStatusChanged()
+            }
+        }
+    }
+
+    /**
+     * Staging a conflict is what marks it resolved, markers or not — so with git's markers still in
+     * the file, ask first, as the web and the tablet do (`markResolved`).
+     */
+    fun handleMarkResolved(change: FileChange) {
+        val client = api ?: return
+        val stageNow = {
+            runGitWrite("stage", "Could not stage") { it.gitStage(projectName, listOf(change.path), resolvedRepo) }
+        }
+        scope.launch {
+            val text = try {
+                client.readProjectFile(projectName, GitRepoScope.projectRelativePath(change.path, resolvedRepo))
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                ""
+            }
+            if (GitChangesView.hasConflictMarkers(text)) {
+                gitConfirm = PhoneGitConfirm(
+                    title = "${change.fileName} still has conflict markers",
+                    message = "Marking it resolved stages the file as it is, markers and all.",
+                    confirmLabel = "Mark resolved",
+                    destructive = true,
+                    run = stageNow,
+                )
+            } else {
+                stageNow()
+            }
+        }
+    }
+
+    /** The operation banner's Continue, Skip and Abort (`/git/operation/:action`); Abort asks first. */
+    fun handleOperation(action: String) {
+        val op = changes?.operation ?: return
+        val noun = GitChangesView.OPERATION_NOUN[op.kind] ?: op.kind
+        when (action) {
+            "continue" -> runGitWrite("continue", "Could not continue the $noun") {
+                it.gitOperation(projectName, "continue", resolvedRepo)
+                onNotice("The $noun is finished")
+            }
+            "skip" -> runGitWrite("skip", "Could not skip the commit") { it.gitOperation(projectName, "skip", resolvedRepo) }
+            "abort" -> gitConfirm = PhoneGitConfirm(
+                title = "Abort the $noun?",
+                message = "This puts the branch back where it was before the $noun started. Conflicts you resolved so far are lost.",
+                confirmLabel = "Abort $noun",
+                destructive = true,
+                run = { runGitWrite("abort", "Could not abort the $noun") { it.gitOperation(projectName, "abort", resolvedRepo) } },
+            )
+        }
+    }
+
     fun handleSyncAction(action: String) {
         val client = api ?: return
         scope.launch {
@@ -772,6 +845,11 @@ fun PhoneSourceControlScreen(
             handleSyncAction(failed.action)
         },
         onDismissSyncFailure = { syncFailure = null },
+        tabActions = tabActions,
+        onMarkResolved = ::handleMarkResolved,
+        onOperationAction = ::handleOperation,
+        gitConfirm = gitConfirm,
+        onDismissGitConfirm = { gitConfirm = null },
         modifier = modifier,
     )
 }
@@ -830,9 +908,25 @@ fun PhoneSourceControlContent(
     syncFailure: PhoneSyncFailureState? = null,
     onRetrySyncFailure: () -> Unit = {},
     onDismissSyncFailure: () -> Unit = {},
+    tabActions: PhoneGitTabActions = PhoneGitTabActions(),
+    onMarkResolved: (FileChange) -> Unit = {},
+    onOperationAction: (String) -> Unit = {},
+    gitConfirm: PhoneGitConfirm? = null,
+    onDismissGitConfirm: () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     var repoPickerSheetOpen by remember { mutableStateOf(false) }
+    var moreSheetOpen by remember { mutableStateOf(false) }
+    // A conflict row opens the conflict editor and its check cell marks it resolved (`git-change-row.tsx`).
+    val openRow: (FileChange) -> Unit = { change ->
+        val resolve = tabActions.onResolveConflict
+        if (change.conflict && resolve != null) resolve(change) else onOpenDiff(change)
+    }
+    val toggleRow: (FileChange) -> Unit = { change ->
+        if (change.conflict) onMarkResolved(change) else onToggleFileStage(change)
+    }
+    val hasMoreActions = tabActions.onOpenBranchReview != null ||
+        (tabActions.onOpenReview != null && groups.totalFiles > 0)
     var actionSheetTarget by remember { mutableStateOf<FileChange?>(null) }
 
     val subline = remember(branchState, groups) {
@@ -874,6 +968,9 @@ fun PhoneSourceControlContent(
                     busyAction = busyAction,
                     onOpenBranchSheet = onOpenBranchSheet,
                     onRefresh = onRefresh,
+                    onOpenHistory = tabActions.onOpenHistory,
+                    historyLabel = tabActions.historyLabel,
+                    onOpenMore = if (hasMoreActions) ({ moreSheetOpen = true }) else null,
                 )
             }
 
@@ -941,11 +1038,25 @@ fun PhoneSourceControlContent(
                             contentPadding = PaddingValues(bottom = if (undoBarState?.active == true) 80.dp else 16.dp),
                         ) {
                             // Conflict pause warning banner (`CF2`, Requirement 9.6, Note N28)
-                            if (groups.hasConflicts || operation != null) {
+                            // A merge, rebase or cherry-pick stopped part way: the web's operation banner,
+                            // with its two ways out (`git-operation-banner.tsx`).
+                            if (operation != null) {
+                                item(key = "operation-banner") {
+                                    com.hienlh.ppm.app.ui.git.GitOperationBanner(
+                                        operation = operation,
+                                        branch = branchState,
+                                        conflicts = groups.conflictCount,
+                                        busyAction = busyAction,
+                                        onContinue = { onOperationAction("continue") },
+                                        onAbort = { onOperationAction("abort") },
+                                        onSkip = if (operation.kind == "rebase") ({ onOperationAction("skip") }) else null,
+                                    )
+                                }
+                            } else if (groups.hasConflicts) {
                                 item(key = "conflict-banner") {
                                     PhoneConflictPauseBanner(
                                         conflictCount = groups.conflictCount,
-                                        operation = operation,
+                                        operation = null,
                                     )
                                 }
                             }
@@ -1030,8 +1141,8 @@ fun PhoneSourceControlContent(
                                     val item = groups.staged[idx]
                                     PhoneGitChangeRow(
                                         change = item,
-                                        onRowClick = { onOpenDiff(item) },
-                                        onToggleCheckbox = { onToggleFileStage(item) },
+                                        onRowClick = { openRow(item) },
+                                        onToggleCheckbox = { toggleRow(item) },
                                         onOpenActionSheet = { actionSheetTarget = item },
                                     )
                                 }
@@ -1041,11 +1152,17 @@ fun PhoneSourceControlContent(
                             if (groups.changes.isNotEmpty()) {
                                 item(key = "header-changes") {
                                     val canStageAll = groups.changes.any { !it.conflict }
+                                    val review = tabActions.onOpenReview
                                     SectionLabel(
                                         text = "CHANGES (${groups.changesCount})",
                                         modifier = Modifier.testTag("phone-git-section-changes"),
-                                        trailing = if (canStageAll) {
+                                        trailing = if (canStageAll || review != null) {
                                             {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                if (review != null) {
+                                                    PhoneGitReviewButton(onClick = { review(null) })
+                                                }
+                                                if (canStageAll) {
                                                 val pillShape = RoundedCornerShape(8.dp)
                                                 Box(
                                                     modifier = Modifier
@@ -1065,6 +1182,8 @@ fun PhoneSourceControlContent(
                                                             .copy(color = tokens.accent.color),
                                                     )
                                                 }
+                                                }
+                                                }
                                             }
                                         } else {
                                             null
@@ -1078,8 +1197,8 @@ fun PhoneSourceControlContent(
                                     val item = groups.changes[idx]
                                     PhoneGitChangeRow(
                                         change = item,
-                                        onRowClick = { onOpenDiff(item) },
-                                        onToggleCheckbox = { onToggleFileStage(item) },
+                                        onRowClick = { openRow(item) },
+                                        onToggleCheckbox = { toggleRow(item) },
                                         onOpenActionSheet = { actionSheetTarget = item },
                                     )
                                 }
@@ -1157,13 +1276,19 @@ fun PhoneSourceControlContent(
         // File long-press contextual sheet (`SC8`, Requirements 9.2, 9.3, 9.4, 9.6)
         val sheetChange = actionSheetTarget
         if (sheetChange != null) {
-            val rowActions = remember(sheetChange, onOpenFile) {
+            val rowActions = remember(sheetChange, onOpenFile, tabActions) {
                 buildPhoneFileRowActions(
                     change = sheetChange,
                     onOpenDiff = { onOpenDiff(sheetChange) },
                     onOpenFile = onOpenFile?.let { open -> { open(sheetChange.path) } },
                     onToggleStage = { onToggleFileStage(sheetChange) },
                     onDiscard = { onRequestDiscard(sheetChange) },
+                    onReview = tabActions.onOpenReview?.let { review -> { review(sheetChange) } },
+                    onResolve = tabActions.onResolveConflict?.let { resolve -> { resolve(sheetChange) } },
+                    onMarkResolved = { onMarkResolved(sheetChange) },
+                    onPickLines = tabActions.onPickLines?.let { pick ->
+                        { pick(sheetChange, if (sheetChange.isStaged) "index" else "worktree") }
+                    },
                 )
             }
             RowActionsSheet(
@@ -1171,6 +1296,39 @@ fun PhoneSourceControlContent(
                 subtitle = sheetChange.subline,
                 actions = rowActions,
                 onDismiss = { actionSheetTarget = null },
+            )
+        }
+
+        // Mark resolved over conflict markers, Abort the merge/rebase
+        if (gitConfirm != null) {
+            ConfirmDialog(
+                title = gitConfirm.title,
+                message = gitConfirm.message,
+                confirmLabel = gitConfirm.confirmLabel,
+                destructive = gitConfirm.destructive,
+                onConfirm = {
+                    onDismissGitConfirm()
+                    gitConfirm.run()
+                },
+                onDismiss = onDismissGitConfirm,
+            )
+        }
+
+        // The header's ··· sheet: the web panel's More menu entries that open a git tab
+        if (moreSheetOpen) {
+            RowActionsSheet(
+                title = "Source Control",
+                actions = buildList {
+                    val review = tabActions.onOpenReview
+                    if (review != null && groups.totalFiles > 0) {
+                        add(RowAction(id = "review-changes", label = "Review changes", icon = LucideIcon.FileDiff, onClick = { review(null) }))
+                    }
+                    val branchReview = tabActions.onOpenBranchReview
+                    if (branchReview != null) {
+                        add(RowAction(id = "review-branch", label = "Review branch…", icon = LucideIcon.FileDiff, onClick = branchReview))
+                    }
+                },
+                onDismiss = { moreSheetOpen = false },
             )
         }
 
@@ -1257,11 +1415,33 @@ internal fun buildPhoneFileRowActions(
     onOpenFile: (() -> Unit)?,
     onToggleStage: () -> Unit,
     onDiscard: () -> Unit,
+    onReview: (() -> Unit)? = null,
+    onResolve: (() -> Unit)? = null,
+    onMarkResolved: (() -> Unit)? = null,
+    onPickLines: (() -> Unit)? = null,
 ): List<RowAction> {
     val allowedKinds = PhoneGitCapabilities.actionsFor(change)
     return buildList {
         for (kind in allowedKinds) {
             when (kind) {
+                PhoneFileActionKind.REVIEW_CHANGES -> if (onReview != null) {
+                    add(RowAction(id = "review-changes", label = "Review changes", icon = LucideIcon.FileDiff, onClick = onReview))
+                }
+                // Without a conflict editor to hand over to, the row still shows the file's diff.
+                PhoneFileActionKind.RESOLVE_CONFLICT -> if (onResolve != null) {
+                    add(RowAction(id = "resolve-conflict", label = "Resolve conflict", icon = ProductIcon.GitMerge, onClick = onResolve))
+                } else {
+                    add(RowAction(id = "open-diff", label = "Open diff", icon = LucideIcon.FileDiff, onClick = onOpenDiff))
+                }
+                PhoneFileActionKind.MARK_RESOLVED -> if (onMarkResolved != null) {
+                    add(RowAction(id = "mark-resolved", label = "Mark as resolved", icon = ProductIcon.Check, onClick = onMarkResolved))
+                }
+                PhoneFileActionKind.STAGE_LINES -> if (onPickLines != null) {
+                    add(RowAction(id = "stage-lines", label = "Stage lines…", icon = ProductIcon.Plus, onClick = onPickLines))
+                }
+                PhoneFileActionKind.UNSTAGE_LINES -> if (onPickLines != null) {
+                    add(RowAction(id = "unstage-lines", label = "Unstage lines…", icon = ProductIcon.Minus, onClick = onPickLines))
+                }
                 PhoneFileActionKind.OPEN_DIFF -> add(
                     RowAction(
                         id = "open-diff",
@@ -1321,6 +1501,9 @@ private fun PhoneBranchHeaderBar(
     busyAction: String?,
     onOpenBranchSheet: () -> Unit,
     onRefresh: () -> Unit,
+    onOpenHistory: (() -> Unit)? = null,
+    historyLabel: String = "View Git Log",
+    onOpenMore: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val branchLabel = phoneGitBranchName(branchState) ?: "Branch"
@@ -1340,6 +1523,7 @@ private fun PhoneBranchHeaderBar(
     ) {
         Row(
             modifier = Modifier
+                .weight(1f, fill = false)
                 .minTouchTarget(minHeight = 40.dp)
                 .clip(pillShape)
                 .background(tokens.panel2.color, pillShape)
@@ -1421,6 +1605,70 @@ private fun PhoneBranchHeaderBar(
                 spinning = busyAction == "fetch",
             )
         }
+
+        // The web header's History (`Open Git Graph` / `View Git Log`) and ··· (`More actions`).
+        if (onOpenHistory != null) {
+            PhoneGitHeaderIconButton(
+                icon = ProductIcon.History,
+                label = historyLabel,
+                tag = "phone-git-history-button",
+                onClick = onOpenHistory,
+            )
+        }
+        if (onOpenMore != null) {
+            PhoneGitHeaderIconButton(
+                icon = ProductIcon.MoreHorizontal,
+                label = "More actions",
+                tag = "phone-git-more-button",
+                onClick = onOpenMore,
+            )
+        }
+    }
+}
+
+/** A 48 dp icon button of the branch bar, the same slot as Fetch and refresh. */
+@Composable
+private fun PhoneGitHeaderIconButton(icon: ProductIcon, label: String, tag: String, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val slotShape = RoundedCornerShape(12.dp)
+    Box(
+        modifier = Modifier
+            .size(KitSpec.MinTouchTarget)
+            .clip(slotShape)
+            .ppmClickable(
+                shape = slotShape,
+                hoverColor = tokens.surfaceHover.color,
+                onClickLabel = label,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = label }
+            .testTag(tag),
+        contentAlignment = Alignment.Center,
+    ) {
+        PpmIcon(icon = icon, size = 18.dp, tint = tokens.text2.color)
+    }
+}
+
+/** The Changes header's `Review` (`title="Review block by block"`): the Review changes tab on every file. */
+@Composable
+private fun PhoneGitReviewButton(onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val pillShape = RoundedCornerShape(8.dp)
+    Row(
+        modifier = Modifier
+            .heightIn(min = KitSpec.MinTouchTarget)
+            .clip(pillShape)
+            .ppmClickable(shape = pillShape, onClickLabel = "Review block by block", onClick = onClick)
+            .padding(horizontal = 8.dp)
+            .testTag("phone-git-review-button"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        PpmIcon(icon = LucideIcon.FileDiff, size = 14.dp, tint = tokens.text2.color)
+        BasicText(
+            text = "Review",
+            style = ppmText(11.5f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text2.color),
+        )
     }
 }
 
@@ -1474,11 +1722,14 @@ internal fun PhoneGitChangeRow(
             modifier = Modifier
                 .width(KitSpec.MinTouchTarget)
                 .heightIn(min = KitSpec.RowPhoneTwoLineHeight)
-                .alpha(if (change.canToggleStage) 1f else 0.55f)
                 .ppmClickable(
-                    enabled = change.canToggleStage,
+                    enabled = change.canToggleStage || change.conflict,
                     role = Role.Checkbox,
-                    onClickLabel = if (change.isStaged) "Unstage ${change.fileName}" else "Stage ${change.fileName}",
+                    onClickLabel = when {
+                        change.conflict -> "Mark ${change.fileName} resolved"
+                        change.isStaged -> "Unstage ${change.fileName}"
+                        else -> "Stage ${change.fileName}"
+                    },
                     onClick = onToggleCheckbox,
                 )
                 .testTag("phone-git-check-${change.group.name.lowercase()}-${change.path}"),
@@ -1565,9 +1816,16 @@ internal fun PhoneGitChangeRow(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        // Trailing +added / −removed counts for this group's side
+        // Trailing +added / −removed counts for this group's side; a conflict says what a tap does
         val noteText = change.lineNote
-        if (counts != null) {
+        if (change.conflict) {
+            BasicText(
+                text = "Resolve",
+                style = ppmText(12f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.accent.color),
+                maxLines = 1,
+                modifier = Modifier.testTag("phone-git-resolve-${change.path}"),
+            )
+        } else if (counts != null) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),

@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -793,7 +794,28 @@ internal fun ConflictEditorContent(
         }
 
         // Conflict Region Action Cards
-        if (regions.isNotEmpty()) {
+        if (regions.isNotEmpty() && mobile) {
+            // A phone stacks each conflict's label over its three accept buttons, 44 dp tall and a third
+            // of the width each, and scrolls the cards in at most a third of the screen so the file stays in view.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .background(tokens.panel.opacity(0.6).color)
+                    .cssBorder(tokens.border.color, sides = CssSides.Bottom)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("conflict-region-list-phone"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (region in regions) {
+                    ConflictRegionPhoneCard(
+                        region = region,
+                        onResolve = { action -> applyResolution(region, action) },
+                    )
+                }
+            }
+        } else if (regions.isNotEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -870,24 +892,83 @@ internal fun ConflictEditorContent(
     }
 }
 
+/** One conflict on a phone: which lines and sides, then Accept Current / Incoming / Both side by side, 44 dp tall. */
+@Composable
+private fun ConflictRegionPhoneCard(
+    region: ConflictRegion,
+    onResolve: (ConflictResolutionAction) -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(tokens.bgSolid.color)
+            .cssBorder(tokens.border.color, RoundedCornerShape(10.dp))
+            .padding(10.dp)
+            .testTag("conflict-region-${region.id}"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BasicText(
+            "Lines ${region.startLine}–${region.endLine} (${region.currentLabel.ifBlank { "HEAD" }} ↔ ${region.incomingLabel.ifBlank { "incoming" }})",
+            style = ppmText(13f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.text.color),
+        )
+        val baseText = region.baseContent
+        if (baseText != null) {
+            BasicText(
+                "diff3 base (${region.baseLabel?.ifBlank { "base" } ?: "base"}): ${baseText.lines().size} line(s)",
+                style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text3.color),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            ConflictActionButton(
+                label = "Accept Current",
+                color = tokens.success.color,
+                tag = "conflict-accept-current-${region.id}",
+                onClick = { onResolve(ConflictResolutionAction.CURRENT) },
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+            )
+            ConflictActionButton(
+                label = "Accept Incoming",
+                color = tokens.accent.color,
+                tag = "conflict-accept-incoming-${region.id}",
+                onClick = { onResolve(ConflictResolutionAction.INCOMING) },
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+            )
+            ConflictActionButton(
+                label = "Accept Both",
+                color = tokens.warning.color,
+                tag = "conflict-accept-both-${region.id}",
+                onClick = { onResolve(ConflictResolutionAction.BOTH) },
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun ConflictActionButton(
     label: String,
     color: Color,
     tag: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(4.dp))
             .background(color.copy(alpha = 0.16f))
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp)
             .testTag(tag),
+        contentAlignment = Alignment.Center,
     ) {
         BasicText(
             label,
-            style = ppmText(11f, FontWeight.Medium, lineHeight = 14f).copy(color = color),
+            style = ppmText(11f, FontWeight.Medium, lineHeight = 14f).copy(color = color, textAlign = TextAlign.Center),
         )
     }
 }

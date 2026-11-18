@@ -41,6 +41,7 @@ import com.hienlh.ppm.client.GitBranch
 import com.hienlh.ppm.client.GitCommit
 import com.hienlh.ppm.client.GitGraphData
 import com.hienlh.ppm.client.gitGraph
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
@@ -198,7 +199,8 @@ fun GitLogBody(model: AppModel, tab: WorkspaceTab) {
             Spacer(Modifier.weight(1f))
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    // A 44 dp touch target on a phone.
+                    .size(if (LocalPpmMobile.current) 44.dp else 28.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .alpha(if (loading) 0.5f else 1f)
                     .clickable(enabled = !loading) { scope.launch { fetchData() } }

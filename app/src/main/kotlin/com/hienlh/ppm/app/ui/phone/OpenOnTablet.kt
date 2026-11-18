@@ -75,10 +75,6 @@ fun tabletOnlyNoticeFor(tab: WorkspaceTab): String =
  * Returns the concise one-line notice for a tablet-only [type] (Requirement 3.2).
  */
 fun tabletOnlyNoticeForType(type: String, title: String = ""): String = when (type.lowercase().trim()) {
-    "conflict-editor" -> "Resolve conflicts on a tablet."
-    "git-review", "session-review" -> "Review changes opens on a tablet."
-    "branch-review" -> "Branch review opens on a tablet."
-    "git-graph", "git-log" -> "Git Graph opens on a tablet."
     "db-connection" -> "Add or edit connections on a tablet."
     "db-structure" -> "Database structure opens on a tablet."
     "db-impexp" -> "Database import and export open on a tablet."
