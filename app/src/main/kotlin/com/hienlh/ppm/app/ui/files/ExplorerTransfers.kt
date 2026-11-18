@@ -138,7 +138,7 @@ class ExplorerTransfers internal constructor(
         catch (error: Exception) { session.failed(error.message ?: "Cannot copy the path.") }
     } }
 
-    /** Attach to root and each directory target; phone has no upload target or upload button. */
+    /** Attach to root and each directory target; a phone has no drop target (it uploads with [upload]). */
     @Composable
     fun dropModifier(directory: String): Modifier {
         if (LocalPpmMobile.current || activity == null) return Modifier
@@ -160,8 +160,21 @@ class ExplorerTransfers internal constructor(
         if (uris.size > PROJECT_UPLOAD_MAX_FILES) { session.failed("Drop at most $PROJECT_UPLOAD_MAX_FILES files."); return true }
         val permission = try { activity?.requestDragAndDropPermissions(event) }
         catch (error: Exception) { session.failed(error.message ?: "Cannot read the dropped files."); return true }
-        val job = session.upload(if (uris.size == 1) "file" else "${uris.size} files", work = { progress ->
-            val sources = withContext(Dispatchers.IO) { uris.map { uploadSource(context, it!!) } }
+        val job = startUpload(directory, uris.map { it!! }) { permission?.release() }
+        if (job == null) permission?.release()
+        return true
+    }
+
+    /** Files a phone picked with Upload Files… (it cannot drop them on the tree), uploaded into [directory] as a drop is. */
+    fun upload(directory: String, uris: List<Uri>) {
+        if (uris.isEmpty() || state.value.busy) return
+        if (uris.size > PROJECT_UPLOAD_MAX_FILES) { session.failed("Choose at most $PROJECT_UPLOAD_MAX_FILES files."); return }
+        startUpload(directory, uris) {}
+    }
+
+    private fun startUpload(directory: String, uris: List<Uri>, release: () -> Unit) =
+        session.upload(if (uris.size == 1) "file" else "${uris.size} files", work = { progress ->
+            val sources = withContext(Dispatchers.IO) { uris.map { uploadSource(context, it) } }
             try {
                 val files = api.uploadProjectFiles(project.name, directory, sources, progress)
                 "Uploaded ${if (files.size == 1) files.first().name else "${files.size} files"}."
@@ -169,11 +182,8 @@ class ExplorerTransfers internal constructor(
                 throw IOException((error.message ?: "Upload failed") + if (error.mayHaveWritten) " Earlier files may already have been saved." else "", error)
             }
         }, finished = {
-            try { onUploadFinished(project.name, directory) } finally { permission?.release() }
+            try { onUploadFinished(project.name, directory) } finally { release() }
         })
-        if (job == null) permission?.release()
-        return true
-    }
 }
 
 private class ExplorerExternalDrop(private val drop: (DragEvent) -> Boolean) : DragAndDropTarget {
