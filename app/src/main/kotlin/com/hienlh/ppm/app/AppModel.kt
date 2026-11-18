@@ -1730,7 +1730,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 keys.await()?.let { keyBindings = KeyBindings(it) }
                 uiPrefs.await()?.let { prefs ->
                     prefs.projectSortMode?.takeIf { it in PROJECT_SORT_MODES }?.let { projectSortMode = it }
-                    projectOpenedAt = prefs.recentOpen
+                    projectOpenedAt = newerOpenTimes(projectOpenedAt, prefs.recentOpen)
                     prefs.sidebarCollapsed?.let { sidebarCollapsed = it }
                     prefs.sidebarWidth?.let { sidebarWidth = it }
                     prefs.keepScreenAwake?.let { keepScreenAwake = it }
@@ -2940,6 +2940,22 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             while (true) {
                 read()
                 delay(10_000)
+            }
+        }
+    }
+
+    /**
+     * Reads the Recent times again (`refreshRecent`): another device may have opened a project since
+     * this one connected. Called whenever a project switcher opens; a newer time this app holds stays.
+     */
+    fun refreshRecentProjects() {
+        val api = api ?: return
+        scope.launch {
+            val server = quietly { api.uiPrefs() }?.recentOpen ?: return@launch
+            val merged = newerOpenTimes(projectOpenedAt, server)
+            if (merged != projectOpenedAt) {
+                projectOpenedAt = merged
+                saveUiPrefs()
             }
         }
     }

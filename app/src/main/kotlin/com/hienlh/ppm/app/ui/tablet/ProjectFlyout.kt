@@ -121,6 +121,8 @@ private val AUTOSCROLL_STEP = 10.dp
 @Composable
 fun ProjectFlyout(model: AppModel, anchor: Rect, limit: Float, onDismiss: () -> Unit) {
     if (closedByConnectionLost(onDismiss)) return
+    // Another device may have opened a project since this app connected: read the Recent times again.
+    androidx.compose.runtime.LaunchedEffect(Unit) { model.refreshRecentProjects() }
     Popup(
         popupPositionProvider = WindowOrigin,
         onDismissRequest = onDismiss,

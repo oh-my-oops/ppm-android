@@ -104,6 +104,8 @@ fun ProjectSwitcherSheet(
     modifier: Modifier = Modifier,
 ) {
     if (model.projectActions != null) return
+    // Another device may have opened a project since this app connected: read the Recent times again.
+    LaunchedEffect(Unit) { model.refreshRecentProjects() }
     val tokens = LocalPpmTokens.current
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
 
