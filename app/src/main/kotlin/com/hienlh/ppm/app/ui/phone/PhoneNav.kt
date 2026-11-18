@@ -97,6 +97,7 @@ enum class PhoneArea(
             // Project search and replace, Problems and the host's File Explorer show in the Files area.
             "search", "problems", "os-explorer", "host-explorer" -> FILES
             "git-diff", "git-status", "source-control" -> SOURCE_CONTROL
+            "conflict-editor", "git-review", "session-review", "branch-review", "git-log" -> SOURCE_CONTROL
             "terminal" -> TERMINAL
             "database", "sqlite", "db-query", "db-sql" -> DATABASE
             "system-monitor", "monitor" -> MONITOR
@@ -135,7 +136,8 @@ enum class PhoneArea(
         fun isMinimalTabType(type: String): Boolean = type == "chat" || type == "settings" || type == "editor"
 
         /** Maps a [WorkspaceTab] to its [PhoneArea], or `null` if it is a tablet-only tab. */
-        fun fromTab(tab: WorkspaceTab): PhoneArea? = fromTabType(tab.type)
+        fun fromTab(tab: WorkspaceTab): PhoneArea? =
+            if (com.hienlh.ppm.app.ui.phone.git.isGitGraphExtensionTab(tab)) SOURCE_CONTROL else fromTabType(tab.type)
 
         /** Resolves a [PhoneArea] by its drawer/route [id], or `null` if unknown. */
         fun fromId(id: String): PhoneArea? = entries.firstOrNull { it.id == id } ?: fromTabType(id)
@@ -147,7 +149,7 @@ enum class PhoneArea(
         fun isTabletOnlyTabType(type: String): Boolean = fromTabType(type) == null
 
         /** True when [tab] is a tablet-only tab that should render [OpenOnTablet] on phone. */
-        fun isTabletOnly(tab: WorkspaceTab): Boolean = isTabletOnlyTabType(tab.type)
+        fun isTabletOnly(tab: WorkspaceTab): Boolean = fromTab(tab) == null
 
         /** True when a settings [section] is tablet-only (AI Providers, Accounts, SSH, Tunnel, Backup). */
         fun isTabletOnlySettingsSection(section: String): Boolean {

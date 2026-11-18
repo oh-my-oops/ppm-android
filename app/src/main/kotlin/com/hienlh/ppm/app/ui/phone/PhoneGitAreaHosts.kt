@@ -51,6 +51,9 @@ import com.hienlh.ppm.app.ui.phone.files.PhoneDiffScreen
 import com.hienlh.ppm.app.ui.phone.files.PhoneFileTabScreen
 import com.hienlh.ppm.app.ui.phone.files.PhoneFilesTreeScreen
 import com.hienlh.ppm.app.ui.phone.git.PhoneGitDiffTabHost
+import com.hienlh.ppm.app.ui.phone.git.PhoneGitTabBodyHost
+import com.hienlh.ppm.app.ui.phone.git.isPhoneGitTabBody
+import com.hienlh.ppm.app.ui.phone.git.rememberPhoneGitTabActions
 import com.hienlh.ppm.app.ui.phone.git.PhoneSourceControlScreen
 import com.hienlh.ppm.client.gitStageHunks
 import com.hienlh.ppm.client.gitUnstageHunks
@@ -135,6 +138,12 @@ internal fun PhoneSourceControlAreaHost(
         )
         return
     }
+    // Resolving a conflict, Review changes, Branch review, the commit list and the Git Graph: the
+    // tablet's own tab body, full screen (`TabBody`), as the web below `md` shows each of them.
+    if (tab != null && isPhoneGitTabBody(tab)) {
+        PhoneGitTabBodyHost(model = model, tab = tab)
+        return
+    }
 
     val project = model.selectedProject.orEmpty()
     val initialStatus = model.gitBranches[project]
@@ -151,6 +160,9 @@ internal fun PhoneSourceControlAreaHost(
         if (project.isNotEmpty()) model.loadGitRepos(project)
     }
     val refreshEvents = remember(model, project) { phoneGitRefreshEvents(model, project) }
+    val repo = com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(model.gitDiscovery[project], model.gitChosenRepoPath[project])
+    val linesTarget = remember(project) { mutableStateOf<Pair<com.hienlh.ppm.state.git.FileChange, String>?>(null) }
+    val tabActions = rememberPhoneGitTabActions(model, project, repo, nav, onPickLines = { change, scope -> linesTarget.value = change to scope })
 
     PhoneSourceControlScreen(
         projectName = project,
@@ -184,7 +196,22 @@ internal fun PhoneSourceControlAreaHost(
                 client.gitStageHunks(project, change.path, items, repo)
             }
         },
+        tabActions = tabActions,
+        onNotice = { text -> model.toast(com.hienlh.ppm.app.ErrorToastMessage(text, kind = com.hienlh.ppm.app.ErrorToastMessage.Kind.SUCCESS)) },
     )
+
+    // "Stage lines…" / "Unstage lines…": the tablet's line picker, a bottom sheet on a phone (`hunk-stage-dialog.tsx`).
+    linesTarget.value?.let { (change, scope) ->
+        com.hienlh.ppm.app.ui.git.GitHunkStageDialog(
+            model = model,
+            project = project,
+            repo = repo,
+            filePath = change.path,
+            scope = scope,
+            onClose = { linesTarget.value = null },
+            onApplied = { model.refreshGitStatus(project) },
+        )
+    }
 }
 
 /**

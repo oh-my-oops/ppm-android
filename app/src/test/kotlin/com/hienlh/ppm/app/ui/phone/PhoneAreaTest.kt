@@ -54,6 +54,11 @@ class PhoneAreaTest {
             "chat" to PhoneArea.CHAT,
             "editor" to PhoneArea.FILES,
             "git-diff" to PhoneArea.SOURCE_CONTROL,
+            "conflict-editor" to PhoneArea.SOURCE_CONTROL,
+            "git-review" to PhoneArea.SOURCE_CONTROL,
+            "session-review" to PhoneArea.SOURCE_CONTROL,
+            "branch-review" to PhoneArea.SOURCE_CONTROL,
+            "git-log" to PhoneArea.SOURCE_CONTROL,
             "terminal" to PhoneArea.TERMINAL,
             "database" to PhoneArea.DATABASE,
             "sqlite" to PhoneArea.DATABASE,
@@ -96,12 +101,7 @@ class PhoneAreaTest {
     @Test
     fun `tablet-only tab types resolve to PhoneTabRoute TabletOnly with concise tablet notice`() {
         val tabletOnlyTypes = listOf(
-            "conflict-editor",
-            "git-review",
-            "session-review",
-            "branch-review",
             "git-graph",
-            "git-log",
             "db-connection",
             "db-structure",
             "db-impexp",
@@ -158,9 +158,10 @@ class PhoneAreaTest {
         // Active tab is tablet-only `git-review:ppm` -> routes to OpenOnTablet
         val activeBefore = store.state.value.activeGridTab
         assertNotNull(activeBefore)
+        // `git-review:ppm` is phone-supported now: it shows in the Source Control area.
         val route = resolvePhoneTabRoute(activeBefore!!)
-        assertTrue(route is PhoneTabRoute.TabletOnly)
-        assertEquals("Review changes opens on a tablet.", (route as PhoneTabRoute.TabletOnly).notice)
+        assertTrue(route is PhoneTabRoute.Area)
+        assertEquals(PhoneArea.SOURCE_CONTROL, (route as PhoneTabRoute.Area).area)
 
         // Switching across tablet-only and phone tabs on phone never drops any tablet-only tab from WorkspaceStore
         store.setActiveTab(structureTab.id)

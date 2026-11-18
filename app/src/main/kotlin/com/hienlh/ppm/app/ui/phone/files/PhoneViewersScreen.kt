@@ -877,6 +877,7 @@ fun PhoneFileTabScreen(
     onBreadcrumbSegmentClick: (PhonePathCrumb) -> Unit = {},
     editorBodyContent: (@Composable () -> Unit)? = null,
     fileViewerContent: (@Composable () -> Unit)? = null,
+    onResolveConflicts: (() -> Unit)? = null,
 ) {
     var editMarkdownAsCode by remember(filePath) { mutableStateOf(false) }
     val kind = remember(filePath, forceCode, editMarkdownAsCode, cannotDisplayBinary) {
@@ -914,6 +915,7 @@ fun PhoneFileTabScreen(
             onRetryLoad = onRetry,
             onBreadcrumbSegmentClick = onBreadcrumbSegmentClick,
             editorBodyContent = editorBodyContent,
+            onResolveConflicts = onResolveConflicts,
             modifier = modifier,
         )
         PhoneFileViewKind.IMAGE -> PhoneImageViewerScreen(

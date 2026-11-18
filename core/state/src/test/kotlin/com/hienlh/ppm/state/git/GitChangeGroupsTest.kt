@@ -237,23 +237,58 @@ class GitChangeGroupsTest {
         assertFalse(row.canToggleStage)
         assertFalse(row.canDiscard)
 
-        // Requirement 9.6: phone capabilities must not expose tablet-only features
-        assertFalse(PhoneGitCapabilities.ALLOWS_BLOCK_OR_LINE_STAGING)
-        assertFalse(PhoneGitCapabilities.ALLOWS_BLOCK_OR_LINE_DISCARD)
+        // A phone resolves conflicts, reviews, opens the graph and picks lines; Discard all, stash, worktrees and blame stay off.
+        assertTrue(PhoneGitCapabilities.ALLOWS_BLOCK_OR_LINE_STAGING)
+        assertTrue(PhoneGitCapabilities.ALLOWS_BLOCK_OR_LINE_DISCARD)
         assertFalse(PhoneGitCapabilities.ALLOWS_DISCARD_ALL)
-        assertFalse(PhoneGitCapabilities.ALLOWS_REVIEW_CHANGES)
-        assertFalse(PhoneGitCapabilities.ALLOWS_GIT_GRAPH)
+        assertTrue(PhoneGitCapabilities.ALLOWS_REVIEW_CHANGES)
+        assertTrue(PhoneGitCapabilities.ALLOWS_GIT_GRAPH)
         assertFalse(PhoneGitCapabilities.ALLOWS_STASH)
         assertFalse(PhoneGitCapabilities.ALLOWS_WORKTREES)
-        assertFalse(PhoneGitCapabilities.ALLOWS_CONFLICT_RESOLUTION)
+        assertTrue(PhoneGitCapabilities.ALLOWS_CONFLICT_RESOLUTION)
         assertFalse(PhoneGitCapabilities.ALLOWS_BLAME)
+        assertFalse(PhoneGitCapabilities.CONFLICT_PAUSE_BANNER.contains("tablet"))
+        // `git-change-row.tsx`: a conflict offers Resolve conflict, Open file, Mark as resolved.
         assertEquals(
-            "Resolve conflicts on a tablet. Commit and Pull are paused until then.",
-            PhoneGitCapabilities.CONFLICT_PAUSE_BANNER,
+            listOf(PhoneFileActionKind.RESOLVE_CONFLICT, PhoneFileActionKind.OPEN_FILE, PhoneFileActionKind.MARK_RESOLVED),
+            PhoneGitCapabilities.actionsFor(row),
+        )
+    }
+
+    @Test
+    fun `phone row actions follow the web context menu and pick lines on the row's own side`() {
+        val file = ChangedFile(
+            path = "src/Both.kt",
+            staged = ChangeSide(added = 1, removed = 0, blocks = listOf("b0")),
+            unstaged = ChangeSide(added = 2, removed = 1, blocks = listOf("b1")),
+            conflict = false,
+            x = "M",
+            y = "M",
+            untracked = false,
+        )
+        val groups = GitChangeGroups.from(listOf(file))
+        assertEquals(
+            listOf(
+                PhoneFileActionKind.REVIEW_CHANGES,
+                PhoneFileActionKind.OPEN_DIFF,
+                PhoneFileActionKind.OPEN_FILE,
+                PhoneFileActionKind.UNSTAGE_FILE,
+                PhoneFileActionKind.UNSTAGE_LINES,
+                // The file still has unstaged changes, so its staged row can discard them too (`hasUnstaged`).
+                PhoneFileActionKind.DISCARD_CHANGES,
+            ),
+            PhoneGitCapabilities.actionsFor(groups.staged.single()),
         )
         assertEquals(
-            listOf(PhoneFileActionKind.OPEN_DIFF, PhoneFileActionKind.OPEN_FILE),
-            PhoneGitCapabilities.actionsFor(row),
+            listOf(
+                PhoneFileActionKind.REVIEW_CHANGES,
+                PhoneFileActionKind.OPEN_DIFF,
+                PhoneFileActionKind.OPEN_FILE,
+                PhoneFileActionKind.STAGE_FILE,
+                PhoneFileActionKind.STAGE_LINES,
+                PhoneFileActionKind.DISCARD_CHANGES,
+            ),
+            PhoneGitCapabilities.actionsFor(groups.changes.single()),
         )
     }
 }

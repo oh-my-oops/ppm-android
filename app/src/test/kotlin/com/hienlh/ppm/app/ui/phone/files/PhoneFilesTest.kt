@@ -300,7 +300,7 @@ class PhoneFilesTest {
         }
 
         compose.onNodeWithText("1 conflict remaining").assertExists()
-        compose.onNodeWithText(MERGE_CONFLICT_TABLET_SUBTITLE).assertExists()
+        compose.onNodeWithText(MERGE_CONFLICT_RESOLVE_SUBTITLE).assertExists()
         compose.onNodeWithText("File changed on disk while you have unsaved edits.").assertExists()
         compose.onNodeWithText("Discard & Reload").assertExists()
         compose.onNodeWithText("Overwrite Disk").assertExists()

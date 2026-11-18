@@ -95,6 +95,7 @@ fun PhoneEditorScreen(
     onSelectionAction: (PhoneSelectionAction) -> Unit = {},
     onBreadcrumbSegmentClick: (PhonePathCrumb) -> Unit = {},
     editorBodyContent: (@Composable () -> Unit)? = null,
+    onResolveConflicts: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val context = LocalContext.current
@@ -233,8 +234,10 @@ fun PhoneEditorScreen(
             PhoneFilesBanner(
                 icon = ProductIcon.GitMerge,
                 title = formatMergeConflictBannerTitle(conflictCount),
-                subtitle = MERGE_CONFLICT_TABLET_SUBTITLE,
+                subtitle = MERGE_CONFLICT_RESOLVE_SUBTITLE,
                 isError = false,
+                actionLabel = if (onResolveConflicts != null) "Resolve" else null,
+                onAction = onResolveConflicts,
                 modifier = Modifier.testTag("phone-editor-conflict-banner"),
             )
         }

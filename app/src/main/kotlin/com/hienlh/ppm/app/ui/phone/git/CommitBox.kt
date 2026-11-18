@@ -128,11 +128,7 @@ fun phoneCommitHint(
 ): String {
     if (conflictCount > 0) {
         val noun = if (conflictCount == 1) "conflict" else "conflicts"
-        return if (isTablet) {
-            "Resolve $conflictCount $noun to commit"
-        } else {
-            "Resolve $conflictCount $noun on a tablet"
-        }
+        return "Resolve $conflictCount $noun to commit"
     }
     if (aiState is WriteWithAi.Writing) {
         return aiState.writingLabel(stagedCount = stagedCount, tablet = isTablet)

@@ -378,8 +378,8 @@ internal fun PhoneTranscriptLocals(model: AppModel, tab: ChatTab, chat: ChatCont
 
 /**
  * The session's Review, opened from the changes sheet on [path] (`openSessionReview`): the
- * phone's Review layout over the chat. The workspace's session-review tab is not used, since a
- * phone shows that tab type as "opens on a tablet"; this holds its own review of the same session.
+ * phone's Review layout over the chat. It holds its own review of the same session rather than
+ * opening the workspace's session-review tab (which a phone shows in Source Control), so it closes back onto the chat.
  */
 internal class PhoneSessionReview(val review: ReviewTab)
 

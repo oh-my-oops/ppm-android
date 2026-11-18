@@ -449,7 +449,8 @@ fun countMergeConflicts(content: String): Int {
 fun formatMergeConflictBannerTitle(conflictCount: Int): String =
     if (conflictCount == 1) "1 conflict remaining" else "$conflictCount conflicts remaining"
 
-const val MERGE_CONFLICT_TABLET_SUBTITLE: String = "Resolve conflicts on a tablet."
+/** Under the merge conflict banner: the file stays read-only here, and Resolve opens the conflict editor. */
+const val MERGE_CONFLICT_RESOLVE_SUBTITLE: String = "Accept current, incoming or both in the conflict editor."
 
 // ───────────────────────── Section 3 · Diff ─────────────────────────
 

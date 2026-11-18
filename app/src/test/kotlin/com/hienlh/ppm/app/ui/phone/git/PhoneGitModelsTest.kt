@@ -60,7 +60,7 @@ class PhoneGitModelsTest {
         assertEquals("Tick a file to stage", phoneCommitHint(0, 2, 0, ""))
         assertEquals("2 files staged · write a message to commit", phoneCommitHint(2, 3, 0, "  "))
         assertEquals("1 file staged · ready to commit", phoneCommitHint(1, 2, 0, "feat: add phone git"))
-        assertEquals("Resolve 2 conflicts on a tablet", phoneCommitHint(1, 2, 2, "feat: add phone git"))
+        assertEquals("Resolve 2 conflicts to commit", phoneCommitHint(1, 2, 2, "feat: add phone git"))
 
         assertFalse(phoneCanCommit(stagedCount = 0, conflictCount = 0, message = "msg"))
         assertFalse(phoneCanCommit(stagedCount = 1, conflictCount = 0, message = "   "))

@@ -133,6 +133,8 @@ fun PhoneFileTabHost(model: AppModel, tab: WorkspaceTab, modifier: Modifier = Mo
                 null
             },
             onCloseTab = { model.closeTab(tab.id) },
+            // A file with git's conflict markers opens the conflict editor, as Source Control's Resolve does.
+            onResolveConflicts = if (isRelativeProjectFile) ({ model.openGitConflictTab(project!!, path) }) else null,
             onBreadcrumbSegmentClick = { crumb ->
                 if (isRelativeProjectFile) siblingsOf = crumb.relativePath.substringBeforeLast('/', "")
             },
