@@ -29,6 +29,8 @@ sealed class PpmError(message: String) : Exception(message) {
         val code: String? = null,
         val hint: String? = null,
         val data: JsonElement? = null,
+        /** The whole answer, for a route that puts its details beside `error` (the vault's `attemptsLeft`, `retryAfterMs`). Not compared. */
+        val body: JsonElement? = null,
     ) : PpmError(serverMessage) {
         override fun equals(other: Any?) =
             other is Server &&

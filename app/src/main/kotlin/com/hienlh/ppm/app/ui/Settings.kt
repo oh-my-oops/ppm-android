@@ -221,6 +221,7 @@ enum class SettingsCategory(
     Mcp("mcp", "MCP Servers", "Model Context Protocol servers & sign-in", ProductIcon.Plug, SettingsGroup.Ai, minimalSafe = true),
     AiResources("ai-resources", "AI Resources", "Skills, agents, commands & MCP configs", ProductIcon.Layers, SettingsGroup.Ai, minimalSafe = false),
     PpmBot("ppmbot", "PPMBot", "Telegram bot coordinator, tasks & memory", ProductIcon.BotMessageSquare, SettingsGroup.Ai, minimalSafe = false),
+    Vault("vault", "Vault", "Personal details the AI may read, behind passwords", ProductIcon.Lock, SettingsGroup.Ai, minimalSafe = false),
     Design("design", "Design", "Design Canvas apps, instructions & skills", ProductIcon.LayoutGrid, SettingsGroup.Ai, minimalSafe = false),
 
     // Integrations
@@ -547,6 +548,7 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                     SettingsCategory.Mcp -> McpSettingsSection(model)
                     SettingsCategory.AiResources -> AiResourcesSettingsSection(model)
                     SettingsCategory.PpmBot -> PpmBotSettingsSection(model)
+                    SettingsCategory.Vault -> com.hienlh.ppm.app.ui.settings.vault.VaultSettingsSection(model)
                     SettingsCategory.Design -> DesignSettingsSection(model)
                     SettingsCategory.Notifications -> NotificationsSettingsSection(model)
                     SettingsCategory.RemoteAccess -> RemoteAccessSettingsSection(model)

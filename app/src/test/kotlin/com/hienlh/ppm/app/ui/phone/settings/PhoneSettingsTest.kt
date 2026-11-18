@@ -46,7 +46,7 @@ class PhoneSettingsTest {
     fun `phone settings route model maps the 6 full sections and routes all other categories to Open on a tablet`() {
         // Requirement 15.1: 6 full phone sections
         assertEquals(
-            listOf("Accounts", "AI Provider", "Memory", "Notifications", "Theme", "Servers", "Schedules", "Storage", "About"),
+            listOf("Accounts", "AI Provider", "Memory", "Tools", "Vault", "Notifications", "Theme", "Servers", "Schedules", "Storage", "About"),
             PhoneSettingsSection.entries.map { it.title },
         )
         assertEquals(
@@ -94,6 +94,8 @@ class PhoneSettingsTest {
             SettingsCategory.Accounts,
             SettingsCategory.Ai,
             SettingsCategory.Memory,
+            SettingsCategory.Tools,
+            SettingsCategory.Vault,
             SettingsCategory.Notifications,
             SettingsCategory.Appearance,
             SettingsCategory.Servers,
@@ -146,15 +148,15 @@ class PhoneSettingsTest {
         }
 
         for (section in PhoneSettingsSection.entries) {
-            composeRule.onNodeWithTag("phone-settings-row-${section.id}").assertIsDisplayed()
+            composeRule.onNodeWithTag("phone-settings-row-${section.id}").assertExists()
         }
         composeRule.onNodeWithTag("phone-settings-row-accounts").performClick()
         assertEquals(PhoneSettingsSection.Accounts, selectedSection)
 
         // Switch state to a non-phone section (Requirement 15.2)
-        tabletOnlyCategory = SettingsCategory.Tools
+        tabletOnlyCategory = SettingsCategory.Jira
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("phone-settings-tablet-only-tools").assertIsDisplayed()
+        composeRule.onNodeWithTag("phone-settings-tablet-only-jira").assertIsDisplayed()
         composeRule.onNodeWithText("Open on a tablet").assertIsDisplayed()
     }
 

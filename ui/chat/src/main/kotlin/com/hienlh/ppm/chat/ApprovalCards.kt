@@ -89,6 +89,7 @@ import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ChatQuestions
 import com.hienlh.ppm.protocol.Question
 import com.hienlh.ppm.protocol.SessionCollabApprovalInput
+import com.hienlh.ppm.protocol.VaultCardInput
 import com.hienlh.ppm.protocol.prettyString
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -116,6 +117,8 @@ fun PendingApprovalCard(request: ApprovalRequest, respond: (approved: Boolean, d
     if (db != null) return DbExecuteApprovalCard(request.requestId, db, modifier)
     val collab = remember(request.tool, request.input) { SessionCollabApprovalInput.from(request.tool, request.input) }
     if (collab != null) return CollabApprovalCard(request.requestId, collab, modifier)
+    val vault = remember(request.tool, request.input) { VaultCardInput.from(request.tool, request.input) }
+    if (vault != null) return VaultCard(request.requestId, vault, modifier)
     ToolApprovalCard(request, respond, modifier)
 }
 

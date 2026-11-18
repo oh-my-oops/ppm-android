@@ -61,6 +61,22 @@ enum class PhoneSettingsSection(
         group = PhoneSettingsGroup.AI,
         category = SettingsCategory.Memory,
     ),
+    Tools(
+        id = "tools",
+        title = "Tools",
+        subtitle = "PPM tools the AI can use",
+        icon = ProductIcon.Wrench,
+        group = PhoneSettingsGroup.AI,
+        category = SettingsCategory.Tools,
+    ),
+    Vault(
+        id = "vault",
+        title = "Vault",
+        subtitle = "Personal details the AI may read, behind passwords",
+        icon = ProductIcon.Lock,
+        group = PhoneSettingsGroup.AI,
+        category = SettingsCategory.Vault,
+    ),
     Notifications(
         id = "notifications",
         title = "Notifications",
@@ -143,6 +159,8 @@ fun isPhoneFullSettingsCategory(category: SettingsCategory): Boolean = when (cat
     SettingsCategory.Accounts,
     SettingsCategory.Ai,
     SettingsCategory.Memory,
+    SettingsCategory.Tools,
+    SettingsCategory.Vault,
     SettingsCategory.Notifications,
     SettingsCategory.Appearance,
     SettingsCategory.Servers,
@@ -159,6 +177,8 @@ fun resolvePhoneSettingsCategory(category: SettingsCategory): PhoneSettingsRoute
     SettingsCategory.Accounts -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Accounts)
     SettingsCategory.Ai -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.AiProvider)
     SettingsCategory.Memory -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Memory)
+    SettingsCategory.Tools -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Tools)
+    SettingsCategory.Vault -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Vault)
     SettingsCategory.Notifications -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Notifications)
     SettingsCategory.Appearance -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Theme)
     SettingsCategory.Servers -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Servers)
