@@ -213,6 +213,7 @@ internal fun ToolsSettingsSection(model: AppModel) {
     val scope = rememberCoroutineScope()
     var ppmTools by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     var hideBuiltinCron by remember { mutableStateOf<Boolean?>(null) }
+    var sessionCollab by remember { mutableStateOf<kotlinx.serialization.json.JsonElement?>(null) }
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
@@ -222,6 +223,7 @@ internal fun ToolsSettingsSection(model: AppModel) {
             val loaded = client.aiSettings()
             ppmTools = loaded.ppmTools
             hideBuiltinCron = loaded.hideBuiltinCron
+            sessionCollab = loaded.sessionCollab
             errorMsg = null
         } catch (t: Throwable) {
             errorMsg = t.message ?: "Failed to load tools settings"
@@ -240,7 +242,7 @@ internal fun ToolsSettingsSection(model: AppModel) {
         errorMsg = errorMsg,
         onToggleTool = { toolId, enabled ->
             val previous = ppmTools
-            ppmTools = previous + (toolId to enabled)
+            ppmTools = com.hienlh.ppm.state.settings.patchPpmToolSwitches(previous, toolId, enabled)
             errorMsg = null
             val client = api ?: return@ToolsSettingsContent
             scope.launch {
@@ -271,6 +273,19 @@ internal fun ToolsSettingsSection(model: AppModel) {
                 }
             }
         },
+        sessionCollab = com.hienlh.ppm.state.settings.SessionCollabSettings.resolve(sessionCollab),
+        onSessionCollab = { key, value ->
+            errorMsg = null
+            val client = api ?: return@ToolsSettingsContent
+            scope.launch {
+                try {
+                    sessionCollab = client.updateAiSettings(com.hienlh.ppm.protocol.AiSettingsPatch.sessionCollab(key, value)).sessionCollab
+                } catch (t: Throwable) {
+                    errorMsg = t.message ?: "Could not save"
+                    reload()
+                }
+            }
+        },
     )
 }
 
@@ -283,11 +298,13 @@ internal fun ToolsSettingsContent(
     /** `hide_builtin_cron`, on unless set off. */
     hideBuiltinCron: Boolean = true,
     onHideBuiltinCron: (Boolean) -> Unit = {},
+    sessionCollab: com.hienlh.ppm.state.settings.SessionCollabSettings = com.hienlh.ppm.state.settings.SessionCollabSettings(),
+    onSessionCollab: (key: String, value: kotlinx.serialization.json.JsonElement) -> Unit = { _, _ -> },
 ) {
     val tokens = LocalPpmTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         BasicText(
-            "Control which built-in PPM MCP tools are exposed to AI chats. Changes apply to new turns.",
+            "PPM's own tools for the AI chat, with Claude, Codex and Antigravity alike. New chats get the tools that are on; turning one off also stops it in chats already open.",
             style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
         )
         if (loading) {
@@ -314,6 +331,9 @@ internal fun ToolsSettingsContent(
                         onCheckedChange = { next -> onToggleTool(tool.id, next) },
                         testTag = "ppm-tool-toggle-${tool.id}",
                     )
+                }
+                if (group.tools.any { it.id == "create_session" }) {
+                    com.hienlh.ppm.app.ui.settings.SessionCollabControls(sessionCollab, onSessionCollab)
                 }
                 if (group.tools.any { it.id == "session_schedule_create" }) {
                     SettingsToggleRow(
