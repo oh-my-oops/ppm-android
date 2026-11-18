@@ -53,6 +53,7 @@ import com.hienlh.ppm.app.ReviewTab
 import com.hienlh.ppm.app.TextInputFocus
 import com.hienlh.ppm.app.ui.AntigravityUsagePanel
 import com.hienlh.ppm.app.ui.BottomSheet
+import com.hienlh.ppm.app.ui.designShotReader
 import com.hienlh.ppm.app.ui.LocalSheetContentTop
 import com.hienlh.ppm.app.ui.SwitchAccountView
 import com.hienlh.ppm.app.ui.SwitchAccountsState
@@ -67,6 +68,7 @@ import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.LocalChatTabs
 import com.hienlh.ppm.chat.LocalMarkdownImages
 import com.hienlh.ppm.chat.LocalRunInTerminal
+import com.hienlh.ppm.chat.LocalDesignShots
 import com.hienlh.ppm.chat.LocalToolImages
 import com.hienlh.ppm.chat.LocalTurnChanges
 import com.hienlh.ppm.chat.MarkdownImages
@@ -359,6 +361,7 @@ internal fun PhoneTranscriptLocals(model: AppModel, tab: ChatTab, chat: ChatCont
     CompositionLocalProvider(
         LocalChatImages provides images,
         LocalToolImages provides toolImages,
+        LocalDesignShots provides designShotReader(model.api),
         LocalMarkdownImages provides markdownImages,
         LocalChatTabs provides tabs,
         LocalRunInTerminal provides { command -> model.runInTerminal(command, tab.project) },

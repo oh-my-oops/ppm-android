@@ -146,6 +146,12 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
         SessionCollabToolCard(collabCall, result?.output, isError, isDone, modifier)
         return
     }
+    // A design screenshot shows its pictures, read from the server by id.
+    val shotCall = if (tool.requestId == null) remember(tool.name, tool.input) { designShotCall(tool.name, tool.input) } else null
+    if (shotCall != null) {
+        DesignShotCard(shotCall, result?.output, isError, isDone, modifier)
+        return
+    }
     if (tool.isAgent && variant == ToolCardVariant.Chat) {
         val opener = LocalAgentSessionOpener.current
         AgentRow(tool, if (isError || bgFailed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING, bgRunning, modifier) {
