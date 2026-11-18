@@ -387,15 +387,6 @@ suspend fun ApiClient.clawbotCancelTelegramConnect(): JsonElement =
 suspend fun ApiClient.clawbotDisconnectPairedChat(chatId: String): JsonElement =
     call("DELETE", "/api/settings/clawbot/paired/${ApiClient.escape(chatId)}")
 
-suspend fun ApiClient.clawbotListTasks(limit: Int = 20): JsonElement =
-    call("GET", "/api/settings/clawbot/tasks", query = listOf("limit" to limit.toString()))
-
-suspend fun ApiClient.clawbotListMemories(project: String = "_global"): JsonElement =
-    call("GET", "/api/settings/clawbot/memories", query = listOf("project" to project))
-
-suspend fun ApiClient.clawbotDeleteMemory(id: Long): JsonElement =
-    call("DELETE", "/api/settings/clawbot/memories/$id")
-
 // ===========================================================================
 // 6. Design Settings & Design Systems (/api/settings/design, /designs/systems)
 // ===========================================================================

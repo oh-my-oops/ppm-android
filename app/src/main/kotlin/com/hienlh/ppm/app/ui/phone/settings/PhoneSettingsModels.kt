@@ -69,6 +69,14 @@ enum class PhoneSettingsSection(
         group = PhoneSettingsGroup.AI,
         category = SettingsCategory.Tools,
     ),
+    Assistant(
+        id = "assistant",
+        title = "PPM Assistant",
+        subtitle = "Its own model, instructions, MCP servers, Telegram",
+        icon = ProductIcon.Sparkles,
+        group = PhoneSettingsGroup.AI,
+        category = SettingsCategory.Assistant,
+    ),
     Vault(
         id = "vault",
         title = "Vault",
@@ -160,6 +168,7 @@ fun isPhoneFullSettingsCategory(category: SettingsCategory): Boolean = when (cat
     SettingsCategory.Ai,
     SettingsCategory.Memory,
     SettingsCategory.Tools,
+    SettingsCategory.Assistant,
     SettingsCategory.Vault,
     SettingsCategory.Notifications,
     SettingsCategory.Appearance,
@@ -178,6 +187,7 @@ fun resolvePhoneSettingsCategory(category: SettingsCategory): PhoneSettingsRoute
     SettingsCategory.Ai -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.AiProvider)
     SettingsCategory.Memory -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Memory)
     SettingsCategory.Tools -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Tools)
+    SettingsCategory.Assistant -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Assistant)
     SettingsCategory.Vault -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Vault)
     SettingsCategory.Notifications -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Notifications)
     SettingsCategory.Appearance -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Theme)

@@ -46,7 +46,7 @@ class PhoneSettingsTest {
     fun `phone settings route model maps the 6 full sections and routes all other categories to Open on a tablet`() {
         // Requirement 15.1: 6 full phone sections
         assertEquals(
-            listOf("Accounts", "AI Provider", "Memory", "Tools", "Vault", "Notifications", "Theme", "Servers", "Schedules", "Storage", "About"),
+            listOf("Accounts", "AI Provider", "Memory", "Tools", "PPM Assistant", "Vault", "Notifications", "Theme", "Servers", "Schedules", "Storage", "About"),
             PhoneSettingsSection.entries.map { it.title },
         )
         assertEquals(
@@ -95,6 +95,7 @@ class PhoneSettingsTest {
             SettingsCategory.Ai,
             SettingsCategory.Memory,
             SettingsCategory.Tools,
+            SettingsCategory.Assistant,
             SettingsCategory.Vault,
             SettingsCategory.Notifications,
             SettingsCategory.Appearance,

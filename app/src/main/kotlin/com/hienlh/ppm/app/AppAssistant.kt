@@ -170,6 +170,14 @@ class AppAssistant internal constructor(private val model: AppModel) {
         model.onWorkspace { store -> openIn(store, sessionId, providerId) }
     }
 
+    /** `openAssistantNewSession`: the Assistant on screen on a new session with [providerId]. */
+    fun openNewSession(providerId: String) {
+        model.onWorkspace { store ->
+            val id = openIn(store, providerId = providerId)
+            if (id.isNotEmpty()) swap(id, "sessionId" to null, "providerId" to JsonPrimitive(providerId))
+        }
+    }
+
     internal fun openIn(store: WorkspaceStore, sessionId: String? = null, providerId: String? = null): String {
         // A phone's grids are per project: a copy left in another project's hidden grid moves here.
         val carried = moveHiddenCopy(store)

@@ -849,31 +849,6 @@ fun duplicateAiResourceTargetScope(itemScope: String, activeProjectPath: String)
 // 5. PPMBot / Clawbot (Phase 12b.5 — /api/settings/clawbot)
 // ===========================================================================
 
-data class ClawbotConfigState(
-    val enabled: Boolean = false,
-    val defaultProvider: String = "claude",
-    val systemPrompt: String = "",
-    val showToolCalls: Boolean = true,
-    val showThinking: Boolean = false,
-    val permissionMode: String = "bypassPermissions",
-    val debounceMs: Int = 2000,
-)
-
-fun parseClawbotConfig(json: JsonElement?): ClawbotConfigState {
-    if (json == null) return ClawbotConfigState()
-    return ClawbotConfigState(
-        enabled = json["enabled"].bool == true,
-        defaultProvider = json["default_provider"].string ?: "claude",
-        systemPrompt = json["system_prompt"].string.orEmpty(),
-        showToolCalls = json["show_tool_calls"].bool ?: true,
-        showThinking = json["show_thinking"].bool == true,
-        permissionMode = json["permission_mode"].string ?: "bypassPermissions",
-        debounceMs = json["debounce_ms"].int ?: 2000,
-    )
-}
-
-fun clampDebounceMs(raw: Int): Int = raw.coerceIn(0, 30_000)
-
 data class TelegramPairedChat(
     val chatId: String,
     val name: String,
@@ -946,50 +921,6 @@ fun parseClawbotTelegram(
         connectError = connectError,
     )
 }
-
-data class ClawbotTaskRow(
-    val id: String,
-    val chatId: String,
-    val projectName: String,
-    val prompt: String,
-    val status: String,
-    val createdAt: Long,
-    val completedAt: Long? = null,
-)
-
-fun parseClawbotTasks(json: JsonElement?): List<ClawbotTaskRow> =
-    json?.array.orEmpty().mapNotNull { row ->
-        val id = row["id"].string ?: return@mapNotNull null
-        ClawbotTaskRow(
-            id = id,
-            chatId = row["chat_id"].string.orEmpty(),
-            projectName = row["project_name"].string.orEmpty(),
-            prompt = row["prompt"].string.orEmpty(),
-            status = row["status"].string ?: "pending",
-            createdAt = row["created_at"].long ?: 0L,
-            completedAt = row["completed_at"].long,
-        )
-    }
-
-data class ClawbotMemoryRow(
-    val id: Long,
-    val project: String,
-    val content: String,
-    val category: String,
-    val importance: Int = 1,
-)
-
-fun parseClawbotMemories(json: JsonElement?): List<ClawbotMemoryRow> =
-    json?.array.orEmpty().mapNotNull { row ->
-        val id = row["id"].long ?: return@mapNotNull null
-        ClawbotMemoryRow(
-            id = id,
-            project = row["project"].string ?: "_global",
-            content = row["content"].string.orEmpty(),
-            category = row["category"].string ?: "general",
-            importance = row["importance"].int ?: 1,
-        )
-    }
 
 // ===========================================================================
 // 6. Design Settings & Design Systems (Phase 12b.5)
