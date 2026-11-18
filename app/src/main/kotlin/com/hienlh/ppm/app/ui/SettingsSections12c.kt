@@ -749,6 +749,16 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
         onRunInTerminal = { cmd -> model.runInTerminal(cmd) },
         onToast = model::toast,
     )
+    // Review links (`review-links-pane.tsx`); the web hides that tab in minimal mode.
+    if (model.info?.minimalMode != true) {
+        val uriHandler = LocalUriHandler.current
+        com.hienlh.ppm.app.ui.settings.ReviewLinksPane(
+            api = model.api,
+            onToast = model::toast,
+            onOpenUrl = { runCatching { uriHandler.openUri(it) } },
+            onOpenGeneral = { model.openSettings("general") },
+        )
+    }
 }
 
 @Composable

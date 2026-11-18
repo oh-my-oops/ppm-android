@@ -76,6 +76,7 @@ import com.hienlh.ppm.app.ui.ChatPane
 import com.hienlh.ppm.app.ui.PpmTextField
 import com.hienlh.ppm.app.ui.PrimaryButton
 import com.hienlh.ppm.app.ui.SecondaryButton
+import com.hienlh.ppm.app.ui.design.share.DesignShareDialog
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.DesignProviderOption
 import com.hienlh.ppm.client.DesignStyleEditResult
@@ -1155,6 +1156,7 @@ fun DesignTabBody(
     var activeVariant by remember(projectName, slug) { mutableStateOf("index.html") }
     var deviceFrame by remember(projectName, slug) { mutableStateOf(DesignDeviceFrame.DESKTOP) }
     var zoom by remember(projectName, slug) { mutableFloatStateOf(1f) }
+    var shareOpen by remember(projectName, slug) { mutableStateOf(false) }
 
     // Layout mode driven by TAB's own width (not window width!)
     var layoutOverride by remember(tab.id) { mutableStateOf(DesignLayoutOverride.AUTO) }
@@ -1724,7 +1726,29 @@ fun DesignTabBody(
                 },
                 onBuildInNewChat = ::triggerBuildInNewChat,
                 onReload = { mintAndLoadPreview(resetRecovery = true) },
+                shareOpen = shareOpen,
+                onShare = { shareOpen = true },
             )
+            if (shareOpen) {
+                DesignShareDialog(
+                    api = api,
+                    events = model.events,
+                    projectName = projectName,
+                    slug = slug,
+                    localOrigin = api?.baseUrl?.toString().orEmpty(),
+                    onDismiss = { shareOpen = false },
+                    onToast = model::toast,
+                    onOpenUrl = { url ->
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    },
+                    onOpenSettings = { category ->
+                        shareOpen = false
+                        model.openSettings(category)
+                    },
+                )
+            }
 
             // Main content area: Split (Canvas left + Chat right <= 50%) or Single pane
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -2198,6 +2222,8 @@ internal fun DesignHeaderToolbar(
     onToggleSidePanel: (DesignSidePanel) -> Unit,
     onBuildInNewChat: () -> Unit,
     onReload: () -> Unit,
+    shareOpen: Boolean = false,
+    onShare: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     Row(
@@ -2260,6 +2286,14 @@ internal fun DesignHeaderToolbar(
             icon = ProductIcon.MessageCircle,
             active = sidePanel == DesignSidePanel.COMMENTS,
         ) { onToggleSidePanel(DesignSidePanel.COMMENTS) }
+        if (onShare != null) {
+            SmallActionChip(
+                label = "Share for review",
+                icon = ProductIcon.Share2,
+                active = shareOpen,
+                onClick = onShare,
+            )
+        }
         SmallActionChip(
             label = "Tweaks",
             icon = ProductIcon.SlidersHorizontal,
