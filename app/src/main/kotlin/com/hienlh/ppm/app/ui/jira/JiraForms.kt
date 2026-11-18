@@ -30,9 +30,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
@@ -53,6 +56,7 @@ import com.hienlh.ppm.client.jiraMetadata
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.state.jira.JIRA_INTERVALS
 import com.hienlh.ppm.state.jira.JiraFieldOption
@@ -71,6 +75,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+
+/** `max-h-[85vh]`: how tall a Jira dialog may grow before its body scrolls. */
+@Composable
+internal fun dialogTallest(): Dp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() } * 0.85f
 
 private fun messageOf(e: Exception, fallback: String) = e.message?.takeIf { it.isNotBlank() } ?: fallback
 
@@ -241,12 +249,12 @@ internal fun JiraWatcherList(model: AppModel, configId: Int) {
         }
     }
     if (adding) {
-        WebDialog(title = "New Watcher", onDismiss = { adding = false }, widest = 448.dp) {
+        WebDialog(title = "New Watcher", onDismiss = { adding = false }, widest = 448.dp, tallest = dialogTallest()) {
             JiraWatcherForm(model, configId, null) { adding = false }
         }
     }
     editing?.let { w ->
-        WebDialog(title = "Edit Watcher", onDismiss = { editing = null }, widest = 448.dp) {
+        WebDialog(title = "Edit Watcher", onDismiss = { editing = null }, widest = 448.dp, tallest = dialogTallest()) {
             JiraWatcherForm(model, configId, w) { editing = null }
         }
     }
@@ -269,7 +277,7 @@ internal fun JiraWatcherForm(model: AppModel, configId: Int, existing: JiraWatch
     var testError by remember { mutableStateOf<String?>(null) }
     val nameText = name.text.toString()
 
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("jira-watcher-form"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.cssFlex().fillMaxWidth().verticalScroll(rememberScrollState()).testTag("jira-watcher-form"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             FieldLabel("Name")
             FormInput(name, "Bug watcher", Modifier.fillMaxWidth().testTag("jira-watcher-name"), height = 36.dp)

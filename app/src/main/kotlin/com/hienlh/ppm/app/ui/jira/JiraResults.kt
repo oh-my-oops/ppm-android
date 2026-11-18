@@ -48,6 +48,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.state.jira.JiraIssueView
 import com.hienlh.ppm.state.jira.JiraTransitionView
@@ -275,8 +276,8 @@ internal fun JiraTicketDetail(model: AppModel, configId: Int, issueKey: String, 
         }
     }
 
-    WebDialog(title = null, onDismiss = onClose) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).testTag("jira-ticket-detail"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    WebDialog(title = null, onDismiss = onClose, tallest = dialogTallest()) {
+        Column(Modifier.cssFlex().fillMaxWidth().verticalScroll(rememberScrollState()).testTag("jira-ticket-detail"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 T(issueKey, 18f, weight = FontWeight.SemiBold)
                 if (baseUrl != null) {
