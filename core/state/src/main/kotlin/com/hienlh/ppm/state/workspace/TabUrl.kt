@@ -20,6 +20,8 @@ data class UrlState(
     val tabIdentifier: String?,
     /** The legacy `?openChat=` parameter: a chat to open, `provider/session` or a session alone. */
     val openChat: String? = null,
+    /** `/assistant?session=<provider>/<id>`: the PPM Assistant, on that session when one is named. */
+    val assistant: com.hienlh.ppm.state.assistant.AssistantDeepLink? = null,
 )
 
 /** The tab types an address can name (`VALID_TAB_TYPES`). */
@@ -145,6 +147,7 @@ fun parsePpmLink(link: String): PpmLink? {
     val openChat = query.split('&').firstOrNull { it.substringBefore('=') == "openChat" }
         ?.substringAfter('=', "")?.let { decodeQueryValue(it) }?.takeIf { it.isNotEmpty() }
     val state = parseUrlState(path, openChat).let { it.copy(tabIdentifier = it.tabIdentifier?.let(::decodePathSegment)) }
+        .let { s -> if (path.trimEnd('/') != "/assistant") s else s.copy(assistant = assistantLinkOf(query)) }
     return PpmLink(host.lowercase(), port.toIntOrNull(), state)
 }
 
@@ -197,3 +200,9 @@ private fun hexDigit(c: Char): Int = when (c) {
     in 'A'..'F' -> c - 'A' + 10
     else -> -1
 }
+
+/** The Assistant deep link's `?session=` (`/assistant?session=<provider>/<id>`). */
+private fun assistantLinkOf(query: String): com.hienlh.ppm.state.assistant.AssistantDeepLink =
+    com.hienlh.ppm.state.assistant.parseAssistantSessionRef(
+        query.split('&').firstOrNull { it.substringBefore('=') == "session" }?.substringAfter('=', "")?.let { decodeQueryValue(it) },
+    )

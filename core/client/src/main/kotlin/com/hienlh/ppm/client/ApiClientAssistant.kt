@@ -1,5 +1,6 @@
 package com.hienlh.ppm.client
 
+import com.hienlh.ppm.protocol.ASSISTANT_PROJECT_NAME
 import com.hienlh.ppm.protocol.AssistantCard
 import com.hienlh.ppm.protocol.AssistantCardsPage
 import com.hienlh.ppm.protocol.AssistantTelegram
@@ -8,6 +9,9 @@ import com.hienlh.ppm.protocol.InlineImage
 import com.hienlh.ppm.protocol.MainSessionRef
 import com.hienlh.ppm.protocol.ManagerAssignCheck
 import com.hienlh.ppm.protocol.ManagerChatSummary
+import com.hienlh.ppm.protocol.ProviderInfo
+import com.hienlh.ppm.protocol.array
+import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
 import kotlinx.serialization.json.JsonArray
@@ -180,6 +184,15 @@ suspend fun ApiClient.assistantBasics(): AssistantBasics {
     return AssistantBasics(settings["persona"]["name"].string?.takeIf { it.isNotBlank() }, settings["default_provider"].string)
 }
 
+/**
+ * The configured providers that can run the Assistant (`useAssistantProviders`): Claude or Codex,
+ * and only when the server says it will enforce the Assistant's policy on them.
+ */
+suspend fun ApiClient.assistantProviders(): List<ProviderInfo> =
+    call("GET", "${chatPath(ASSISTANT_PROJECT_NAME)}/providers").array.orEmpty()
+        .filter { it["supportsAssistantSessions"].bool == true && it["id"].string in listOf("claude", "codex") }
+        .mapNotNull(ProviderInfo::from)
+
 /** What a refused OK, choice or reply said back (`cardRefusal`). */
 data class CardRefusal(val error: String, val question: String?, val card: AssistantCard?) {
     companion object {
@@ -189,3 +202,7 @@ data class CardRefusal(val error: String, val question: String?, val card: Assis
         }
     }
 }
+
+/** A design screenshot a manager put on a card (`/api/design-shots/<id>.png`, behind the login). */
+suspend fun ApiClient.designShot(id: String): ByteArray =
+    bytes(request("GET", "/api/design-shots/" + ApiClient.escape(id) + ".png"))

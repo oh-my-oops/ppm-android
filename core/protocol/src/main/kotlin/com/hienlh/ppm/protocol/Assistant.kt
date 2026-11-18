@@ -133,6 +133,8 @@ data class CardPayload(
     val urgentCapped: Boolean = false,
     val requestId: String? = null,
     val chatTitle: String? = null,
+    /** The provider of that other chat (`payload.chat.providerId`). */
+    val chatProvider: String? = null,
     val expiresAt: Long? = null,
     val answerInPpm: String? = null,
     val deciding: CardDeciding? = null,
@@ -191,6 +193,7 @@ data class CardPayload(
                 urgentCapped = json["urgentCapped"].bool ?: false,
                 requestId = json["requestId"].string,
                 chatTitle = json["chat"]["title"].string,
+                chatProvider = json["chat"]["providerId"].string,
                 expiresAt = json["expiresAt"].long,
                 answerInPpm = json["answerInPpm"].string,
                 deciding = deciding,
@@ -355,13 +358,19 @@ data class MainSessionRef(val sessionId: String, val providerId: String) {
 }
 
 /** `GET /api/assistant/telegram`: what the head's bell and label need. */
-data class AssistantTelegram(val enabled: Boolean, val running: Boolean, val quietWhileInPpm: Boolean, val chats: Int) {
+data class AssistantTelegram(
+    val enabled: Boolean,
+    val running: Boolean,
+    val quietWhileInPpm: Boolean,
+    /** The Assistant sessions a connected Telegram chat talks to. */
+    val chatSessionIds: List<String> = emptyList(),
+) {
     companion object {
         fun from(json: JsonElement?) = AssistantTelegram(
             enabled = json["enabled"].bool ?: false,
             running = json["running"].bool ?: false,
             quietWhileInPpm = json["quietWhileInPpm"].bool ?: false,
-            chats = json["chats"].array?.size ?: 0,
+            chatSessionIds = json["chats"].array.orEmpty().mapNotNull { it["sessionId"].string },
         )
     }
 }

@@ -148,4 +148,20 @@ class AssistantApiTest {
         assertEquals("ws://host:8080/ws/project/p/chat/s?providerId=claude&token=t", api.chatSocketUrl("p", "s", "claude", "bad id!"))
         assertTrue(ChatClientId.valid(ChatClientId.value))
     }
+
+    @Test
+    fun `only Claude and Codex that take Assistant sessions can run it, and design shots come back as bytes`() = withServer(
+        ok("""[{"id":"claude","name":"Claude","supportsAssistantSessions":true},{"id":"codex","name":"Codex","supportsAssistantSessions":false},
+            |{"id":"antigravity","name":"Antigravity","supportsAssistantSessions":true}]""".trimMargin()),
+        MockResponse.Builder().body("PNGDATA").build(),
+        ok("""{"enabled":true,"running":true,"quietWhileInPpm":false,"chats":[{"sessionId":"main-1"}]}"""),
+    ) { server, api ->
+        assertEquals(listOf("claude"), api.assistantProviders().map { it.id })
+        assertEquals("GET /api/project/__assistant__/chat/providers", server.takeRequest().let { it.method + " " + it.target })
+        assertEquals("PNGDATA", String(api.designShot("shot 1")))
+        assertEquals("GET /api/design-shots/shot%201.png", server.takeRequest().let { it.method + " " + it.target })
+        val telegram = api.assistantTelegram()
+        assertEquals(listOf("main-1"), telegram.chatSessionIds)
+        assertFalse(telegram.quietWhileInPpm)
+    }
 }

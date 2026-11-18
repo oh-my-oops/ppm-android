@@ -178,13 +178,17 @@ fun ChatTranscriptView(
     bottomFade: Boolean = true,
     /** `[data-chat-list]:has(+ [data-chat-footer])`: lifts the scroll navigator `24.dp` when the footer overlaps the `12.dp` fade band. */
     overlappedByFooter: Boolean = bottomFade,
+    /** What a host adds among the messages (the Assistant's cards); null draws the chat alone. */
+    timeline: ChatTimeline? = null,
 ) {
+    val built = remember(timeline, state.items) { timeline?.build?.invoke(state.items) }
+    val hasExtension = built != null && built.items.isNotEmpty()
     Box(modifier.fillMaxSize()) {
         when {
             // A new chat has nothing to load until its first message makes the session.
             state.sessionId != null && !state.hasLoadedHistory && state.items.isEmpty() && state.historyError == null ->
                 CenteredNotice("Loading messages...", pulsing = true)
-            state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
+            state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null && !hasExtension ->
                 Welcome(welcome, welcomeActions)
             else -> {
                 // A long press on an answer's markdown opens it selectable (SelectText.kt).
@@ -194,6 +198,8 @@ fun ChatTranscriptView(
                         state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken,
                         bottomFade = bottomFade,
                         overlappedByFooter = overlappedByFooter,
+                        timeline = timeline,
+                        built = built,
                     )
                 }
                 selecting?.let { text -> SelectTextDialog(text) { selecting = null } }
@@ -219,9 +225,22 @@ private fun TranscriptList(
     onJumpTaken: (ChatJumpRequest) -> Unit,
     bottomFade: Boolean,
     overlappedByFooter: Boolean,
+    timeline: ChatTimeline? = null,
+    built: ChatTimelineBuild? = null,
 ) {
     val rollups = remember { TurnRollups() }
-    val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning, rollups) }
+    val hidden = built?.hidden.orEmpty()
+    val rows = remember(state.items, state.isRunning, hidden) {
+        TranscriptRows.of(state.items, state.isRunning, rollups).let { all -> if (hidden.isEmpty()) all else all.filter { it.item.id !in hidden } }
+    }
+    val manualPaging = timeline?.manualPaging == true
+    // Without manual paging the host follows the chat's own pages, so only the chat's count.
+    val hasEarlier = state.hasEarlier || (manualPaging && timeline?.hasEarlier == true)
+    val placed = remember(rows, built, state.hasEarlier) { placeTimeline(rows.map { it.item }, built, state.hasEarlier) }
+    val loadBoth: () -> Unit = {
+        if (state.hasEarlier) onLoadEarlier()
+        timeline?.onLoadEarlier?.invoke()
+    }
     // Each user message's number in the session, which names its versions; a row per item.
     val ordinals = remember(state.items, state.userOrdinalOffset) { MessageVersions.ordinals(state.items, state.userOrdinalOffset) }
     val scope = rememberCoroutineScope()
@@ -231,7 +250,7 @@ private fun TranscriptList(
     // Top down, as the web's: the sentinel while there is more above, the skeleton while it loads,
     // the messages oldest first, the turn streaming in, the cache gone cold while the chat is
     // idle, and the approval or the thinking line while there is one.
-    val head = (if (state.hasEarlier) 1 else 0) + (if (state.loadingEarlier) 1 else 0)
+    val head = (if (hasEarlier) 1 else 0) + (if (state.loadingEarlier) 1 else 0)
     // Read again once a minute, as `useMinuteClock` reads the time. Read once, here: the list's
     // builder reruns by itself when a state it reads changes, and read live there the notice could
     // join a list whose `keys` were built without it (`index: -1` on a tablet, 03/11).
@@ -244,7 +263,8 @@ private fun TranscriptList(
     // `hasTrailing = !!liveApproval || isStreaming`: the whole turn, so its 16 px padding keeps a
     // running tool card off the bars below even while the thinking line itself shows nothing.
     val trailing = state.pendingApproval != null || state.isRunning
-    val count = head + rows.size + (if (!live.isNullOrEmpty()) 1 else 0) + (if (idleCache != null) 1 else 0) + (if (trailing) 1 else 0)
+    val timelineTrails = !placed?.trailing.isNullOrEmpty()
+    val count = head + rows.size + (if (!live.isNullOrEmpty()) 1 else 0) + (if (timelineTrails) 1 else 0) + (if (idleCache != null) 1 else 0) + (if (trailing) 1 else 0)
     // Opened at its end, so the first frame is already the newest, and the sentinel, which loads
     // what is above once it is near the screen, is not passed on the way there.
     val list = rememberLazyListState((count - 1).coerceAtLeast(0), OPEN_AT_END)
@@ -260,8 +280,8 @@ private fun TranscriptList(
     // here, so that is the sentinel on it, or the message under it less than 400 px above it.
     val load by rememberUpdatedState(onLoadEarlier)
     val early = with(density) { 400.dp.toPx() }
-    LaunchedEffect(list, state.hasEarlier, state.loadingEarlier, state.earlierError, rows.size) {
-        if (!state.hasEarlier || state.loadingEarlier || state.earlierError != null) return@LaunchedEffect
+    LaunchedEffect(list, state.hasEarlier, state.loadingEarlier, state.earlierError, rows.size, manualPaging) {
+        if (!state.hasEarlier || state.loadingEarlier || state.earlierError != null || manualPaging) return@LaunchedEffect
         snapshotFlow { list.nearTop(early) }.collect { near -> if (near) load() }
     }
     // The message a reply card jumped to, lit for 1.4 s (`showMessageAt`).
@@ -369,12 +389,13 @@ private fun TranscriptList(
     val stack = rememberCssLazyStack(0.dp)
     val streams = !live.isNullOrEmpty()
     val cold = idleCache != null
-    val keys = remember(rows, state.hasEarlier, state.loadingEarlier, streams, cold, trailing) {
+    val keys = remember(rows, hasEarlier, state.loadingEarlier, streams, timelineTrails, cold, trailing) {
         buildList {
-            if (state.hasEarlier) add(SENTINEL)
+            if (hasEarlier) add(SENTINEL)
             if (state.loadingEarlier) add(SKELETON)
             for (row in rows) add(row.item.id)
             if (streams) add(LIVE)
+            if (timelineTrails) add(TIMELINE_TRAILING)
             if (cold) add(IDLE_CACHE)
             if (trailing) add(TRAILING)
         }
@@ -441,7 +462,11 @@ private fun TranscriptList(
                     contentPadding = PaddingValues(bottom = if (trailing || !bottomFade) 0.dp else 12.dp),
                 ) {
                     // `h-px`: 2.625 px at 2.625x, which pushes every message under it a fraction down.
-                    if (state.hasEarlier) item(key = SENTINEL) { Spacer(stacked(0).fillMaxWidth().cssHeight(1.dp)) }
+                    if (hasEarlier) {
+                        item(key = SENTINEL) {
+                            if (manualPaging) LoadEarlierButton(loadBoth, stacked(0)) else Spacer(stacked(0).fillMaxWidth().cssHeight(1.dp))
+                        }
+                    }
                     if (state.loadingEarlier) item(key = SKELETON) { Box(stacked(head - 1)) { PreCompactSkeleton() } }
                     rows.forEachIndexed { index, row ->
                         item(key = row.item.id, contentType = row.item.role) {
@@ -466,12 +491,17 @@ private fun TranscriptList(
                                     edits = userEdits,
                                 ) { onDismiss(row.item.id) }
                             }
+                            val above = placed?.before?.get(index).orEmpty()
                             // Above the summary: the rule marks where the conversation was cut.
-                            if (compaction == null) {
+                            if (compaction == null && above.isEmpty()) {
                                 message(place)
                             } else {
                                 Column(place.fillMaxWidth()) {
-                                    CompactionDivider(compaction)
+                                    // A host's items that come before this message, each 16dp apart as messages are.
+                                    for (entry in above) {
+                                        androidx.compose.runtime.key(entry.key) { Box(Modifier.fillMaxWidth().padding(bottom = 16.dp)) { entry.content() } }
+                                    }
+                                    if (compaction != null) CompactionDivider(compaction)
                                     message(Modifier)
                                 }
                             }
@@ -481,6 +511,15 @@ private fun TranscriptList(
                         item(key = LIVE) {
                             CompositionLocalProvider(LocalMarkdownImageScope provides LIVE_SCOPE) {
                                 AssistantBlocks(live, live = state.isRunning, actions = null, modifier = stacked(head + rows.size).padding(start = horizPad, end = horizPad, top = 16.dp))
+                            }
+                        }
+                    }
+                    placed?.trailing?.takeIf { it.isNotEmpty() }?.let { after ->
+                        item(key = TIMELINE_TRAILING) {
+                            Column(stacked(keys.indexOf(TIMELINE_TRAILING)).fillMaxWidth().padding(start = horizPad, end = horizPad)) {
+                                for (entry in after) {
+                                    androidx.compose.runtime.key(entry.key) { Box(Modifier.fillMaxWidth().padding(top = 16.dp)) { entry.content() } }
+                                }
                             }
                         }
                     }
@@ -579,6 +618,7 @@ private val HEAD_KEYS = setOf(SENTINEL, SKELETON)
 /** The keys of what comes after the messages: the turn streaming in, the cold cache, the approval or the thinking line. */
 private const val LIVE = "live"
 private const val IDLE_CACHE = "idle-cache"
+private const val TIMELINE_TRAILING = "timeline-trailing"
 private const val TRAILING = "trailing"
 
 /** Where the list starts before it is measured: far past its last item, which it then clamps to its end. */

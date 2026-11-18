@@ -118,17 +118,17 @@ class AssistantStore(
     fun refresh() {
         reloadCards()
         refreshOpen()
-        launchQuiet { _view.update { v -> v.copy(waiting = api.assistantWaiting()) } }
+        launchQuiet { val counts = api.assistantWaiting(); _view.update { it.copy(waiting = counts) } }
         refreshManagers()
         launchQuiet {
             val main = api.assistantMainSession()
             _view.update { it.copy(mainLoaded = true, main = main) }
         }.invokeOnCompletion { if (!_view.value.mainLoaded) _view.update { it.copy(mainLoaded = true) } }
-        launchQuiet { _view.update { v -> v.copy(telegram = api.assistantTelegram()) } }
-        launchQuiet { _view.update { v -> v.copy(name = api.assistantBasics().name) } }
+        launchQuiet { val telegram = api.assistantTelegram(); _view.update { it.copy(telegram = telegram) } }
+        launchQuiet { val name = api.assistantBasics().name; _view.update { it.copy(name = name) } }
     }
 
-    fun refreshManagers() = launchQuiet { _view.update { v -> v.copy(managers = api.managerChats()) } }
+    fun refreshManagers() = launchQuiet { val managers = api.managerChats(); _view.update { it.copy(managers = managers) } }
 
     private fun refreshOpen() {
         val at = openChanges
@@ -188,9 +188,9 @@ class AssistantStore(
             "assistant:managers_changed" -> _view.update { it.copy(managers = ManagerChatSummary.list(frame["managers"])) }
             "assistant:main_session_changed" -> _view.update { it.copy(mainLoaded = true, main = MainSessionRef.from(frame)) }
             "assistant:telegram_quiet_changed" -> frame["on"].bool?.let { on ->
-                _view.update { v -> v.copy(telegram = (v.telegram ?: AssistantTelegram(false, false, false, 0)).copy(quietWhileInPpm = on)) }
+                _view.update { v -> v.copy(telegram = (v.telegram ?: AssistantTelegram(false, false, false)).copy(quietWhileInPpm = on)) }
             }
-            "assistant:telegram_binding_changed" -> launchQuiet { _view.update { v -> v.copy(telegram = api.assistantTelegram()) } }
+            "assistant:telegram_binding_changed" -> launchQuiet { val telegram = api.assistantTelegram(); _view.update { it.copy(telegram = telegram) } }
         }
     }
 
@@ -237,8 +237,14 @@ class AssistantStore(
     } catch (e: Exception) {
         val refusal = CardRefusal.of(e)
         refusal.card?.let(::take)
-        if (refusal.error == "already_answered") ALREADY_ANSWERED_ELSEWHERE else refusal.error
+        refusal.question ?: if (refusal.error == "already_answered") ALREADY_ANSWERED_ELSEWHERE else refusal.error
     }
+
+    /** OK on a decision card, bound to the draft it shows. */
+    suspend fun ok(card: AssistantCard): String? = act { api.okAssistantCard(card.id, card.payload.draft?.sha256).card }
+
+    /** One of a decision card's choices. */
+    suspend fun choose(card: AssistantCard, optionId: String): String? = act { api.chooseAssistantCardOption(card.id, optionId).card }
 
     /** The routes a decision's send goes through. */
     val sendApi: DecisionSendApi = object : DecisionSendApi {
@@ -253,12 +259,17 @@ class AssistantStore(
     fun replyTo(card: AssistantCard?) = _view.update { it.copy(replyTarget = card) }
 
     /** The reply bar's send: [force] once the user confirmed the server's question. */
-    suspend fun sendReply(text: String, force: Boolean): SendOutcome {
+    suspend fun sendReply(text: String, force: Boolean, images: List<InlineImage> = emptyList()): SendOutcome {
         val card = _view.value.replyTarget ?: return SendOutcome.Failed("No card to reply to.", null)
+        return sendReplyTo(card, text, force, images)
+    }
+
+    /** A reply to [card] from a bar of its own (a manager chat's, under the card). */
+    suspend fun sendReplyTo(card: AssistantCard, text: String, force: Boolean, images: List<InlineImage> = emptyList()): SendOutcome {
         return try {
-            val press = api.replyToAssistantCard(card.id, text, force = force)
+            val press = api.replyToAssistantCard(card.id, text, force = force, images = images)
             press.card?.let(::take)
-            _view.update { it.copy(replyTarget = null) }
+            _view.update { if (it.replyTarget?.id == card.id) it.copy(replyTarget = null) else it }
             SendOutcome.Sent(press.card)
         } catch (e: CancellationException) {
             throw e
@@ -331,6 +342,20 @@ class AssistantStore(
     }
 
     private fun updateDecisions(change: (DecisionSetState) -> DecisionSetState) = _view.update { it.copy(decisions = change(it.decisions)) }
+
+    /** A decision set aside from the set: its tab then says "Dismissed". Null when it went, else why not. */
+    suspend fun dismissDecision(card: AssistantCard): String? = try {
+        val now = api.dismissAssistantCard(card.id)
+        updateDecisions { d -> d.copy(done = trimDone(d.done + (card.id to DoneTab(now ?: card, false, "Dismissed", clock())))) }
+        now?.let(::take)
+        null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        val refusal = CardRefusal.of(e)
+        refusal.card?.let(::take)
+        refusal.error
+    }
 
     /** "Send this one": the card's pick, alone. */
     fun sendOne(card: AssistantCard, confirmAge: Boolean = false) {

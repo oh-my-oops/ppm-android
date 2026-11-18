@@ -137,4 +137,23 @@ class AssistantStoreTest {
         events.handle(WireJson.parse("""{"type":"assistant:waiting_changed"}"""))
         assertEquals(listOf("assistant:card"), seen)
     }
+
+    @Test
+    fun `a reply from a card's own bar leaves the Assistant's reply target alone, and a refusal says why`() = withStore(
+        base + ("POST /api/assistant/cards/w1/reply" to """{"card":""" + cardJson("w1", 2, status = "answered") + ""","to":"manager"}"""),
+    ) { store, routes ->
+        store.start()
+        waitFor("the waiting list") { store.view.value.open != null }
+        val w1 = store.view.value.open!!.single()
+        val other = w1.copy(id = "c9")
+        store.replyTo(other)
+        val sent = store.sendReplyTo(w1, "go on", force = false)
+        assertTrue(sent is SendOutcome.Sent)
+        assertTrue(routes.asked.contains("POST /api/assistant/cards/w1/reply"))
+        assertEquals("c9", store.view.value.replyTarget?.id)
+        assertTrue(store.view.value.open!!.isEmpty())
+        val refused = store.sendReplyTo(other, "again", force = false)
+        assertTrue(refused is SendOutcome.Failed)
+        assertEquals("c9", store.view.value.replyTarget?.id)
+    }
 }
