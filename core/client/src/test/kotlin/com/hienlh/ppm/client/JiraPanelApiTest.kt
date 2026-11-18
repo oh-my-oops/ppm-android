@@ -46,6 +46,15 @@ class JiraPanelApiTest {
     }
 
     @Test
+    fun `an edited watcher sends every field, an emptied template as null`() = withServer(ok("{}")) { server, api ->
+        api.jiraEditWatcher(5, "Bugs", "project = PPM", null, 60_000, "debug")
+        assertEquals(
+            "PUT /api/jira/watchers/5" to """{"name":"Bugs","jql":"project = PPM","promptTemplate":null,"intervalMs":60000,"mode":"debug"}""",
+            server.next(),
+        )
+    }
+
+    @Test
     fun `dismiss names the problem, and null brings the dot back`() = withServer(ok("{}"), ok("{}")) { server, api ->
         api.schedulesDismiss(4, "failed:9")
         assertEquals("POST /api/schedules/4/dismiss" to """{"key":"failed:9"}""", server.next())

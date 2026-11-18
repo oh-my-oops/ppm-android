@@ -32,3 +32,17 @@ suspend fun ApiClient.jiraTransitionTicket(configId: Int, issueKey: String, tran
 /** The filter builder's choices: `projects` (`[{ key, name }]`), `assignees` (`[{ accountId, displayName }]`), or `issuetype` | `priority` | `status` (`[{ id, name }]`). */
 suspend fun ApiClient.jiraMetadata(configId: Int, field: String): JsonElement =
     call("GET", "/api/jira/metadata/$configId/$field")
+
+/** The watcher form's Save Changes: every field, the template null when it was emptied. */
+suspend fun ApiClient.jiraEditWatcher(id: Int, name: String, jql: String, promptTemplate: String?, intervalMs: Int, mode: String): JsonElement =
+    call(
+        "PUT",
+        "/api/jira/watchers/$id",
+        body = buildJsonObject {
+            put("name", name)
+            put("jql", jql)
+            put("promptTemplate", promptTemplate)
+            put("intervalMs", intervalMs)
+            put("mode", mode)
+        },
+    )
