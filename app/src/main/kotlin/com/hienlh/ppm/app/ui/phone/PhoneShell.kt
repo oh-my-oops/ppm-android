@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.phoneSearch
 import com.hienlh.ppm.app.PrefsStore
 import com.hienlh.ppm.app.tasks
 import com.hienlh.ppm.app.openAssistant
@@ -129,6 +130,10 @@ fun PhoneShell(
             model.mobileDrawerOpenRequest = null
             when (drawerRequest) {
                 "explorer" -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.FILES))
+                "search" -> model.phoneSearch?.let { search ->
+                    search.setOpen(true)
+                    nav.visitTab(PhoneNav.areaTabId(PhoneArea.FILES))
+                }
                 "git" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.SOURCE_CONTROL))
                 "database" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.DATABASE))
                 "tunnels" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.PORT_FORWARDING))
@@ -477,7 +482,14 @@ fun PhoneShell(
                     nav.closeDrawer()
                     handleDrawerSelection(model, PhoneArea.SCHEDULES.id, openTabs, nav)
                 },
-            ).filter { tile -> PhoneArea.fromId(tile.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true },
+            ).filter { tile -> PhoneArea.fromId(tile.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true } +
+                listOfNotNull(
+                    // The host's File Explorer, a sheet over the app (the web drawer's Files tile); none in minimal mode.
+                    com.hienlh.ppm.app.ui.phone.files.fileExplorerDrawerTile {
+                        nav.closeDrawer()
+                        model.openExplorer()
+                    }.takeIf { !minimal },
+                ),
             onProjectClick = {
                 nav.closeDrawer()
                 nav.pushSheet(SheetKey.ProjectSwitcher)

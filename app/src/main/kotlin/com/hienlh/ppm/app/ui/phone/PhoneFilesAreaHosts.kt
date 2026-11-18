@@ -52,6 +52,9 @@ import com.hienlh.ppm.app.ui.phone.files.PhoneFileTabHost
 import com.hienlh.ppm.app.ui.phone.files.PhoneFileTabScreen
 import com.hienlh.ppm.app.ui.phone.files.PhoneFilesTreeScreen
 import com.hienlh.ppm.app.ui.phone.files.PhoneSearchScreen
+import com.hienlh.ppm.app.ui.phone.files.PhoneFilesPanelTab
+import com.hienlh.ppm.app.ui.phone.files.isPhoneFilesPanelTab
+import com.hienlh.ppm.app.ui.phone.files.isPhoneSearchTab
 import com.hienlh.ppm.app.ui.phone.files.copyTextToClipboard
 import com.hienlh.ppm.app.phoneSearch
 import androidx.activity.compose.BackHandler
@@ -118,9 +121,14 @@ internal fun PhoneFilesAreaHost(
     tab: WorkspaceTab?,
     nav: PhoneNav,
 ) {
-    if (tab == null || tab.type == "files") {
+    if (tab != null && isPhoneFilesPanelTab(tab)) {
+        PhoneFilesPanelTab(model = model, tab = tab)
+        return
+    }
+    if (tab == null || tab.type == "files" || isPhoneSearchTab(tab)) {
         val search = model.phoneSearch
         val searchOpen = search?.open?.collectAsState()?.value == true
+        LaunchedEffect(search, tab?.id) { if (isPhoneSearchTab(tab)) search?.setOpen(true) }
         if (search != null && searchOpen) {
             val context = LocalContext.current
             BackHandler { search.setOpen(false) }

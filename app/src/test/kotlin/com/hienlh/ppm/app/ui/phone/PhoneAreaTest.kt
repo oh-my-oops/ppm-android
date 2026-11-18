@@ -60,6 +60,10 @@ class PhoneAreaTest {
             "web-preview" to PhoneArea.PORT_FORWARDING,
             "settings" to PhoneArea.SETTINGS,
             "jira" to PhoneArea.JIRA,
+            "search" to PhoneArea.FILES,
+            "problems" to PhoneArea.FILES,
+            "os-explorer" to PhoneArea.FILES,
+            "host-explorer" to PhoneArea.FILES,
         )
 
         for ((type, expectedArea) in phoneTabCases) {
@@ -90,9 +94,6 @@ class PhoneAreaTest {
             "design",
             "group",
             "ai-resource",
-            "problems",
-            "os-explorer",
-            "search",
         )
 
         for (type in tabletOnlyTypes) {

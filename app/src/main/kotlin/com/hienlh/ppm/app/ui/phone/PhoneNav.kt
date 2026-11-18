@@ -76,6 +76,8 @@ enum class PhoneArea(
             "chat" -> CHAT
             "projects" -> PROJECTS
             "editor", "file", "files" -> FILES
+            // Project search and replace, Problems and the host's File Explorer show in the Files area.
+            "search", "problems", "os-explorer", "host-explorer" -> FILES
             "git-diff", "git-status", "source-control" -> SOURCE_CONTROL
             "terminal" -> TERMINAL
             "database", "sqlite", "db-query", "db-sql" -> DATABASE
