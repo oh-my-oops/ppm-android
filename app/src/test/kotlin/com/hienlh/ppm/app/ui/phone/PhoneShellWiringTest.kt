@@ -124,13 +124,14 @@ class PhoneShellWiringTest {
         assertEquals(0, composeRule.onAllNodesWithTag("terminal-key-row").fetchSemanticsNodes().size)
         assertEquals(0, composeRule.onAllNodesWithTag("phone-terminal-open").fetchSemanticsNodes().size)
 
-        // 5. Database area renders DatabaseSidebarPane in read-only mode
+        // 5. Database area renders DatabaseSidebarPane, which adds connections on a phone too
         composeRule.runOnIdle {
             nav.visitTab(PhoneNav.areaTabId(PhoneArea.DATABASE))
         }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("phone-database-screen").assertExists()
-        composeRule.onNodeWithTag("db-sidebar-readonly-badge").assertExists()
+        composeRule.onNodeWithTag("db-new-connection-btn").assertExists()
+        assertEquals(0, composeRule.onAllNodesWithTag("db-sidebar-readonly-badge").fetchSemanticsNodes().size)
 
         // 6. Monitor area renders PhoneSystemMonitorScreen
         composeRule.runOnIdle {

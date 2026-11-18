@@ -5,7 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
@@ -227,15 +229,21 @@ class Phase09fDatabaseStructureImpExpUiTest {
         // 1. Existing table on phone -> read-only structure view
         composeRule.onNodeWithTag("db-structure-phone-readonly").assertIsDisplayed()
 
-        // 2. New table on phone -> "Open on a larger screen"
+        assertTrue(composeRule.onAllNodesWithTag("db-structure-phone-notice").fetchSemanticsNodes().isEmpty())
+
+        // 2. New table on phone -> the web's notice alone (`structure-tab.tsx`)
         isNewTable = true
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("db-structure-phone-larger-screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("db-structure-phone-notice").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "This table is not created yet. Open this tab on a larger screen to set it up and create it.",
+        ).assertIsDisplayed()
 
-        // 3. ImpExp on phone -> "Needs a wider screen"
+        // 3. ImpExp on phone -> the web's "needs a wider screen" (`impexp-tab.tsx`)
         showImpExp = true
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("db-impexp-phone-wider-screen").assertIsDisplayed()
+        composeRule.onNodeWithText("Import/Export needs a wider screen. Open this tab on a computer.").assertIsDisplayed()
     }
 
     @Test

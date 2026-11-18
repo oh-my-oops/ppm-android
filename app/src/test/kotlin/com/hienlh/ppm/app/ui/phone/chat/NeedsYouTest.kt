@@ -15,7 +15,6 @@ import com.hienlh.ppm.state.resolveNeedsYouState
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -131,17 +130,11 @@ class NeedsYouTest {
     }
 
     @Test
-    fun phoneToolCardPolicyEnforcesPreviewAndWriteQueryRules() {
+    fun phoneToolCardPolicyEnforcesPreviewRules() {
         assertFalse(PhoneToolCardPolicy.canOpenPreviewInTabOnPhone("open_preview"))
         assertFalse(PhoneToolCardPolicy.canOpenPreviewInTabOnPhone("mcp__ppm-tabs__open_preview"))
         assertTrue(PhoneToolCardPolicy.canOpenPreviewInTabOnPhone("open_file"))
         assertEquals("no problems", PhoneToolCardPolicy.inlinePreviewDiagnosticSummary(0))
         assertEquals("2 problems", PhoneToolCardPolicy.inlinePreviewDiagnosticSummary(2))
-
-        assertEquals(
-            "Open on a tablet to run it with write access",
-            PhoneToolCardPolicy.openQueryWriteNoticeOnPhone("open_query", isWriteSql = true),
-        )
-        assertNull(PhoneToolCardPolicy.openQueryWriteNoticeOnPhone("open_query", isWriteSql = false))
     }
 }

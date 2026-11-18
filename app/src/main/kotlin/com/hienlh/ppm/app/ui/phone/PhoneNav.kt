@@ -77,7 +77,7 @@ enum class PhoneArea(
             "git-diff", "git-status", "source-control" -> SOURCE_CONTROL
             "conflict-editor", "git-review", "session-review", "branch-review", "git-log" -> SOURCE_CONTROL
             "terminal" -> TERMINAL
-            "database", "sqlite", "db-query", "db-sql" -> DATABASE
+            "database", "sqlite", "db-query", "db-sql", "db-connection", "db-structure", "db-impexp" -> DATABASE
             "system-monitor", "monitor" -> MONITOR
             "logs" -> LOGS
             "schedules" -> SCHEDULES

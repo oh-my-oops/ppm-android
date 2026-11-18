@@ -82,7 +82,10 @@ import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
@@ -352,16 +355,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
             onExecuteQueryStream = { spec, runId, onCall, onEvent ->
                 val client = api ?: error("Not connected to server")
                 if (effectiveConnIdStr.isEmpty()) error("Choose a database connection first.")
-                val body = buildJsonObject {
-                    put("sql", spec.sql)
-                    put("runId", runId)
-                    put("maxRows", spec.maxRows)
-                    put("continueOnError", spec.continueOnError)
-                    if (spec.explain) put("explain", true)
-                    if (!spec.writeOncePassword.isNullOrEmpty()) {
-                        put("writeOnce", buildJsonObject { put("password", spec.writeOncePassword) })
-                    }
-                }
+                val body = queryScriptRequestJson(spec, runId)
                 client.dbQueryScriptStream(
                     connectionId = effectiveConnIdStr,
                     body = body,
@@ -501,7 +495,8 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                 setUnsavedGridRows(tab.id, count, slot = "query-results")
                 model.patchTabMetadata(tab.id, "unsavedGridRows" to if (count > 0) JsonPrimitive(count) else null)
             },
-            readOnly = LocalPpmMobile.current,
+            // PPM signs in with a password; with none set, the server asks for nothing (`!!getAuthToken()`).
+            writeOncePasswordRequired = !api?.token.isNullOrEmpty(),
         )
     }
 }
@@ -521,7 +516,7 @@ internal fun DatabaseQueryTabContent(
     dbType: String = "postgres",
     database: String? = null,
     readonlyConnection: Boolean = false,
-    readOnly: Boolean = false,
+    writeOncePasswordRequired: Boolean = true,
     connections: List<TreeConnection> = emptyList(),
     databases: List<String> = emptyList(),
     schemas: List<String> = emptyList(),
@@ -1024,14 +1019,6 @@ internal fun DatabaseQueryTabContent(
                             onClick = { showHistoryPanel = !showHistoryPanel },
                         )
                     }
-                    if (readOnly) {
-                        BasicText(
-                            "Read-only",
-                            style = ppmText(10f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f)
-                                .copy(color = tokens.text3.color),
-                            modifier = Modifier.testTag("db-query-readonly-badge"),
-                        )
-                    }
                 } else {
                     // Phone compact top bar actions: Format, Save, History
                     SettingsButton(
@@ -1050,14 +1037,6 @@ internal fun DatabaseQueryTabContent(
                             primary = showHistoryPanel,
                             modifier = Modifier.testTag("db-query-history-btn"),
                             onClick = { showHistoryPanel = !showHistoryPanel },
-                        )
-                    }
-                    if (readOnly) {
-                        BasicText(
-                            "Read-only",
-                            style = ppmText(10f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f)
-                                .copy(color = tokens.text3.color),
-                            modifier = Modifier.testTag("db-query-readonly-badge"),
                         )
                     }
                 }
@@ -1156,20 +1135,12 @@ internal fun DatabaseQueryTabContent(
                         "Driver $missingDriverId is not installed.",
                         style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.error.color),
                     )
-                    if (readOnly) {
-                        BasicText(
-                            "Install the driver on a tablet.",
-                            style = ppmText(11f, lineHeight = 14f).copy(color = tokens.text3.color),
-                            modifier = Modifier.testTag("db-readonly-driver-tablet-note"),
-                        )
-                    } else {
-                        SettingsButton(
-                            label = "Install Driver",
-                            primary = true,
-                            modifier = Modifier.testTag("db-query-install-driver-btn"),
-                            onClick = { onInstallMissingDriver(missingDriverId!!) },
-                        )
-                    }
+                    SettingsButton(
+                        label = "Install Driver",
+                        primary = true,
+                        modifier = dbPhoneTouchTarget().testTag("db-query-install-driver-btn"),
+                        onClick = { onInstallMissingDriver(missingDriverId!!) },
+                    )
                 }
             }
 
@@ -1196,21 +1167,7 @@ internal fun DatabaseQueryTabContent(
                 }
             }
 
-            // Dialogs (WriteOnce, DiscardResultEdits, SaveAs)
-            if (showWriteOnceDialog) {
-                WriteOnceDialog(
-                    onSubmit = { password ->
-                        showWriteOnceDialog = false
-                        val prev = lastRunSpec ?: scriptRun(sql)?.let {
-                            QueryRunSpec(it.sql, it.lineOffset, rowLimit, continueOnError)
-                        }
-                        if (prev != null) {
-                            executeRunNow(prev.copy(writeOncePassword = password))
-                        }
-                    },
-                    onCancel = { showWriteOnceDialog = false },
-                )
-            }
+            // Dialogs (DiscardResultEdits, SaveAs); WriteOnce overlays the whole tab, below.
 
             val pendingSpec = pendingRunConfirmationSpec
             if (pendingSpec != null) {
@@ -1461,22 +1418,14 @@ internal fun DatabaseQueryTabContent(
                                 )
                             }
 
-                            if (readonlyRefused) {
-                                if (readOnly) {
-                                    BasicText(
-                                        "Run it with write access on a tablet.",
-                                        style = ppmText(11f, lineHeight = 14f).copy(color = tokens.text3.color),
-                                        modifier = Modifier.testTag("db-query-readonly-tablet-note"),
-                                    )
-                                } else {
-                                    SettingsButton(
-                                        label = "Run with write access (once)",
-                                        primary = true,
-                                        modifier = Modifier.testTag("db-query-write-once-btn"),
-                                        onClick = { showWriteOnceDialog = true },
-                                    )
-                                }
-                            }
+                        }
+
+                        // `offerWriteOnce`: the run a readonly connection refused, offered once more with write access.
+                        if (readonlyRefused && !isRunning) {
+                            WriteOnceOfferBar(
+                                connectionName = connectionName,
+                                onRunWithWriteAccess = { showWriteOnceDialog = true },
+                            )
                         }
 
                         // Active Result Sub-Tab Body
@@ -1502,14 +1451,13 @@ internal fun DatabaseQueryTabContent(
                                         tableCols,
                                         extracted,
                                         readonlyConnection,
-                                        readOnly,
                                         currentRun?.kind,
                                     ) {
                                         resultEditability(
                                             resultColumns = resultSet.columns,
                                             tableColumns = tableCols,
                                             source = extracted,
-                                            readonly = readonlyConnection || readOnly,
+                                            readonly = readonlyConnection,
                                             explain = currentRun?.kind == "explain",
                                         )
                                     }
@@ -1548,7 +1496,6 @@ internal fun DatabaseQueryTabContent(
                                                     },
                                                 ),
                                                 readonlyEnabled = editability !is ResultEditability.Editable,
-                                                readOnly = readOnly,
                                                 onChangesetDirtyChanged = { dirty ->
                                                     dirtyResultTabs[shownTab] = dirty
                                                 },
@@ -1777,6 +1724,22 @@ internal fun DatabaseQueryTabContent(
                 }
             }
         }
+
+        if (showWriteOnceDialog) {
+            val replay = lastRunSpec ?: scriptRun(sql)?.let {
+                QueryRunSpec(it.sql, it.lineOffset, rowLimit, continueOnError)
+            }
+            WriteOnceDialog(
+                connectionName = connectionName,
+                sql = replay?.sql.orEmpty(),
+                passwordRequired = writeOncePasswordRequired,
+                onCancel = { showWriteOnceDialog = false },
+                onRun = { password ->
+                    showWriteOnceDialog = false
+                    if (replay != null) executeRunNow(replay.copy(writeOncePassword = password))
+                },
+            )
+        }
     }
 }
 
@@ -1927,51 +1890,57 @@ private fun QueryMessagesPanel(
 
 // ── 9e.2 Readonly Write-Once Dialog (`write-once-dialog.tsx`) ───────────────
 
-@Composable
-private fun WriteOnceDialog(
-    onSubmit: (String) -> Unit,
-    onCancel: () -> Unit,
-) {
-    val tokens = LocalPpmTokens.current
-    var password by remember { mutableStateOf("") }
+/** The `/query/script` body for [spec]. A PPM with no password still sends `writeOnce`, with an empty one, as the web does. */
+internal fun queryScriptRequestJson(spec: QueryRunSpec, runId: String): JsonObject = buildJsonObject {
+    put("sql", spec.sql)
+    put("runId", runId)
+    put("maxRows", spec.maxRows)
+    put("continueOnError", spec.continueOnError)
+    if (spec.explain) put("explain", true)
+    if (spec.writeOncePassword != null) {
+        put("writeOnce", buildJsonObject { put("password", spec.writeOncePassword) })
+    }
+}
 
-    Column(
+/**
+ * The bar over a run a readonly connection refused (`offerWriteOnce` in `query-tab.tsx`):
+ * `border-b bg-warning/10 px-3 py-1.5 text-xs`, its button `h-7 max-md:h-11`.
+ */
+@Composable
+private fun WriteOnceOfferBar(connectionName: String, onRunWithWriteAccess: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val shape = RoundedCornerShape(4.dp)
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(tokens.panel.color)
+            .background(tokens.warning.opacity(0.10).color)
             .cssBorder(tokens.border.color, sides = CssSides.Bottom)
-            .padding(14.dp)
-            .testTag("db-query-write-once-dialog"),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("db-query-write-once-bar"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        PpmIcon(ProductIcon.ShieldAlert, 16.dp, tokens.warning.color)
         BasicText(
-            "Run with write access (once)",
-            style = ppmText(13f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.text.color),
+            "$connectionName is readonly.",
+            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
+            modifier = Modifier.weight(1f),
         )
-        BasicText(
-            "This connection is read-only. Enter your PPM password to allow this single run to execute write statements.",
-            style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
-        )
-        SettingsTextInput(
-            value = password,
-            onValueChange = { password = it },
-            placeholder = "PPM Password",
-            mono = true,
-            modifier = Modifier.fillMaxWidth().testTag("db-query-write-once-password"),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SettingsButton(
-                label = "Run",
-                primary = true,
-                modifier = Modifier.testTag("db-query-write-once-submit"),
-                onClick = {
-                    if (password.isNotEmpty()) onSubmit(password)
-                },
-            )
-            SettingsButton(
-                label = "Cancel",
-                modifier = Modifier.testTag("db-query-write-once-cancel"),
-                onClick = onCancel,
+        Box(
+            modifier = Modifier
+                .testTag("db-query-write-once-btn")
+                .heightIn(min = if (mobile) 44.dp else 28.dp)
+                .clip(shape)
+                .ppmClickable(shape = shape, hoverColor = tokens.warning.opacity(0.15).color, onClick = onRunWithWriteAccess)
+                .cssBorder(tokens.warning.opacity(0.5).color, shape)
+                .padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                "Run with write access (once)",
+                style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.warning.color),
+                maxLines = 1,
             )
         }
     }

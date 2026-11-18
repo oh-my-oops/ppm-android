@@ -15,9 +15,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.database.DatabaseImpExpTabBody
 import com.hienlh.ppm.app.ui.database.DatabaseQueryTabBody
 import com.hienlh.ppm.app.ui.database.DatabaseSidebarPane
+import com.hienlh.ppm.app.ui.database.DatabaseStructureTabBody
 import com.hienlh.ppm.app.ui.database.DatabaseTableTabBody
+import com.hienlh.ppm.app.ui.database.DbConnectionFormTabBody
 import com.hienlh.ppm.app.ui.database.DbSqlObjectTabBody
 import com.hienlh.ppm.app.ui.database.SqliteViewerTabBody
 import com.hienlh.ppm.app.ui.phone.settings.PhoneSettingsScreen
@@ -33,7 +36,6 @@ import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.serialization.json.JsonPrimitive
 
 @Composable
 internal fun PhoneDatabaseAreaHost(
@@ -50,26 +52,24 @@ internal fun PhoneDatabaseAreaHost(
             .fillMaxSize()
             .testTag("phone-database-screen"),
     ) {
-        if (tab == null) {
+        val sidebar = @Composable {
             DatabaseSidebarPane(
                 model = model,
                 onNavigate = onNavigateToWorkspaceTab,
-                readOnly = true,
             )
+        }
+        if (tab == null) {
+            sidebar()
         } else {
-            val readOnlyTab = remember(tab) {
-                tab.withMetadata("readOnly" to JsonPrimitive(true))
-            }
-            when (readOnlyTab.type) {
-                "database" -> DatabaseTableTabBody(model, readOnlyTab)
-                "sqlite" -> SqliteViewerTabBody(model, readOnlyTab)
-                "db-query" -> DatabaseQueryTabBody(model, readOnlyTab)
-                "db-sql" -> DbSqlObjectTabBody(model, readOnlyTab)
-                else -> DatabaseSidebarPane(
-                    model = model,
-                    onNavigate = onNavigateToWorkspaceTab,
-                    readOnly = true,
-                )
+            when (tab.type) {
+                "database" -> DatabaseTableTabBody(model, tab)
+                "sqlite" -> SqliteViewerTabBody(model, tab)
+                "db-query" -> DatabaseQueryTabBody(model, tab)
+                "db-sql" -> DbSqlObjectTabBody(model, tab)
+                "db-connection" -> DbConnectionFormTabBody(model, tab)
+                "db-structure" -> DatabaseStructureTabBody(model, tab)
+                "db-impexp" -> DatabaseImpExpTabBody(model, tab)
+                else -> sidebar()
             }
         }
     }

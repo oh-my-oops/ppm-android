@@ -64,6 +64,9 @@ class PhoneAreaTest {
             "sqlite" to PhoneArea.DATABASE,
             "db-query" to PhoneArea.DATABASE,
             "db-sql" to PhoneArea.DATABASE,
+            "db-connection" to PhoneArea.DATABASE,
+            "db-structure" to PhoneArea.DATABASE,
+            "db-impexp" to PhoneArea.DATABASE,
             "system-monitor" to PhoneArea.MONITOR,
             "logs" to PhoneArea.LOGS,
             "schedules" to PhoneArea.SCHEDULES,
@@ -102,9 +105,6 @@ class PhoneAreaTest {
     fun `tablet-only tab types resolve to PhoneTabRoute TabletOnly with concise tablet notice`() {
         val tabletOnlyTypes = listOf(
             "git-graph",
-            "db-connection",
-            "db-structure",
-            "db-impexp",
         )
 
         for (type in tabletOnlyTypes) {
