@@ -284,14 +284,15 @@ private fun InputRow(
             )
         }
         Row(
+            // The border insets what follows it, so the 44px target sits outside it.
             Modifier
+                .alpha(if (buttonEnabled) 1f else 0.5f)
                 .heightIn(min = 44.dp)
                 .clip(shape)
-                .cssBorder(tokens.border.color, shape)
-                .alpha(if (buttonEnabled) 1f else 0.5f)
                 .ppmClickable(enabled = buttonEnabled, pressedColor = tokens.panel2.color, shape = shape, onClickLabel = buttonLabel, onClick = onSubmit)
-                .padding(horizontal = 12.dp)
-                .testTag(buttonTag),
+                .testTag(buttonTag)
+                .cssBorder(tokens.border.color, shape)
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
