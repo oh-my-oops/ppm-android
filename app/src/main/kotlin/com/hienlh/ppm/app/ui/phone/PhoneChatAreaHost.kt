@@ -270,156 +270,161 @@ internal fun PhoneChatContent(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        PhoneChatScreen(
-            composerState = composerState,
-            onSendMessage = { text ->
-                if (chatTab != null) {
-                    // Sent while the AI works, it joins the server's queue (ChatTranscript.send).
-                    if (chatTab.draft.text.toString() != text) {
-                        chatTab.draft.setTextAndPlaceCursorAtEnd(text)
+        // The task(s) this chat works on sit above it, as at the top of the tablet's chat.
+        androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+            com.hienlh.ppm.app.ui.tasks.ChatTaskStrip(model, chatTab?.session?.id ?: chatState?.sessionId, chatTab?.project)
+            PhoneChatScreen(
+                composerState = composerState,
+                onSendMessage = { text ->
+                    if (chatTab != null) {
+                        // Sent while the AI works, it joins the server's queue (ChatTranscript.send).
+                        if (chatTab.draft.text.toString() != text) {
+                            chatTab.draft.setTextAndPlaceCursorAtEnd(text)
+                        }
+                        chatTab.submit()
+                    } else {
+                        model.newChat(pendingMessage = text)
+                        visitActive()
                     }
-                    chatTab.submit()
-                } else {
-                    model.newChat(pendingMessage = text)
+                },
+                onStopTurn = { chatController?.cancel() },
+                queuedMessages = phoneQueuedMessages(chatState?.queue.orEmpty()),
+                onSendQueuedNow = { chatController?.sendQueuedNow() },
+                onEditQueued = { id -> chatController?.takeBackQueued(id) },
+                activityChip = {
+                    if (chatTab != null && chatState != null) PhoneActivityChip(model, chatTab, chatState) { visitActive() }
+                },
+                schedulesChip = {
+                    if (chatTab != null && model.info?.minimalMode != true) {
+                        com.hienlh.ppm.app.ui.tasks.ManagerTasksChip(model, chatTab.session?.id ?: chatState?.sessionId, narrow = true)
+                        ChatSessionSchedulesChip(model, chatTab.session?.id ?: chatState?.sessionId, narrow = true)
+                    }
+                },
+                onRemoveQueued = { id -> chatController?.takeBackQueued(id, discard = true) },
+                queuedImages = chatTab?.let { rememberChatImages(model, it.project) },
+                // The transcript's own pill scrolls to the waiting card.
+                onScrollToWaitingCard = null,
+                modifier = Modifier.weight(1f).testTag("phone-chat-screen"),
+                isNewChat = isNewChat,
+                startingConversation = startingConversation,
+                projectName = model.selectedProject ?: model.serverName,
+                recentSessions = model.sessions,
+                onOpenRecentSession = { session ->
+                    // Picking a chat from a new chat's welcome shows it in this tab, as the web's does.
+                    if (chatTab != null && chatTab.session == null) model.replaceTab(chatTab.tabId, session) else model.openTab(session)
                     visitActive()
-                }
-            },
-            onStopTurn = { chatController?.cancel() },
-            queuedMessages = phoneQueuedMessages(chatState?.queue.orEmpty()),
-            onSendQueuedNow = { chatController?.sendQueuedNow() },
-            onEditQueued = { id -> chatController?.takeBackQueued(id) },
-            activityChip = {
-                if (chatTab != null && chatState != null) PhoneActivityChip(model, chatTab, chatState) { visitActive() }
-            },
-            schedulesChip = {
-                if (chatTab != null && model.info?.minimalMode != true) {
-                    ChatSessionSchedulesChip(model, chatTab.session?.id ?: chatState?.sessionId, narrow = true)
-                }
-            },
-            onRemoveQueued = { id -> chatController?.takeBackQueued(id, discard = true) },
-            queuedImages = chatTab?.let { rememberChatImages(model, it.project) },
-            // The transcript's own pill scrolls to the waiting card.
-            onScrollToWaitingCard = null,
-            modifier = Modifier.testTag("phone-chat-screen"),
-            isNewChat = isNewChat,
-            startingConversation = startingConversation,
-            projectName = model.selectedProject ?: model.serverName,
-            recentSessions = model.sessions,
-            onOpenRecentSession = { session ->
-                // Picking a chat from a new chat's welcome shows it in this tab, as the web's does.
-                if (chatTab != null && chatTab.session == null) model.replaceTab(chatTab.tabId, session) else model.openTab(session)
-                visitActive()
-            },
-            onQuickOrientation = if (model.info?.minimalMode == true) null else ({ model.learnPpmMode = true }),
-            pendingApproval = chatState?.pendingApproval,
-            streaming = isStreaming,
-            elapsedTurnLabel = rememberTurnElapsed(isStreaming, chatState?.liveStartedAt),
-            providerId = providerId,
-            modelLabel = modelLabel,
-            effortLabel = effortInEffect,
-            effortNotice = effortNotice,
-            permissionModeId = permissionModeId,
-            accountName = accountName,
-            accountUsageText = phoneAccountUsageText(usageSummary),
-            // ✦ Spec: a chat bound to a spec opens it, any other gets the workflow chooser (AppModelSpecs.kt).
-            specModeEnabled = chatTab?.let { model.pendingSpecStart(it.tabId) != null } == true,
-            onToggleSpecMode = chatTab?.let { tab -> { model.startSpec(tab.tabId) } },
-            changes = changesChip,
-            backgroundCommands = chatState?.backgroundShells.orEmpty().filter { !it.isStopped }
-                .map { PhoneBackgroundCommand(it.shellId, it.command, stopping = it.isStopping) },
-            onViewBackgroundOutput = { id -> chatTab?.let { model.openBackgroundOutput(it.tabId, id) } },
-            onStopBackgroundCommand = { id -> chatController?.killBackgroundShell(id) },
-            replyEditBanner = replyEditBanner,
-            onCancelReplyEdit = {
-                if (chatTab?.editFork != null) chatTab.cancelEdit() else chatTab?.selectReply(null)
-            },
-            attachments = phoneDraftAttachments(chatTab?.attachments.orEmpty()),
-            onRemoveAttachment = { id -> chatTab?.let { model.removeAttachment(it, id) } },
-            onOpenAttachSheet = if (chatTab != null) ({ showAttachSheet = true }) else null,
-            voiceRecording = listening,
-            voiceElapsedLabel = listeningSince?.let { phoneElapsedLabel(it, voiceNow) } ?: "0:00",
-            onToggleVoiceRecording = toggleMic,
-            onOpenModelEffortSheet = { showModelSheet = true },
-            onOpenAccountSwitcher = if (chatTab != null && hasAccounts) ({ showAccountSheet = true }) else null,
-            onOpenSessionChangesSheet = {
-                sessionChanges?.refresh()
-                showChangesSheet = true
-            },
-            onOpenSessionInfoSheet = { showSessionInfoSheet = true },
-            sendEnabled = !startingConversation,
-            composerInputTransformation = composerTransformation,
-            pickerContent = {
-                if (chatTab != null) {
-                    // The `/` and `@` pickers, as the tablet composer has them (`rememberComposerPickers`).
-                    val pickers = rememberComposerPickers(model, chatTab)
-                    if (pickers.isShowing) {
-                        ComposerPickerList(model, chatTab, pickers, narrow = true, variant = PickerVariant.FLOATING)
-                    }
-                }
-            },
-            connectionChip = {
-                if (chatController != null) {
-                    ConnectionChip(
-                        stage = reconnect.stage,
-                        narrow = true,
-                        onRetry = {
-                            reconnect.restart()
-                            chatController.reloadChat()
-                        },
-                    )
-                }
-            },
-            bannersContent = {
-                if (chatTab != null && chatController != null && chatState != null) {
-                    PhoneChatBanners(model, chatTab, chatController, chatState.turnStop.takeIf { !chatState.isRunning }, chatState.mcpNeedsAuth)
-                }
-            },
-            transcriptContent = {
-                if (chatTab != null && chatController != null && chatState != null) {
-                    PhoneTranscriptLocals(model, chatTab, chatController, chatState) {
-                        val preview = chatTab.firstSendPreview
-                        if (preview != null) {
-                            FirstSendView(preview.content, preview.timestamp, Modifier.fillMaxSize())
-                        } else {
-                            // Fork and Edit are left out while a turn runs, and the switchers greyed out.
-                            val running = chatState.isRunning
-                            val editingId = chatTab.editFork?.messageId
-                            val edits = remember(chatTab, running, editingId) {
-                                ChatEdits(
-                                    onFork = if (running) null else { item, anchor -> model.edits.fork(chatTab, item, anchor) },
-                                    onEdit = if (running) null else chatTab::armEdit,
-                                    editingId = editingId,
-                                    onSwitchVersion = { model.edits.switchVersion(chatTab, it) },
-                                    versionsDisabled = running,
-                                )
-                            }
-                            ChatTranscriptView(
-                                state = chatState,
-                                onRespond = { req, ok, data -> chatController.respond(req, ok, data) },
-                                onLoadEarlier = chatController::loadEarlier,
-                                onReload = { chatController.reload() },
-                                modifier = Modifier.fillMaxSize(),
-                                jumps = remember(chatTab.tabId) { model.chatJumps.filter { it.first == chatTab.tabId }.map { it.second } },
-                                welcome = {
-                                    chatTab.welcomeList?.let { list ->
-                                        SessionListPanel(model, list, onOpen = { model.replaceTab(chatTab.tabId, it) }, Modifier.padding(horizontal = 16.dp))
-                                    }
-                                },
-                                welcomeActions = if (model.info?.minimalMode == true) null else ({ OnboardingEntryRow(model, compact = true) }),
-                                onDismiss = chatController::dismissMessage,
-                                onClearErrors = chatController::clearErrors,
-                                jumpRequest = model.chatJump?.takeIf { it.sessionId == chatState.sessionId },
-                                onJumpTaken = model::chatJumpDone,
-                                // Not while the draft, which may carry a reply of its own, is on its way, nor while an edit's version is made.
-                                onReply = if (chatTab.draftLoading || chatTab.editForking) null else chatTab::selectReply,
-                                edits = edits,
-                                bottomFade = true,
-                            )
+                },
+                onQuickOrientation = if (model.info?.minimalMode == true) null else ({ model.learnPpmMode = true }),
+                pendingApproval = chatState?.pendingApproval,
+                streaming = isStreaming,
+                elapsedTurnLabel = rememberTurnElapsed(isStreaming, chatState?.liveStartedAt),
+                providerId = providerId,
+                modelLabel = modelLabel,
+                effortLabel = effortInEffect,
+                effortNotice = effortNotice,
+                permissionModeId = permissionModeId,
+                accountName = accountName,
+                accountUsageText = phoneAccountUsageText(usageSummary),
+                // ✦ Spec: a chat bound to a spec opens it, any other gets the workflow chooser (AppModelSpecs.kt).
+                specModeEnabled = chatTab?.let { model.pendingSpecStart(it.tabId) != null } == true,
+                onToggleSpecMode = chatTab?.let { tab -> { model.startSpec(tab.tabId) } },
+                changes = changesChip,
+                backgroundCommands = chatState?.backgroundShells.orEmpty().filter { !it.isStopped }
+                    .map { PhoneBackgroundCommand(it.shellId, it.command, stopping = it.isStopping) },
+                onViewBackgroundOutput = { id -> chatTab?.let { model.openBackgroundOutput(it.tabId, id) } },
+                onStopBackgroundCommand = { id -> chatController?.killBackgroundShell(id) },
+                replyEditBanner = replyEditBanner,
+                onCancelReplyEdit = {
+                    if (chatTab?.editFork != null) chatTab.cancelEdit() else chatTab?.selectReply(null)
+                },
+                attachments = phoneDraftAttachments(chatTab?.attachments.orEmpty()),
+                onRemoveAttachment = { id -> chatTab?.let { model.removeAttachment(it, id) } },
+                onOpenAttachSheet = if (chatTab != null) ({ showAttachSheet = true }) else null,
+                voiceRecording = listening,
+                voiceElapsedLabel = listeningSince?.let { phoneElapsedLabel(it, voiceNow) } ?: "0:00",
+                onToggleVoiceRecording = toggleMic,
+                onOpenModelEffortSheet = { showModelSheet = true },
+                onOpenAccountSwitcher = if (chatTab != null && hasAccounts) ({ showAccountSheet = true }) else null,
+                onOpenSessionChangesSheet = {
+                    sessionChanges?.refresh()
+                    showChangesSheet = true
+                },
+                onOpenSessionInfoSheet = { showSessionInfoSheet = true },
+                sendEnabled = !startingConversation,
+                composerInputTransformation = composerTransformation,
+                pickerContent = {
+                    if (chatTab != null) {
+                        // The `/` and `@` pickers, as the tablet composer has them (`rememberComposerPickers`).
+                        val pickers = rememberComposerPickers(model, chatTab)
+                        if (pickers.isShowing) {
+                            ComposerPickerList(model, chatTab, pickers, narrow = true, variant = PickerVariant.FLOATING)
                         }
                     }
-                }
-            },
-        )
+                },
+                connectionChip = {
+                    if (chatController != null) {
+                        ConnectionChip(
+                            stage = reconnect.stage,
+                            narrow = true,
+                            onRetry = {
+                                reconnect.restart()
+                                chatController.reloadChat()
+                            },
+                        )
+                    }
+                },
+                bannersContent = {
+                    if (chatTab != null && chatController != null && chatState != null) {
+                        PhoneChatBanners(model, chatTab, chatController, chatState.turnStop.takeIf { !chatState.isRunning }, chatState.mcpNeedsAuth)
+                    }
+                },
+                transcriptContent = {
+                    if (chatTab != null && chatController != null && chatState != null) {
+                        PhoneTranscriptLocals(model, chatTab, chatController, chatState) {
+                            val preview = chatTab.firstSendPreview
+                            if (preview != null) {
+                                FirstSendView(preview.content, preview.timestamp, Modifier.fillMaxSize())
+                            } else {
+                                // Fork and Edit are left out while a turn runs, and the switchers greyed out.
+                                val running = chatState.isRunning
+                                val editingId = chatTab.editFork?.messageId
+                                val edits = remember(chatTab, running, editingId) {
+                                    ChatEdits(
+                                        onFork = if (running) null else { item, anchor -> model.edits.fork(chatTab, item, anchor) },
+                                        onEdit = if (running) null else chatTab::armEdit,
+                                        editingId = editingId,
+                                        onSwitchVersion = { model.edits.switchVersion(chatTab, it) },
+                                        versionsDisabled = running,
+                                    )
+                                }
+                                ChatTranscriptView(
+                                    state = chatState,
+                                    onRespond = { req, ok, data -> chatController.respond(req, ok, data) },
+                                    onLoadEarlier = chatController::loadEarlier,
+                                    onReload = { chatController.reload() },
+                                    modifier = Modifier.fillMaxSize(),
+                                    jumps = remember(chatTab.tabId) { model.chatJumps.filter { it.first == chatTab.tabId }.map { it.second } },
+                                    welcome = {
+                                        chatTab.welcomeList?.let { list ->
+                                            SessionListPanel(model, list, onOpen = { model.replaceTab(chatTab.tabId, it) }, Modifier.padding(horizontal = 16.dp))
+                                        }
+                                    },
+                                    welcomeActions = if (model.info?.minimalMode == true) null else ({ OnboardingEntryRow(model, compact = true) }),
+                                    onDismiss = chatController::dismissMessage,
+                                    onClearErrors = chatController::clearErrors,
+                                    jumpRequest = model.chatJump?.takeIf { it.sessionId == chatState.sessionId },
+                                    onJumpTaken = model::chatJumpDone,
+                                    // Not while the draft, which may carry a reply of its own, is on its way, nor while an edit's version is made.
+                                    onReply = if (chatTab.draftLoading || chatTab.editForking) null else chatTab::selectReply,
+                                    edits = edits,
+                                    bottomFade = true,
+                                )
+                            }
+                        }
+                    }
+                },
+            )
+        }
 
         if (chatTab?.editForking == true) PhoneEditForkingOverlay()
 

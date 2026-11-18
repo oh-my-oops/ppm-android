@@ -3807,6 +3807,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     private fun openFromLink(store: WorkspaceStore, link: UrlState, project: String) {
         link.tabType?.let { openFromUrl(store, it, link.tabIdentifier, project) }
         link.openChat?.let { openFromUrl(store, "chat", it, project) }
+        // `?openTask=<id>` (Telegram's "Open in PPM" on a task card): the task in its tab, kept.
+        link.openTask?.let { tasks.openTask(it, project, "Task", null, keep = true) }
     }
 
     /** `autoOpenFromUrl`: the focused panel's tab with the address's id, or a new tab built from the address. */
@@ -4793,7 +4795,7 @@ internal fun filePathTab(path: String, projectName: String?) = NewTab(
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
 /** The sections this app has, in the web's default rail order (`BUILTIN_SIDEBAR_TABS`). */
-private val SIDEBAR_SECTIONS = listOf("history", "teams", "designs", "specs", "explorer", "search", "git", "database", "tunnels", "ai-resources")
+private val SIDEBAR_SECTIONS = listOf("history", "tasks", "teams", "designs", "specs", "explorer", "search", "git", "database", "tunnels", "ai-resources")
 private val MINIMAL_SIDEBAR_SECTIONS = setOf("history", "explorer", "search")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")

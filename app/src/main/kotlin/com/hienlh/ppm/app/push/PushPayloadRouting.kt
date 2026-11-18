@@ -210,14 +210,22 @@ fun buildPpmDeepLink(
     } else {
         rawPath to rawQuery
     }
+    // A task link (`?openTask=<id>`, Telegram's "Open in PPM" on a task card) keeps its task
+    // whatever chat the push also names, so a tap opens the task's page.
+    val taskParam = rawQuery?.split('&')?.firstOrNull { it.substringBefore('=') == "openTask" && it.length > "openTask=".length }
+    val routedQuery = if (taskParam == null || finalQuery?.split('&')?.contains(taskParam) == true) {
+        finalQuery
+    } else {
+        listOfNotNull(finalQuery?.takeIf { it.isNotBlank() }, taskParam).joinToString("&")
+    }
 
     return buildString {
         append("ppm://")
         append(authority)
         append(if (finalPath.startsWith('/')) finalPath else "/$finalPath")
-        if (!finalQuery.isNullOrBlank()) {
+        if (!routedQuery.isNullOrBlank()) {
             append('?')
-            append(finalQuery)
+            append(routedQuery)
         }
     }
 }

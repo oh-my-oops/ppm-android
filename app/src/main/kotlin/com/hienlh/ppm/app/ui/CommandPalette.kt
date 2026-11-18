@@ -440,9 +440,11 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
     val ranked by produceState(PaletteRanked("", actions), actions, ranking, filesystemItems, typed.path) {
         value = withContext(Dispatchers.Default) { PaletteRanked(typed.path, paletteResults(ranking, actions, filesystemItems, typed.path)) }
     }
-    val filtered = ranked.items
+    // A task code (`#82`, `ppm/82`) puts that task first (`useTaskCodeCommands`).
+    val taskCodes = com.hienlh.ppm.app.ui.tasks.rememberTaskCodeItems(model, text, project, onDismiss)
+    val filtered = if (taskCodes.items.isEmpty()) ranked.items else taskCodes.items + ranked.items
     // The list on screen can still be the one for the text before; an Enter must not run its first row.
-    val answered = ranked.answers(typed.path, listing)
+    val answered = ranked.answers(typed.path, listing) && !taskCodes.pending
     val groups = availableGroups(hasActions = actions.isNotEmpty(), hasFiles = files.isNotEmpty(), hasFilesystem = filesystemPaths.isNotEmpty())
     val counts = remember(filtered) { groupCounts(filtered) }
     val shown = remember(filtered, activeGroups) { visibleResults(filtered, activeGroups) }

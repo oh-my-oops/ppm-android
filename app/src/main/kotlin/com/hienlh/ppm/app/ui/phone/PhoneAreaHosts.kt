@@ -82,5 +82,11 @@ internal fun PhoneWorkspaceAreaBody(
             model = model,
             nav = nav,
         )
+        // A `task` tab (the palette, `?openTask`, Full screen) shows the task's page; the area itself the list.
+        PhoneArea.TASKS -> if (tab?.type == "task") {
+            com.hienlh.ppm.app.ui.tasks.TaskTabBody(model, tab, onBack = { nav.visitTab(PhoneNav.areaTabId(PhoneArea.TASKS)) })
+        } else {
+            com.hienlh.ppm.app.ui.tasks.TasksPanel(model)
+        }
     }
 }

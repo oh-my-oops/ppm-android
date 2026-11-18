@@ -410,6 +410,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             ) {
                 CssColumn(Modifier.fillMaxSize()) {
                     if (tab.providerPending) NewChatGateLine(model, tab)
+                    // The task(s) this chat works on, and their quick view.
+                    com.hienlh.ppm.app.ui.tasks.ChatTaskStrip(model, currentSessionId, tab.project)
                     BackgroundCommandBar(
                         state.backgroundShells,
                         onViewOutput = { model.openBackgroundOutput(tab.tabId, it.shellId) },
@@ -563,6 +565,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                     horizontalArrangement = Arrangement.spacedBy(if (narrow || mobile) 4.dp else 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
+                                    com.hienlh.ppm.app.ui.tasks.ManagerTasksChip(model, currentSessionId, narrow)
                                     ActivityChip(
                                         sessionId = currentSessionId,
                                         running = runningAgents,
