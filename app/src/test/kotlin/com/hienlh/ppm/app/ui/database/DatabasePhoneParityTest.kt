@@ -379,7 +379,7 @@ class DatabasePhoneParityTest {
         composeRule.onNodeWithTag("db-query-write-once-dialog").assertIsDisplayed()
         composeRule.onNodeWithText(WRITE_ONCE_TITLE).assertIsDisplayed()
         composeRule.onNodeWithText(writeOnceExplanation("Payroll Prod")).assertIsDisplayed()
-        composeRule.onNode(hasText("DELETE FROM payroll WHERE id = 7") and hasAnyAncestor(hasTestTag("db-query-write-once-sql")))
+        composeRule.onNode(hasText("DELETE FROM payroll WHERE id = 7") and hasAnyAncestor(hasTestTag("db-query-write-once-sql")), useUnmergedTree = true)
             .assertIsDisplayed()
         composeRule.onNodeWithTag("db-query-write-once-submit").assertIsNotEnabled().assertHeightIsAtLeast(44.dp)
         composeRule.onNodeWithTag("db-query-write-once-password").performTextReplacement("ppm-secret")
