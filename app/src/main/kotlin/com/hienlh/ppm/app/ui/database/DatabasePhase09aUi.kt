@@ -135,7 +135,6 @@ import kotlinx.serialization.json.put
 fun DatabaseSidebarPane(
     model: AppModel,
     onNavigate: () -> Unit = {},
-    readOnly: Boolean = LocalPpmMobile.current,
 ) {
     val api = model.api
     val scope = rememberCoroutineScope()
@@ -405,7 +404,7 @@ fun DatabaseSidebarPane(
                         if (dbParam != null) put("database", dbParam)
                         put("tableName", item.name)
                         if (item.schema != null) put("schema", item.schema)
-                        if (readOnly || conn.readonly == 1) put("readonly", true)
+                        if (conn.readonly == 1) put("readonly", true)
                     },
                 )
                 onNavigate()
@@ -444,7 +443,7 @@ fun DatabaseSidebarPane(
                         put("dbType", conn.type)
                         put("tableName", item.name)
                         if (item.schema != null) put("schema", item.schema)
-                        put("readonly", readOnly || conn.readonly == 1)
+                        put("readonly", conn.readonly == 1)
                     },
                 )
                 onNavigate()
@@ -485,7 +484,6 @@ fun DatabaseSidebarPane(
                 )
                 onNavigate()
             },
-            readOnly = readOnly,
         )
     }
 }
@@ -538,11 +536,11 @@ internal fun DatabaseSidebarContent(
     onOpenObjectStructure: (DbObjectItem) -> Unit = {},
     onNewTable: () -> Unit = {},
     onOpenImpExp: (mode: String?, tableName: String?) -> Unit = { _, _ -> },
-    readOnly: Boolean = false,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val context = LocalContext.current
+    val phoneTouchTarget = dbPhoneTouchTarget()
 
     var connectionsCollapsed by remember { mutableStateOf(false) }
     var objectsCollapsed by remember { mutableStateOf(false) }
@@ -619,20 +617,13 @@ internal fun DatabaseSidebarContent(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (readOnly) {
-                    BasicText(
-                        "Read-only",
-                        style = ppmText(10f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f)
-                            .copy(color = tokens.text3.color),
-                        modifier = Modifier.testTag("db-sidebar-readonly-badge"),
-                    )
-                }
                 SettingsButton(
                     label = "+ Query",
-                    modifier = Modifier.testTag("db-new-query-btn"),
+                    modifier = phoneTouchTarget.testTag("db-new-query-btn"),
                     onClick = onNewQuery,
                 )
-                if (!readOnly) {
+                // A phone only looks at structure and has no Import/Export (`editsStructure`/`impExp: !mobile`).
+                if (!mobile) {
                     SettingsButton(
                         label = "+ Table",
                         modifier = Modifier.testTag("db-new-table-btn"),
@@ -643,26 +634,26 @@ internal fun DatabaseSidebarContent(
                         modifier = Modifier.testTag("db-open-impexp-btn"),
                         onClick = { onOpenImpExp(null, null) },
                     )
-                    SettingsButton(
-                        label = "+ Folder",
-                        modifier = Modifier.testTag("db-new-folder-btn"),
-                        onClick = {
-                            creatingFolder = !creatingFolder
-                            newFolderName = ""
-                        },
-                    )
-                    SettingsButton(
-                        label = "Export",
-                        modifier = Modifier.testTag("db-export-btn"),
-                        onClick = { showExportWarning = true },
-                    )
-                    SettingsButton(
-                        label = "+ Connection",
-                        primary = true,
-                        modifier = Modifier.testTag("db-new-connection-btn"),
-                        onClick = onNewConnection,
-                    )
                 }
+                SettingsButton(
+                    label = "+ Folder",
+                    modifier = phoneTouchTarget.testTag("db-new-folder-btn"),
+                    onClick = {
+                        creatingFolder = !creatingFolder
+                        newFolderName = ""
+                    },
+                )
+                SettingsButton(
+                    label = "Export",
+                    modifier = phoneTouchTarget.testTag("db-export-btn"),
+                    onClick = { showExportWarning = true },
+                )
+                SettingsButton(
+                    label = "+ Connection",
+                    primary = true,
+                    modifier = phoneTouchTarget.testTag("db-new-connection-btn"),
+                    onClick = onNewConnection,
+                )
             }
         }
 
@@ -886,20 +877,12 @@ internal fun DatabaseSidebarContent(
                                             )
                                             val missingDriver = st.missingDriverId
                                             if (missingDriver != null) {
-                                                if (readOnly) {
-                                                    BasicText(
-                                                        "Install the driver on a tablet.",
-                                                        style = ppmText(10f, lineHeight = 14f).copy(color = tokens.text3.color),
-                                                        modifier = Modifier.testTag("db-readonly-driver-tablet-note"),
-                                                    )
-                                                } else {
-                                                    SettingsButton(
-                                                        label = "Install Driver",
-                                                        primary = true,
-                                                        modifier = Modifier.testTag("db-install-driver-$missingDriver"),
-                                                        onClick = { onInstallDriver(missingDriver) },
-                                                    )
-                                                }
+                                                SettingsButton(
+                                                    label = "Install Driver",
+                                                    primary = true,
+                                                    modifier = phoneTouchTarget.testTag("db-install-driver-$missingDriver"),
+                                                    onClick = { onInstallDriver(missingDriver) },
+                                                )
                                             }
                                         }
                                     }
@@ -913,52 +896,52 @@ internal fun DatabaseSidebarContent(
                                         ) {
                                             SettingsButton(
                                                 label = "Connect",
+                                                modifier = phoneTouchTarget,
                                                 onClick = {
                                                     menuConn = null
                                                     onSelectDbRef(c.singleDbRef ?: DbRef(c.id, null), true)
                                                 },
                                             )
-                                            if (readOnly) {
-                                                SettingsButton(
-                                                    label = "New query",
-                                                    onClick = {
-                                                        menuConn = null
-                                                        onNewQuery()
-                                                    },
-                                                )
-                                            }
-                                            if (!readOnly) {
-                                                SettingsButton(
-                                                    label = "Edit",
-                                                    onClick = {
-                                                        menuConn = null
-                                                        onEditConnection(c)
-                                                    },
-                                                )
-                                                SettingsButton(
-                                                    label = "Duplicate",
-                                                    onClick = {
-                                                        menuConn = null
-                                                        onDuplicateConnection(c.id)
-                                                    },
-                                                )
-                                            }
+                                            SettingsButton(
+                                                label = "New query",
+                                                modifier = phoneTouchTarget,
+                                                onClick = {
+                                                    menuConn = null
+                                                    onNewQuery()
+                                                },
+                                            )
+                                            SettingsButton(
+                                                label = "Edit",
+                                                modifier = phoneTouchTarget,
+                                                onClick = {
+                                                    menuConn = null
+                                                    onEditConnection(c)
+                                                },
+                                            )
+                                            SettingsButton(
+                                                label = "Duplicate",
+                                                modifier = phoneTouchTarget,
+                                                onClick = {
+                                                    menuConn = null
+                                                    onDuplicateConnection(c.id)
+                                                },
+                                            )
                                             SettingsButton(
                                                 label = "Disconnect",
+                                                modifier = phoneTouchTarget,
                                                 onClick = {
                                                     menuConn = null
                                                     onDisconnectConnection(c.id)
                                                 },
                                             )
-                                            if (!readOnly) {
-                                                SettingsButton(
-                                                    label = "Delete",
-                                                    onClick = {
-                                                        menuConn = null
-                                                        onDeleteConnection(c.id)
-                                                    },
-                                                )
-                                            }
+                                            SettingsButton(
+                                                label = "Delete",
+                                                modifier = phoneTouchTarget,
+                                                onClick = {
+                                                    menuConn = null
+                                                    onDeleteConnection(c.id)
+                                                },
+                                            )
                                         }
                                     }
                                 }
@@ -990,15 +973,6 @@ internal fun DatabaseSidebarContent(
                             else -> {}
                         }
                     }
-                }
-                if (readOnly) {
-                    BasicText(
-                        "Add or edit connections on a tablet.",
-                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
-                        modifier = Modifier
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                            .testTag("db-readonly-connections-tablet-note"),
-                    )
                 }
             }
         }
@@ -1194,7 +1168,7 @@ internal fun DatabaseSidebarContent(
                                                 style = ppmText(10f, kind = FontKind.MONO, lineHeight = 13f).copy(color = tokens.text3.color),
                                             )
                                         }
-                                        if (row.expandable && !readOnly) {
+                                        if (row.expandable) {
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(4.dp))
@@ -1424,6 +1398,7 @@ internal fun DbConnectionFormContent(
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
+    val phoneTouchTarget = dbPhoneTouchTarget()
     var values by remember(initialValues) { mutableStateOf(initialValues) }
     var activeSubTab by remember { mutableStateOf("general") }
     var validationProblem by remember { mutableStateOf<String?>(null) }
@@ -1469,6 +1444,7 @@ internal fun DbConnectionFormContent(
                     Box(
                         modifier = Modifier
                             .weight(1f)
+                            .then(phoneTouchTarget)
                             .clip(RoundedCornerShape(6.dp))
                             .background(if (selected) tokens.accent.opacity(0.18).color else tokens.panel.color)
                             .cssBorder(if (selected) tokens.accent.color else tokens.border.color)
@@ -1507,7 +1483,7 @@ internal fun DbConnectionFormContent(
                         SettingsButton(
                             label = tabLabel,
                             primary = activeSubTab == tabId,
-                            modifier = Modifier.testTag("db-form-tab-$tabId"),
+                            modifier = phoneTouchTarget.testTag("db-form-tab-$tabId"),
                             onClick = { activeSubTab = tabId },
                         )
                     }
@@ -1810,7 +1786,7 @@ internal fun DbConnectionFormContent(
                         SettingsButton(
                             label = "Install Driver",
                             primary = true,
-                            modifier = Modifier.testTag("db-form-install-driver"),
+                            modifier = phoneTouchTarget.testTag("db-form-install-driver"),
                             onClick = { onInstallMissingDriver(missingDriverId) },
                         )
                     } else if (!testDetails.isNullOrBlank()) {
@@ -1838,7 +1814,7 @@ internal fun DbConnectionFormContent(
                 SettingsButton(
                     label = "Connect",
                     primary = true,
-                    modifier = Modifier.testTag("db-form-connect-btn"),
+                    modifier = (if (mobile) Modifier.weight(2f) else Modifier).then(phoneTouchTarget).testTag("db-form-connect-btn"),
                     onClick = {
                         val prob = validateConnectionForm(values, forSave = true)
                         if (prob != null) {
@@ -1851,7 +1827,7 @@ internal fun DbConnectionFormContent(
                 )
                 SettingsButton(
                     label = "Test",
-                    modifier = Modifier.testTag("db-form-test-btn"),
+                    modifier = (if (mobile) Modifier.weight(1f) else Modifier).then(phoneTouchTarget).testTag("db-form-test-btn"),
                     onClick = {
                         val prob = validateConnectionForm(values, forSave = false)
                         if (prob != null) {
@@ -1864,7 +1840,7 @@ internal fun DbConnectionFormContent(
                 )
                 SettingsButton(
                     label = "Save",
-                    modifier = Modifier.testTag("db-form-save-btn"),
+                    modifier = (if (mobile) Modifier.weight(1f) else Modifier).then(phoneTouchTarget).testTag("db-form-save-btn"),
                     onClick = {
                         val prob = validateConnectionForm(values, forSave = true)
                         if (prob != null) {

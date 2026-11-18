@@ -54,6 +54,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
@@ -554,30 +555,12 @@ internal fun DatabaseStructureTabContent(
     var activeSaveChange by remember { mutableStateOf<StructureChange?>(null) }
     var copyBanner by remember { mutableStateOf<String?>(null) }
 
-    // Phone guard (`§9f.2`): new table or dirty structure editor prompts "Open on a larger screen"
-    if (mobile && (isNewTable || isDirty)) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(tokens.bgSolid.color)
-                .padding(24.dp)
-                .testTag("db-structure-phone-larger-screen"),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                PpmIcon(ProductIcon.FolderTree.vector, 28.dp, tokens.text3.color)
-                BasicText(
-                    "Open on a larger screen",
-                    style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
-                )
-                BasicText(
-                    "Creating or editing table structure requires a tablet or desktop screen.",
-                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
-                )
-            }
+    // A phone only looks at structure (`structure-tab.tsx`): what it cannot do here is said rather
+    // than lost, the change staying in the tab for a larger screen. A new table shows the notice alone.
+    val phoneNotice = structurePhoneNotice(mobile = mobile, isNewTable = isNewTable, isDirty = isDirty)
+    if (mobile && isNewTable && phoneNotice != null) {
+        Column(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
+            StructurePhoneNotice(phoneNotice)
         }
         return
     }
@@ -665,12 +648,17 @@ internal fun DatabaseStructureTabContent(
                     onClick = { triggerSaveDialog() },
                 )
             }
-            SettingsButton(
-                label = "Refresh",
-                modifier = Modifier.testTag("db-structure-refresh-btn"),
-                onClick = onRefresh,
-            )
+            // Refresh drops the tab's held change, which a phone keeps for a larger screen.
+            if (!(mobile && isDirty)) {
+                SettingsButton(
+                    label = "Refresh",
+                    modifier = Modifier.testTag("db-structure-refresh-btn"),
+                    onClick = onRefresh,
+                )
+            }
         }
+
+        if (phoneNotice != null) StructurePhoneNotice(phoneNotice)
 
         if (copyBanner != null) {
             Row(
@@ -2491,12 +2479,8 @@ internal fun DatabaseImpExpTabContent(
             ) {
                 PpmIcon(ProductIcon.ArrowLeftRight.vector, 28.dp, tokens.text3.color)
                 BasicText(
-                    "Needs a wider screen",
-                    style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
-                )
-                BasicText(
-                    "Database Import / Export requires a tablet or desktop screen.",
-                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                    IMPEXP_PHONE_NOTICE,
+                    style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
                 )
             }
         }
@@ -3777,5 +3761,35 @@ fun DbTabCloseConfirmDialogContent(
                 )
             }
         }
+    }
+}
+
+/** `impexp-tab.tsx` on a phone: the two-pane Import/Export does not fit, and the web says so. */
+internal const val IMPEXP_PHONE_NOTICE = "Import/Export needs a wider screen. Open this tab on a computer."
+
+/** The notice `structure-tab.tsx` shows a phone over a structure it cannot change, or null. */
+internal fun structurePhoneNotice(mobile: Boolean, isNewTable: Boolean, isDirty: Boolean): String? = when {
+    !mobile -> null
+    isNewTable -> "This table is not created yet. Open this tab on a larger screen to set it up and create it."
+    isDirty -> "This tab holds changes to the table that are not saved. Open it on a larger screen to review and save them."
+    else -> null
+}
+
+/** `role="status"`: `flex items-start gap-2 border-b border-border-soft bg-panel-2 px-3 py-2.5 text-[13px] text-text-2`. */
+@Composable
+private fun StructurePhoneNotice(text: String) {
+    val tokens = LocalPpmTokens.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(tokens.panel2.color)
+            .cssBorder(tokens.borderSoft.color, sides = CssSides.Bottom)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .testTag("db-structure-phone-notice"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        PpmIcon(ProductIcon.Info.vector, 16.dp, tokens.info.color, modifier = Modifier.padding(top = 2.dp))
+        BasicText(text, style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text2.color), modifier = Modifier.weight(1f))
     }
 }

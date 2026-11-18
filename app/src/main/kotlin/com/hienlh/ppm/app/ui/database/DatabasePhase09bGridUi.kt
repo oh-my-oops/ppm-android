@@ -1677,7 +1677,7 @@ fun DatabaseTableTabBody(
                         put("dbType", dbType)
                         put("tableName", refTable)
                         put("schema", refSchema ?: schemaName)
-                        put("readonly", readonlyEnabled || mobile)
+                        put("readonly", readonlyEnabled)
                         put(
                             "filters",
                             encodeGridFiltersJson(
@@ -1689,7 +1689,6 @@ fun DatabaseTableTabBody(
                     },
                 )
             },
-            readOnly = mobile,
         )
     }
 }
@@ -1722,7 +1721,6 @@ internal fun DatabaseTableTabContent(
     missingDriverId: String? = null,
     exportStatusMessage: String? = null,
     readonlyEnabled: Boolean = true,
-    readOnly: Boolean = false,
     autoRefreshSec: Int = 0,
     tableReferences: TableReferences = TableReferences(),
     onRefresh: (Boolean) -> Unit = {},
@@ -1868,7 +1866,7 @@ internal fun DatabaseTableTabContent(
         }
     }
     val hasRowKey = keyCols.isNotEmpty() && keyCols.all { it in columns }
-    val effectiveReadonly = readOnly || readonlyEnabled
+    val effectiveReadonly = readonlyEnabled
     val canEditTable = !effectiveReadonly && hasRowKey
 
     fun rowKeyMapFor(rowIndex: Int): Map<String, DbCellValue> {
@@ -2193,17 +2191,15 @@ internal fun DatabaseTableTabContent(
                             },
                         )
                         SettingsButton(label = "Copy ▾", onClick = { showCopyMenu = !showCopyMenu })
-                        if (!readOnly) {
-                            SettingsButton(label = "Export ▾", onClick = { showExportMenu = !showExportMenu })
-                            SettingsButton(
-                                label = "Generate SQL",
-                                modifier = Modifier.testTag("db-generate-sql-btn"),
-                                onClick = {
-                                    showPhoneOverflowMenu = false
-                                    showGenerateSqlDialog = true
-                                },
-                            )
-                        }
+                        SettingsButton(label = "Export ▾", onClick = { showExportMenu = !showExportMenu })
+                        SettingsButton(
+                            label = "Generate SQL",
+                            modifier = Modifier.testTag("db-generate-sql-btn"),
+                            onClick = {
+                                showPhoneOverflowMenu = false
+                                showGenerateSqlDialog = true
+                            },
+                        )
                         if (hasReferences(tableReferences)) {
                             SettingsButton(
                                 label = "References",
@@ -2216,14 +2212,12 @@ internal fun DatabaseTableTabContent(
                             )
                         }
                         SettingsButton(label = "Columns (${visibleColumns.size}/${columns.size})", onClick = { showColumnsPanel = !showColumnsPanel })
-                        if (!readOnly) {
-                            SettingsButton(
-                                label = if (readonlyEnabled) "🔒 Read-only" else "✏️ Editable",
-                                primary = !readonlyEnabled,
-                                modifier = Modifier.testTag("db-readonly-toggle-btn"),
-                                onClick = { onToggleReadonly(!readonlyEnabled) },
-                            )
-                        }
+                        SettingsButton(
+                            label = if (readonlyEnabled) "🔒 Read-only" else "✏️ Editable",
+                            primary = !readonlyEnabled,
+                            modifier = Modifier.testTag("db-readonly-toggle-btn"),
+                            onClick = { onToggleReadonly(!readonlyEnabled) },
+                        )
                     }
                 }
             } else {
@@ -2336,18 +2330,16 @@ internal fun DatabaseTableTabContent(
                         modifier = Modifier.testTag("db-copy-menu-btn"),
                         onClick = { showCopyMenu = !showCopyMenu },
                     )
-                    if (!readOnly) {
-                        SettingsButton(
-                            label = "Export ▾",
-                            modifier = Modifier.testTag("db-export-menu-btn"),
-                            onClick = { showExportMenu = !showExportMenu },
-                        )
-                        SettingsButton(
-                            label = "Generate SQL",
-                            modifier = Modifier.testTag("db-generate-sql-btn"),
-                            onClick = { showGenerateSqlDialog = !showGenerateSqlDialog },
-                        )
-                    }
+                    SettingsButton(
+                        label = "Export ▾",
+                        modifier = Modifier.testTag("db-export-menu-btn"),
+                        onClick = { showExportMenu = !showExportMenu },
+                    )
+                    SettingsButton(
+                        label = "Generate SQL",
+                        modifier = Modifier.testTag("db-generate-sql-btn"),
+                        onClick = { showGenerateSqlDialog = !showGenerateSqlDialog },
+                    )
                     SettingsButton(
                         label = "Columns (${visibleColumns.size}/${columns.size})",
                         primary = showColumnsPanel,
@@ -2375,21 +2367,12 @@ internal fun DatabaseTableTabContent(
                             onClick = { showReferencesPanel = !showReferencesPanel },
                         )
                     }
-                    if (!readOnly) {
-                        SettingsButton(
-                            label = if (readonlyEnabled) "🔒 Read-only" else "✏️ Editable",
-                            primary = !readonlyEnabled,
-                            modifier = Modifier.testTag("db-readonly-toggle-btn"),
-                            onClick = { onToggleReadonly(!readonlyEnabled) },
-                        )
-                    } else {
-                        BasicText(
-                            "Read-only",
-                            style = ppmText(10f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f)
-                                .copy(color = tokens.text3.color),
-                            modifier = Modifier.testTag("db-table-readonly-badge"),
-                        )
-                    }
+                    SettingsButton(
+                        label = if (readonlyEnabled) "🔒 Read-only" else "✏️ Editable",
+                        primary = !readonlyEnabled,
+                        modifier = Modifier.testTag("db-readonly-toggle-btn"),
+                        onClick = { onToggleReadonly(!readonlyEnabled) },
+                    )
 
                     if (rowCountView != null) {
                         Box(
@@ -2588,19 +2571,12 @@ internal fun DatabaseTableTabContent(
                         style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text.color),
                         modifier = Modifier.weight(1f),
                     )
-                    if (readOnly) {
-                        BasicText(
-                            "Install the driver on a tablet.",
-                            style = ppmText(10f, lineHeight = 14f).copy(color = tokens.text3.color),
-                            modifier = Modifier.testTag("db-readonly-driver-tablet-note"),
-                        )
-                    } else {
-                        SettingsButton(
-                            label = "Install $missingDriverId",
-                            primary = true,
-                            onClick = { onInstallMissingDriver(missingDriverId) },
-                        )
-                    }
+                    SettingsButton(
+                        label = "Install $missingDriverId",
+                        primary = true,
+                        modifier = dbPhoneTouchTarget().testTag("db-grid-install-driver-btn"),
+                        onClick = { onInstallMissingDriver(missingDriverId) },
+                    )
                 }
             } else if (errorMessage != null || (saveDialogError != null && activeSavePreview == null)) {
                 Box(
@@ -3516,27 +3492,15 @@ internal fun DatabaseTableTabContent(
                                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                if (readOnly) {
-                                    SettingsButton(
-                                        label = "View row",
-                                        primary = true,
-                                        modifier = Modifier.testTag("db-phone-view-row-btn"),
-                                        onClick = {
-                                            phoneFormRowIndex = phoneCell.second
-                                            phoneLongPressCell = null
-                                        },
-                                    )
-                                } else {
-                                    SettingsButton(
-                                        label = "Edit row",
-                                        primary = true,
-                                        modifier = Modifier.testTag("db-phone-edit-row-btn"),
-                                        onClick = {
-                                            phoneFormRowIndex = phoneCell.second
-                                            phoneLongPressCell = null
-                                        },
-                                    )
-                                }
+                                SettingsButton(
+                                    label = "Edit row",
+                                    primary = true,
+                                    modifier = Modifier.testTag("db-phone-edit-row-btn"),
+                                    onClick = {
+                                        phoneFormRowIndex = phoneCell.second
+                                        phoneLongPressCell = null
+                                    },
+                                )
                                 SettingsButton(
                                     label = "Copy cell",
                                     modifier = Modifier.testTag("db-phone-copy-cell-btn"),
@@ -3579,47 +3543,30 @@ internal fun DatabaseTableTabContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (!readOnly) {
-                        SettingsButton(
-                            label = "+ New row",
-                            enabled = canEditTable,
-                            modifier = Modifier.testTag("db-phone-new-row-btn"),
-                            onClick = {
-                                if (canEditTable) {
-                                    val rIdx = insertBlankRow()
-                                    phoneFormRowIndex = rIdx
-                                }
-                            },
-                        )
-                    } else {
-                        BasicText(
-                            "Read-only",
-                            style = ppmText(11f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f)
-                                .copy(color = tokens.text3.color),
-                            modifier = Modifier.testTag("db-phone-readonly-badge"),
-                        )
-                    }
+                    SettingsButton(
+                        label = "+ New row",
+                        enabled = canEditTable,
+                        modifier = dbPhoneTouchTarget().testTag("db-phone-new-row-btn"),
+                        onClick = {
+                            if (canEditTable) {
+                                val rIdx = insertBlankRow()
+                                phoneFormRowIndex = rIdx
+                            }
+                        },
+                    )
                     SettingsButton(
                         label = "Filters",
                         primary = showPhoneColsAndFiltersSheet || hasFilters(filters),
-                        modifier = Modifier.testTag("db-phone-filters-btn"),
+                        modifier = dbPhoneTouchTarget().testTag("db-phone-filters-btn"),
                         onClick = { showPhoneColsAndFiltersSheet = !showPhoneColsAndFiltersSheet },
                     )
-                    if (!readOnly) {
-                        SettingsButton(
-                            label = if (changedCount > 0) "Save ($changedCount)" else "Save",
-                            primary = changedCount > 0,
-                            enabled = canEditTable,
-                            modifier = Modifier.testTag("db-phone-save-btn"),
-                            onClick = { triggerSaveFlow() },
-                        )
-                    } else {
-                        SettingsButton(
-                            label = "⋯",
-                            modifier = Modifier.testTag("db-phone-bottom-overflow-btn"),
-                            onClick = { showPhoneOverflowMenu = !showPhoneOverflowMenu },
-                        )
-                    }
+                    SettingsButton(
+                        label = if (changedCount > 0) "Save ($changedCount)" else "Save",
+                        primary = changedCount > 0,
+                        enabled = canEditTable,
+                        modifier = dbPhoneTouchTarget().testTag("db-phone-save-btn"),
+                        onClick = { triggerSaveFlow() },
+                    )
                 }
             }
         }
