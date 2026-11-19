@@ -194,6 +194,8 @@ fun PhoneSourceControlScreen(
     onStageHunks: (suspend (FileChange, List<DiffHunk>) -> Unit)? = null,
     tabActions: PhoneGitTabActions = PhoneGitTabActions(),
     onNotice: (String) -> Unit = {},
+    /** A drafted message was dropped because the box changed while the AI wrote it (the web's toast). */
+    onDraftNotUsed: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var reloadTick by remember { mutableIntStateOf(0) }
@@ -699,13 +701,22 @@ fun PhoneSourceControlScreen(
             aiState = WriteWithAi.Failed("AI commit message generator is not configured.", commitMessage)
             return
         }
+        val repoAsked = resolvedRepo
+        // What the box holds now, read live: the shared draft can change on another device too.
+        fun typed(): String =
+            commitDrafts?.message(projectName, repoAsked) ?: localCommitMessage
+        val before = typed()
         scope.launch {
             aiState = WriteWithAi.Writing
             try {
-                val generated = generator(resolvedRepo)
-                if (!generated.isNullOrBlank()) {
+                val generated = generator(repoAsked)
+                if (!generated.isNullOrBlank() && !WriteWithAi.draftFits(before, typed())) {
+                    // Typed into while the AI worked: keep what was typed rather than overwrite it.
+                    aiState = WriteWithAi.Idle
+                    onDraftNotUsed()
+                } else if (!generated.isNullOrBlank()) {
                     setCommitMessage(generated.trim())
-                    aiState = WriteWithAi.Written(generated.trim())
+                    aiState = WriteWithAi.Written(generated.trim(), previousMessage = before)
                 } else {
                     aiState = WriteWithAi.Idle
                 }

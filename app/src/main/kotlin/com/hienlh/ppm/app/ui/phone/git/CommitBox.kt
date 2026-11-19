@@ -366,11 +366,11 @@ fun CommitBox(
                     isTablet && isAiWritten -> ProductIcon.RefreshCw
                     else -> ProductIcon.Sparkles
                 }
+                // The web's button name (`aria-label`), with why it is off when it is.
                 val aiSemanticsLabel = when {
                     isAiWriting -> "Writing commit message with AI"
-                    aiDisabledReason != null -> "Write with AI — $aiDisabledReason"
-                    isTablet && isAiWritten -> "Write commit message again with AI"
-                    else -> "Write commit message with AI"
+                    aiDisabledReason != null -> WriteWithAi.DRAFT_BUTTON_LABEL + " — " + aiDisabledReason
+                    else -> WriteWithAi.DRAFT_BUTTON_LABEL
                 }
                 Chip(
                     label = aiLabel,

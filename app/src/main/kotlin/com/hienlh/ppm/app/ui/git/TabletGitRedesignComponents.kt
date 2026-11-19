@@ -57,7 +57,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.ChangeSide
 import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.design.FileIcon
@@ -67,14 +66,11 @@ import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
-import com.hienlh.ppm.protocol.get
-import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.git.CheckState
 import com.hienlh.ppm.state.git.FileChange
 import com.hienlh.ppm.state.git.GitChangeGroup
 import com.hienlh.ppm.state.git.GitChangeGroups
 import com.hienlh.ppm.state.git.GitChangesView
-import kotlinx.serialization.json.buildJsonObject
 
 internal val FileChange.raw: ChangedFile
     get() = source ?: ChangedFile(
@@ -119,16 +115,6 @@ internal fun ChangedFile.changesBlockSummary(): String? {
 
 internal val FileChange.blockSummary: String?
     get() = if (group == GitChangeGroup.STAGED) raw.stagedBlockSummary() else raw.changesBlockSummary()
-
-internal suspend fun ApiClient.requestAiCommitMessage(project: String): String {
-    val data = call(
-        "POST",
-        "/api/project/${ApiClient.escape(project)}/git/commit-message",
-        emptyList(),
-        buildJsonObject {},
-    )
-    return data["message"].string.orEmpty()
-}
 
 /**
  * Tablet 4 Section 1: Renders `Staged` and `Changes` groups using [GitChangeGroups],

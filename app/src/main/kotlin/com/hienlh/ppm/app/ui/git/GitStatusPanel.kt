@@ -65,6 +65,7 @@ import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.GitChanges
 import com.hienlh.ppm.client.StashEntry
 import com.hienlh.ppm.client.gitChanges
+import com.hienlh.ppm.client.gitCommitMessage
 import com.hienlh.ppm.client.gitCommit
 import com.hienlh.ppm.client.gitDiscard
 import com.hienlh.ppm.client.gitDiscardUndo
@@ -92,6 +93,7 @@ import com.hienlh.ppm.state.git.GitChangesView
 import com.hienlh.ppm.state.git.GitFileTree
 import com.hienlh.ppm.state.git.GitRepoScope
 import com.hienlh.ppm.state.git.GitTreeNode
+import com.hienlh.ppm.state.git.WriteWithAi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -652,25 +654,31 @@ fun GitStatusPanel(
 
     val changeGroups = remember(files) { GitChangeGroups.from(files) }
     var aiLoading by remember(project, repo?.path) { mutableStateOf(false) }
-    var aiError by remember(project, repo?.path) { mutableStateOf<String?>(null) }
     var shortcutsOpen by remember { mutableStateOf(false) }
     var focusedRowKey by remember(project, repo?.path) { mutableStateOf<String?>(null) }
 
+    // The sparkle button in the box (`draftMessage` in `git-commit-composer.tsx`): asks for a
+    // message from what is staged in this repository and puts it in its shared draft; never commits.
     fun handleWriteWithAi() {
         val client = api ?: return
-        if (aiLoading) return
+        if (aiLoading || totals.filesStaged == 0) return
+        val repoAsked = repo
+        val before = model.commitDrafts.message(project, repoAsked)
         scope.launch {
             aiLoading = true
-            aiError = null
             try {
-                val msg = client.requestAiCommitMessage(project)
-                if (msg.isNotEmpty()) {
-                    model.commitDrafts.setMessage(client, project, repo, msg)
+                val msg = client.gitCommitMessage(project, repoAsked)
+                when {
+                    // Typed into while the AI worked: keep what was typed rather than overwrite it.
+                    !WriteWithAi.draftFits(before, model.commitDrafts.message(project, repoAsked)) -> model.toast(
+                        ErrorToastMessage(WriteWithAi.DRAFT_NOT_USED_TITLE, WriteWithAi.DRAFT_NOT_USED_DESCRIPTION, kind = ErrorToastMessage.Kind.PLAIN),
+                    )
+                    msg.isNotEmpty() -> model.commitDrafts.setMessage(client, project, repoAsked, msg)
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                aiError = model.describe(e)
+                model.toast(ErrorToastMessage(WriteWithAi.DRAFT_FAILED_TITLE, model.describe(e)))
             } finally {
                 aiLoading = false
             }
@@ -1062,7 +1070,6 @@ fun GitStatusPanel(
                         branch = branch.head,
                         onWriteWithAi = ::handleWriteWithAi,
                         aiLoading = aiLoading,
-                        aiError = aiError,
                         touchPlaceholder = touchPlaceholder,
                     )
                 }
@@ -1238,7 +1245,6 @@ fun GitStatusPanel(
                         branch = branch.head,
                         onWriteWithAi = ::handleWriteWithAi,
                         aiLoading = aiLoading,
-                        aiError = aiError,
                         touchPlaceholder = touchPlaceholder,
                     )
                 }

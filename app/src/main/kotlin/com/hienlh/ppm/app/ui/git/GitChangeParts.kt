@@ -83,6 +83,7 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.git.ChangeTotals
 import com.hienlh.ppm.state.git.CheckState
 import com.hienlh.ppm.state.git.GitChangesView
+import com.hienlh.ppm.state.git.WriteWithAi
 
 internal enum class Edge { Top, Bottom, Start, End }
 
@@ -986,7 +987,6 @@ internal fun GitCommitComposer(
     onInputFocusChanged: ((Boolean) -> Unit)? = null,
     onWriteWithAi: (() -> Unit)? = null,
     aiLoading: Boolean = false,
-    aiError: String? = null,
     touchPlaceholder: Boolean = false,
 ) {
     val tokens = LocalPpmTokens.current
@@ -1043,11 +1043,13 @@ internal fun GitCommitComposer(
             BasicTextField(
                 value = message,
                 onValueChange = onMessageChange,
+                // Held while the AI drafts, as the web's `readOnly={drafting}`.
+                readOnly = aiLoading,
                 textStyle = PpmFont.sans(13, lineHeight = 19, color = tokens.text.color),
                 cursorBrush = SolidColor(tokens.accent.color),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(end = if (onWriteWithAi != null) 34.dp else 0.dp)
+                    .padding(end = if (onWriteWithAi == null) 0.dp else if (mobile) 44.dp else 34.dp)
                     .testTag("git-commit-input")
                     .onFocusChanged {
                         inputFocused = it.isFocused
@@ -1075,52 +1077,25 @@ internal fun GitCommitComposer(
                 },
             )
             if (onWriteWithAi != null) {
-                val aiEnabled = !aiLoading && busyAction == null && totals.files > 0 && totals.conflicts == 0
+                // Off until something is staged: the AI drafts from the staged diff alone.
+                val aiEnabled = !aiLoading && busyAction == null && totals.filesStaged > 0
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .size(28.dp)
+                        .size(if (mobile) 40.dp else 28.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(tokens.panel2.color)
                         .alpha(if (aiEnabled) 1f else 0.4f)
-                        .semantics { contentDescription = "Write commit message with AI" }
+                        .semantics { contentDescription = WriteWithAi.DRAFT_BUTTON_LABEL }
                         .clickable(enabled = aiEnabled, onClick = onWriteWithAi)
                         .testTag("git-ai-msg-btn"),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (aiLoading) {
-                        PpmIcon(ProductIcon.Loader2, size = 12.dp, tint = tokens.accent.color)
+                        PpmIcon(ProductIcon.Loader2, size = 12.dp, tint = tokens.accent.color, spinning = true)
                     } else {
                         BasicText("✦", style = PpmFont.sans(12, FontWeight.Bold, lineHeight = 14, color = tokens.accent.color))
                     }
-                }
-            }
-        }
-
-        if (!aiError.isNullOrEmpty() && onWriteWithAi != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(tokens.error.opacity(0.12).color)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                    .testTag("git-ai-error-banner"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                BasicText(
-                    text = aiError,
-                    style = PpmFont.sans(11, lineHeight = 14, color = tokens.error.color),
-                    modifier = Modifier.weight(1f),
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable(onClick = onWriteWithAi)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                        .testTag("git-ai-retry-btn"),
-                ) {
-                    BasicText("Retry", style = PpmFont.sans(11, FontWeight.SemiBold, lineHeight = 14, color = tokens.error.color))
                 }
             }
         }
