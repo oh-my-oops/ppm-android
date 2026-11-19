@@ -140,6 +140,20 @@ class SchedulesStateTest {
     }
 
     @Test
+    fun `a script schedule's next run is read on its own zone's clock, as a session schedule's is`() {
+        // A watch kept to UK working hours: the server computes next_fire_at on that clock and the row names the city.
+        val watch = parseScheduleOverview(
+            WireJson.parse("""{"id":5,"name":"watch","kind":"script","mode":"tick","cron_expr":"0 9 * * 1-5","timezone":"Europe/London","next_fire_at":"2026-11-18T09:00:00.000Z"}"""),
+        )!!
+        val tokyo = ZoneId.of("Asia/Tokyo")
+        assertEquals("Europe/London", watch.timezone)
+        assertEquals("09:00 London", nextRunLabel(watch, now - 3_600_000L * 2, utc).main)
+        assertEquals("tomorrow 09:00 London", nextRunLabel(watch.copy(nextFireAt = "2026-11-19T09:00:00Z"), now, tokyo).main)
+        // An existing row has no zone: the machine's, shown without a city.
+        assertEquals("18:30", nextRunLabel(watch.copy(timezone = null, nextFireAt = "2026-11-18T18:30:00Z"), now, utc).main)
+    }
+
+    @Test
     fun `the last run says what happened in a word or two`() {
         assertEquals(RunLine(RunTone.NONE, "Not run yet"), lastRunLabel(s(), now))
         assertEquals(RunLine(RunTone.OK, "Done", "1h ago"), lastRunLabel(s(run = ScheduleLastRun(1, "done", "2026-11-18 08:58:00", "2026-11-18 09:00:00")), now))

@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.schedules
 import com.hienlh.ppm.app.ui.BottomSheet
 import com.hienlh.ppm.app.ui.pressable
 import com.hienlh.ppm.app.ui.projectBackground
@@ -534,9 +535,9 @@ internal fun NotificationRowActionsSheet(
             }
         }
 
-        // Open chat / Open project
+        // Open chat / Open schedule / Open project
         ActionMenuRow(
-            label = if (row.sessionId != null) "Open chat" else "Open project",
+            label = notificationOpenLabel(row),
             icon = ProductIcon.MessageSquare,
             trailingIcon = ProductIcon.ArrowRight,
             tokens = tokens,
@@ -661,12 +662,17 @@ internal fun NotificationKindTile(
 }
 
 /**
- * Opens a notification row's session (or switches to its project for a schedule notification).
+ * Opens a notification row's session, else the schedule it names in the Schedules window, else
+ * switches to its project.
  */
 internal fun openNotificationTarget(model: AppModel, row: FeedRow): Boolean {
-    val sessionId = row.sessionId
-    if (!sessionId.isNullOrBlank()) {
-        return model.openUnreadSession(sessionId, row.project)
+    when (val target = notificationTarget(row)) {
+        is NotificationTarget.Chat -> return model.openUnreadSession(target.sessionId, row.project)
+        is NotificationTarget.Schedule -> {
+            model.schedules.open(select = target.id)
+            return true
+        }
+        NotificationTarget.Project -> Unit
     }
     val project = model.projects.firstOrNull { it.name == row.project } ?: return false
     model.scope.launch { model.openProject(project.name) }
