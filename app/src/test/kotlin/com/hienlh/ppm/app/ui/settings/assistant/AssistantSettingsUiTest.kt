@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -25,11 +26,14 @@ import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.state.assistant.AssistantStore
+import com.hienlh.ppm.state.assistant.MANAGER_DELEGATE_RULE_PROSE
+import com.hienlh.ppm.state.assistant.withManagerDelegateRule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -68,6 +72,8 @@ class AssistantSettingsUiTest {
         "manager_default_mode":"default","manager_template":"","restart_news":true,"auto_readonly_commands":true,"act_on_own":false},
         "providers":[{"id":"claude","name":"Claude"}],"limits":{"instructionsMaxChars":8000,"maxServers":20},"managerTemplateBuiltIn":"# Rules"}"""
 
+    private val withRule = JsonPrimitive(withManagerDelegateRule("Keep it tidy")).toString()
+
     private val routes = mapOf(
         "GET /api/assistant/settings" to settings,
         "PUT /api/assistant/settings" to settings,
@@ -77,6 +83,8 @@ class AssistantSettingsUiTest {
         "POST /api/assistant/notes" to """{"note":{}}""",
         "PATCH /api/assistant/notes/3" to """{"note":{}}""",
         "GET /api/assistant/managers/web/rules" to """{"rules":{"approved":"Keep it tidy","accepted":"Keep it tidy","proposed":"Keep it tidy\nPush to main","pendingHash":"h9","approvedAt":1,"addedSince":["Use bun"],"addedSinceUnder":["Allowed without asking"],"proposedDiff":{"added":["Push to main"],"removed":[]}}}""",
+        // The rules once the default delegate rule was added to "Keep it tidy".
+        "PUT /api/assistant/managers/web/rules" to """{"rules":{"approved":$withRule,"accepted":$withRule,"proposed":null,"pendingHash":null,"approvedAt":3,"addedSince":[],"proposedDiff":null}}""",
         "POST /api/assistant/managers/web/rules/decision" to """{"rules":{"approved":"Keep it tidy","accepted":"Keep it tidy","proposed":null,"pendingHash":null,"approvedAt":2,"addedSince":[],"proposedDiff":null}}""",
         "GET /api/assistant/managers" to """{"managers":[{"projectName":"web","projectPath":"/w","sessionId":"m1","providerId":"claude","title":"QL web","phase":"idle","permissionMode":"default","waiting":0,"rulesPending":true,"digest":true,"telegramDetail":"full","toolsPending":true}]}""",
         "PATCH /api/assistant/managers/web" to "{}",
@@ -224,6 +232,37 @@ class AssistantSettingsUiTest {
         waitAsked("POST /api/assistant/managers/web/rules/decision")
         assertEquals("""{"action":"approve","hash":"h9"}""", bodies.last { it.first.contains("/rules/decision") }.second)
         composeRule.waitUntil(5_000) { composeRule.onAllNodesWithTag("asst-rules-change", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun `older rules are offered the new default rule as one paragraph, and Add saves it into the file (tablet)`() {
+        start(mobile = false, tab = "managers")
+        waitTag("asst-manager-row-web")
+        composeRule.onNodeWithTag("asst-manager-rules-web", useUnmergedTree = true).performClick()
+        waitTag("asst-new-default-rule")
+        node("PPM has a new default rule").assertExists()
+        composeRule.onNodeWithTag("asst-new-default-rule-text", useUnmergedTree = true).assertExists()
+        node(MANAGER_DELEGATE_RULE_PROSE).assertExists()
+        composeRule.onNodeWithTag("asst-new-default-rule-add").assertIsEnabled().performClick()
+        waitAsked("PUT /api/assistant/managers/web/rules")
+        assertEquals(withManagerDelegateRule("Keep it tidy"), body("PUT /api/assistant/managers/web/rules")["text"]!!.let { (it as JsonPrimitive).content })
+        // The rules now hold it: no more offer.
+        composeRule.waitUntil(5_000) { composeRule.onAllNodesWithTag("asst-new-default-rule", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h840dp-xhdpi")
+    fun `the default rule's Add waits while the rules have unsaved edits (phone)`() {
+        start(mobile = true, tab = "managers")
+        waitTag("asst-manager-row-web")
+        composeRule.onNodeWithTag("asst-manager-rules-web", useUnmergedTree = true).performClick()
+        waitTag("asst-new-default-rule")
+        node(MANAGER_DELEGATE_RULE_PROSE).assertExists()
+        composeRule.onNodeWithTag("asst-new-default-rule-add").assertIsEnabled()
+        composeRule.onNodeWithTag("asst-rules-text").performTextReplacement("Keep it tidy\nUse bun")
+        composeRule.onNodeWithTag("asst-new-default-rule-add").assertIsNotEnabled()
+        node("Save or undo your edits first.").assertExists()
+        assertFalse(asked.any { it.startsWith("PUT /api/assistant/managers/web/rules") })
     }
 
     @Test
