@@ -808,10 +808,20 @@ fun Throwable.isCommitMessageUnsupported(): Boolean = when (this) {
     else -> cause?.isCommitMessageUnsupported() == true
 }
 
-/** Whether [this] failure indicates nothing is staged (HTTP 409). */
+/**
+ * The server's own words for an empty index. Its other 409 — a default provider that cannot draft
+ * ("Gemini cannot draft a commit message. Make Claude or Codex the default provider in Settings.")
+ * — is passed on as it is: it names what to change, which "Stage changes first" would not.
+ */
+private const val SERVER_NOTHING_STAGED = "Nothing is staged"
+
+private fun PpmError.Server.meansNothingStaged(): Boolean =
+    status == 409 && (serverMessage == SERVER_NOTHING_STAGED || serverMessage == WRITE_WITH_AI_NOTHING_STAGED_MESSAGE)
+
+/** Whether [this] failure indicates nothing is staged (HTTP 409 "Nothing is staged"). */
 fun Throwable.isCommitMessageNothingStaged(): Boolean = when (this) {
     is CommitMessageNothingStaged -> true
-    is PpmError.Server -> status == 409
+    is PpmError.Server -> meansNothingStaged()
     else -> cause?.isCommitMessageNothingStaged() == true
 }
 
@@ -845,7 +855,7 @@ suspend fun ApiClient.gitCommitMessage(project: String, repo: GitRepo? = null): 
     } catch (error: PpmError.Server) {
         when (error.status) {
             404 -> throw CommitMessageUnsupported(error.serverMessage, error)
-            409 -> throw PpmError.Server(
+            409 -> if (!error.meansNothingStaged()) throw error else throw PpmError.Server(
                 status = 409,
                 serverMessage = WRITE_WITH_AI_NOTHING_STAGED_MESSAGE,
                 code = error.code,

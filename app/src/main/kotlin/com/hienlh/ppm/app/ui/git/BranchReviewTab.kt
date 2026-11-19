@@ -50,6 +50,7 @@ import com.hienlh.ppm.client.BranchDiffFile
 import com.hienlh.ppm.client.ChangeSide
 import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.GitBranch
+import com.hienlh.ppm.client.GitRepo
 import com.hienlh.ppm.client.gitBranchDiff
 import com.hienlh.ppm.client.gitBranches
 import com.hienlh.ppm.design.CssSides
@@ -75,7 +76,12 @@ import kotlinx.coroutines.launch
  * Branch Review tab (`branch-review` -> `src/web/components/branch-review/branch-review-tab.tsx`).
  */
 @Composable
-fun BranchReviewBody(model: AppModel, tab: WorkspaceTab) {
+fun BranchReviewBody(
+    model: AppModel,
+    tab: WorkspaceTab,
+    /** Takes the AI's repository off this tab (its `repo` metadata), once the user picks one here. */
+    dropRepoPin: () -> Unit = { model.updateTabTitleAndMetadata(tab.id, null, "repo" to null) },
+) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val scope = rememberCoroutineScope()
@@ -97,7 +103,16 @@ fun BranchReviewBody(model: AppModel, tab: WorkspaceTab) {
     }
 
     val discovery = model.gitDiscovery[projectName]
-    val chosenPath = model.gitChosenRepoPath[projectName]
+    // The repository the AI's `open_branch_review` named, for this tab alone: the device's choice
+    // (Source Control's) is left where the user put it.
+    val pinnedRepo = tab.metaString("repo")
+    val chosenPath = GitRepoScope.pinnedOrChosen(discovery, pinnedRepo, model.gitChosenRepoPath[projectName])
+    // Picking here is the user's own choice, so it goes where every picker's does, and the tab
+    // stops holding the AI's repository so that it follows that choice.
+    val chooseRepo: (GitRepo) -> Unit = { picked ->
+        if (pinnedRepo != null) dropRepoPin()
+        model.chooseGitRepo(projectName, picked.path)
+    }
     val repo = remember(discovery, chosenPath) { GitRepoScope.resolveRepo(discovery, chosenPath) }
     val needsPick = remember(discovery, chosenPath) { GitRepoScope.needsPick(discovery, chosenPath) }
     val noRepo = remember(discovery) { GitRepoScope.hasNoRepo(discovery) }
@@ -222,7 +237,7 @@ fun BranchReviewBody(model: AppModel, tab: WorkspaceTab) {
     if (needsPick && discovery != null) {
         GitRepoChoice(
             repos = discovery.repos,
-            onSelect = { picked -> model.chooseGitRepo(projectName, picked.path) },
+            onSelect = chooseRepo,
         )
         return
     }
@@ -321,7 +336,7 @@ fun BranchReviewBody(model: AppModel, tab: WorkspaceTab) {
             GitRepoBar(
                 repo = repo,
                 repos = discovery.repos,
-                onSelect = { picked -> model.chooseGitRepo(projectName, picked.path) },
+                onSelect = chooseRepo,
             )
         }
 

@@ -223,4 +223,15 @@ class WriteWithAiTest {
             server.close()
         }
     }
+
+    @Test
+    fun `a drafted message goes in only when the box still holds what it held when asked`() {
+        assertTrue(WriteWithAi.draftFits("", ""))
+        assertTrue(WriteWithAi.draftFits("wip", "wip"))
+        assertFalse(WriteWithAi.draftFits("", "fix: typed meanwhile"))
+        assertFalse(WriteWithAi.draftFits("wip", ""))
+        assertEquals("Draft message with AI", WriteWithAi.DRAFT_BUTTON_LABEL)
+        assertEquals("Message drafted, but not used", WriteWithAi.DRAFT_NOT_USED_TITLE)
+        assertEquals("Could not draft a commit message", WriteWithAi.DRAFT_FAILED_TITLE)
+    }
 }

@@ -717,13 +717,14 @@ internal fun EditableFileCodeView(
         // Change bars in the gutter against the file in git's index, as VS Code draws them, on a
         // phone too (`use-gutter-changes.ts`): one git call per open, then a cheap check every few
         // seconds while the editor is up. Like the web, nothing is asked until the repository that
-        // holds the file is known.
+        // holds the file is known. Switched off in Settings → Appearance (`gutterChanges`, off until
+        // the tour's question is answered), no editor asks git anything at all.
         val gutterChanges = rememberGutterChanges(
             model = model,
             project = project,
             repoFile = repoFile,
             fileRepo = fileRepo,
-            enabled = model.info?.minimalMode != true && isRelativeProjectFile &&
+            enabled = model.gutterChanges && model.info?.minimalMode != true && isRelativeProjectFile &&
                 fileGitScope?.kind == com.hienlh.ppm.state.git.FileGitScopeKind.REPO,
             bufferVersion = currentBufferVersion,
             readText = { docState.session.buffer.toString() },

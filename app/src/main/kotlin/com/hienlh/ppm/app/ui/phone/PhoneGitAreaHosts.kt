@@ -196,6 +196,15 @@ internal fun PhoneSourceControlAreaHost(
         },
         tabActions = tabActions,
         onNotice = { text -> model.toast(com.hienlh.ppm.app.ErrorToastMessage(text, kind = com.hienlh.ppm.app.ErrorToastMessage.Kind.SUCCESS)) },
+        onDraftNotUsed = {
+            model.toast(
+                com.hienlh.ppm.app.ErrorToastMessage(
+                    com.hienlh.ppm.state.git.WriteWithAi.DRAFT_NOT_USED_TITLE,
+                    com.hienlh.ppm.state.git.WriteWithAi.DRAFT_NOT_USED_DESCRIPTION,
+                    kind = com.hienlh.ppm.app.ErrorToastMessage.Kind.PLAIN,
+                ),
+            )
+        },
     )
 
     // "Stage lines…" / "Unstage lines…": the tablet's line picker, a bottom sheet on a phone (`hunk-stage-dialog.tsx`).

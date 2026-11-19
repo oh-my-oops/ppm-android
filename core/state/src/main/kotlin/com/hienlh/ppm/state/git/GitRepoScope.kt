@@ -28,6 +28,15 @@ data class FileGitScope(
  */
 object GitRepoScope {
     /**
+     * The repository one surface works in when it has a [pinned] one of its own (`useGitRepo`'s
+     * `pinned`): the Branch Review tab the AI's `open_branch_review` opened on a named repository.
+     * A pin no longer among the discovered repositories is ignored, so the surface falls back to the
+     * device's [chosen] repository rather than asking for a pick its own picker could not satisfy.
+     */
+    fun pinnedOrChosen(discovery: GitRepos?, pinned: String?, chosen: String?): String? =
+        if (!pinned.isNullOrEmpty() && discovery?.repos?.any { it.path == pinned } == true) pinned else chosen
+
+    /**
      * Pick the active repo from discovery results + persisted choice.
      * - Root is a repo -> always use root (ignore choice).
      * - Single nested repo -> auto-select it.

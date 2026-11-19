@@ -339,4 +339,18 @@ class WindowPanelsTest {
         assertNull(store.openTabInNewWindow(otherProjectsChat()))
         assertEquals(count, openWindows.size)
     }
+
+    @Test
+    fun `a pin set in a floating window is saved with the window panels, and so is taking it off`() {
+        val storage = Storage("app" to twoPanels())
+        val store = store(storage)
+        val windowId = store.popOutTab("editor:a.kt", "p1")!!
+        val panelId = windowPanelId(windowId)
+
+        store.setTabPinned("editor:a.kt", true)
+        assertTrue(loadWindowPanels(storage.windowPanels).getValue(panelId).tabs.single().pinned)
+
+        store.setTabPinned("editor:a.kt", false)
+        assertFalse(loadWindowPanels(storage.windowPanels).getValue(panelId).tabs.single().pinned)
+    }
 }

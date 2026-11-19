@@ -71,6 +71,23 @@ sealed interface WriteWithAi {
         /** Reason shown when nothing is staged (`design.md` Error Handling, Requirement 10.4). */
         const val STAGE_CHANGES_FIRST_REASON: String = WRITE_WITH_AI_NOTHING_STAGED_MESSAGE
 
+        /** The draft button's name (`aria-label` in `git-commit-composer.tsx`). */
+        const val DRAFT_BUTTON_LABEL: String = "Draft message with AI"
+
+        /** The toast when the request fails (`toast.error` in `git-commit-composer.tsx`); the reason is its description. */
+        const val DRAFT_FAILED_TITLE: String = "Could not draft a commit message"
+
+        /** The toast when the box changed while the AI wrote: what was typed is kept. */
+        const val DRAFT_NOT_USED_TITLE: String = "Message drafted, but not used"
+        const val DRAFT_NOT_USED_DESCRIPTION: String = "The box was edited while it was being written."
+
+        /**
+         * Whether a drafted message may go into the box: only when the box still holds what it held
+         * when the AI was asked. Typed into meanwhile — here, or on another device through the shared
+         * draft — the typing is kept and the draft dropped, as the web does.
+         */
+        fun draftFits(before: String, now: String): Boolean = before == now
+
         /**
          * Returns the reason why Write with AI is disabled, or `null` when it can be tapped.
          * When nothing is staged (`stagedCount <= 0`), returns `"Stage changes first"` (Requirement 10.4).

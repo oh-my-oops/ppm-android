@@ -353,4 +353,21 @@ class AiTabsTest {
         assertEquals("[::1]:3000", previewTitle(null, "http://[::1]:3000/"))
         assertEquals("not a url", previewTitle(null, "not a url"))
     }
+
+    @Test
+    fun `Branch Review keeps the repository the server named on its own tab, and a later call naming none drops it`() {
+        val store = store()
+        val review = TabOpenRequest.BranchReview("q1", "app", "/w/app/api", base = "main", head = "feat/x")
+        val id = store.openAiBranchReviewTab(review, session)
+        assertEquals(
+            meta("""{"projectName":"app","base":"main","head":"feat/x","repo":"/w/app/api","aiOpenAt":5000}"""),
+            store.state.value.panelOf(id)!!.tab(id)!!.metadata.withoutStamp(),
+        )
+        now = 6_000L
+        store.openAiBranchReviewTab(review.copy(requestId = "q2", repo = null), session)
+        assertEquals(
+            meta("""{"projectName":"app","base":"main","head":"feat/x","aiOpenAt":6000}"""),
+            store.state.value.panelOf(id)!!.tab(id)!!.metadata.withoutStamp(),
+        )
+    }
 }

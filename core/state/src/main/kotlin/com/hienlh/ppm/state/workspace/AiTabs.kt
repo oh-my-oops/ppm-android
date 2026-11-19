@@ -214,9 +214,10 @@ fun WorkspaceStore.openAiQueryTab(query: kotlinx.serialization.json.JsonObject, 
 /**
  * Opens Branch Review beside the chat showing [sessionId] on the refs `open_branch_review` checked
  * (`openAiBranchReviewTab`), or points the one already open there: a project has one Branch Review
- * tab, and the tab takes `base`/`head` from its metadata whenever `aiOpenAt` moves. Choosing the
- * repository a container folder's request names is the caller's. Throws, with what to tell the
- * AI, when there is nowhere to open it.
+ * tab, and the tab takes `base`/`head` from its metadata whenever `aiOpenAt` moves. In a project
+ * folder holding several repositories the server named one; it goes in the tab's metadata as
+ * `repo`, which scopes that tab alone and leaves the repository the user chose for Source Control
+ * as it was. Throws, with what to tell the AI, when there is nowhere to open it.
  */
 fun WorkspaceStore.openAiBranchReviewTab(request: TabOpenRequest.BranchReview, sessionId: String): String {
     val st = state.value
@@ -226,6 +227,8 @@ fun WorkspaceStore.openAiBranchReviewTab(request: TabOpenRequest.BranchReview, s
     val view = mapOf<String, JsonElement?>(
         "base" to JsonPrimitive(request.base),
         "head" to JsonPrimitive(request.head),
+        // None named: a pin an earlier call left goes, as the web's `repo: undefined` drops it.
+        "repo" to request.repo?.let(::JsonPrimitive),
         "aiOpenAt" to JsonPrimitive(clock()),
     )
     return when (placement) {
