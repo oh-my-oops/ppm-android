@@ -2624,8 +2624,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             },
             openBranchReview = { review ->
                 inChatProject(chat.project) { store ->
-                    // The repository the server named becomes this device's choice, as picking it in Source Control would.
-                    review.repo?.let { chooseGitRepo(review.projectName, it) }
+                    // The repository the server named scopes that tab alone (its `repo` metadata); the device's choice stays.
                     store.openAiBranchReviewTab(review, sessionId)
                 }
             },
