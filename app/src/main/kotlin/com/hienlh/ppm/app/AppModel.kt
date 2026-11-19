@@ -99,6 +99,8 @@ import com.hienlh.ppm.state.AgentSessionOpening
 import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.AttentionNotice
 import com.hienlh.ppm.state.BackgroundOutput
+import com.hienlh.ppm.state.ChatOpenPlan
+import com.hienlh.ppm.state.planChatOpen
 import com.hienlh.ppm.state.ChatAttention
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatItem
@@ -116,7 +118,6 @@ import com.hienlh.ppm.state.HistoryList
 import com.hienlh.ppm.state.KeyBindings
 import com.hienlh.ppm.state.McpSignInBackend
 import com.hienlh.ppm.state.McpSignInFlow
-import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.NewChatCache
 import com.hienlh.ppm.state.NotificationTones
@@ -3649,8 +3650,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     }
 
     /**
-     * Opens a linked session (`openLinkedSession`): switches to [projectName] first if needed,
-     * otherwise opens or focuses its chat tab in the current workspace.
+     * Opens a linked session (`openLinkedSession`, `openChatSession`): its chat tab in the current
+     * workspace when it is this project's; another project's in a floating window on a tablet, and
+     * through the project switch on a phone (`planChatOpen`); an Assistant session in the Assistant.
      */
     fun openLinkedSession(projectName: String, sessionId: String, providerId: String, title: String) {
         val canonical = if (sessionId.startsWith("chat:")) sessionId.substringAfter('/') else sessionId
@@ -3659,24 +3661,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
         val resolvedTitle = title.ifEmpty { "Chat" }
         if (projectName != selectedProject) {
+            val plan = planChatOpen(projectName, selectedProject, mobile = !wide || windows == null)
+            if (plan == ChatOpenPlan.ASSISTANT) return assistant.open(canonical, resolvedProvider)
             if (projects.none { it.name == projectName }) return
-            scope.launch {
-                openProject(projectName) { store ->
-                    store.openTab(
-                        NewTab(
-                            type = "chat",
-                            title = resolvedTitle,
-                            projectId = projectName,
-                            metadata = buildJsonObject {
-                                put("projectName", projectName)
-                                put("sessionId", canonical)
-                                put("providerId", resolvedProvider)
-                            },
-                        ),
-                    )
-                    events?.markRead(canonical)
+            if (plan == ChatOpenPlan.WINDOW) {
+                // At the window cap the chat still opens: the screen switches to its project instead.
+                return openChatInWindow(projectName, canonical, resolvedProvider, resolvedTitle) {
+                    switchToLinkedSession(projectName, canonical, resolvedProvider, resolvedTitle)
                 }
             }
+            switchToLinkedSession(projectName, canonical, resolvedProvider, resolvedTitle)
             return
         }
         withWorkspace { store ->
@@ -3693,6 +3687,27 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 ),
             )
             events?.markRead(canonical)
+        }
+    }
+
+    /** The phone's way to another project's chat: the screen switches to [projectName], then its tab opens. */
+    private fun switchToLinkedSession(projectName: String, canonical: String, resolvedProvider: String, resolvedTitle: String) {
+        scope.launch {
+            openProject(projectName) { store ->
+                store.openTab(
+                    NewTab(
+                        type = "chat",
+                        title = resolvedTitle,
+                        projectId = projectName,
+                        metadata = buildJsonObject {
+                            put("projectName", projectName)
+                            put("sessionId", canonical)
+                            put("providerId", resolvedProvider)
+                        },
+                    ),
+                )
+                events?.markRead(canonical)
+            }
         }
     }
 
@@ -5014,11 +5029,11 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     /** Picked in the composer; until then the chip shows the fallback and messages carry none, so the server keeps the session's own. */
     var permissionMode by mutableStateOf<PermissionMode?>(null)
 
-    /** For a message sent while the turn runs; back to Queue after each send. */
-    var priority by mutableStateOf(MessagePriority.DEFAULT)
-
-    /** What a message sent now carries of the composer's choices: the mode, and the priority only during a turn (`isStreaming ? priority : undefined`). */
-    internal fun sendOptions(running: Boolean) = TurnOptions(permissionMode = permissionMode?.value, priority = if (running) priority.value else null)
+    /**
+     * What a message sent now carries of the composer's choices: the mode alone. A message carries
+     * no priority: sent while a turn runs it is queued, or read at once on Send now.
+     */
+    internal fun sendOptions() = TurnOptions(permissionMode = permissionMode?.value)
 
     /** The message the next one answers, shown over the message box until it is sent or cancelled. */
     var replyTo by mutableStateOf<ReplyReference?>(null)
@@ -5399,10 +5414,9 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
             firstSend?.invoke(message)
             return
         }
-        // The priority goes only with a message sent during a turn, and is Queue again after it.
         chat.send(
             content,
-            sendOptions(chat.state.value.isRunning),
+            sendOptions(),
             replyTo,
             images,
             imagePaths,
@@ -5468,7 +5482,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         firstSendPreview = null
     }
 
-    /** The box after a send: no text, files, agent or reply, Queue again. */
+    /** The box after a send: no text, files, agent or reply. */
     internal fun emptyBox() {
         for (attachment in attachments) attachment.file?.parentFile?.deleteRecursively()
         draft.clearText()
@@ -5476,7 +5490,6 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         agent = null
         replyTo = null
         pendingSend = false
-        priority = MessagePriority.DEFAULT
         historyIndex = -1
         turnLinks.clear()
     }

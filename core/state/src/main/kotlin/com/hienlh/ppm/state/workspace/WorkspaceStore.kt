@@ -8,6 +8,7 @@ import com.hienlh.ppm.state.windows.WindowRuntimeState
 import com.hienlh.ppm.state.windows.WindowStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -673,6 +674,32 @@ class WorkspaceStore(
         gridFocusTarget(s.grid, fromPanelId)?.let { commit(s.copy(focusedPanelId = it)) }
         persist()
         return windowId
+    }
+
+    /**
+     * Opens [def] straight into a new floating window that is its home (`openTabInNewWindow`):
+     * never through a grid, where `openTab` would focus a copy kept in another project's hidden
+     * panel. Answers the tab's and the window's ids, or null on a phone or with every window slot
+     * taken, and then nothing has changed.
+     */
+    fun openTabInNewWindow(def: NewTab, rect: Rect? = null): Pair<String, String>? {
+        val windows = windows ?: return null
+        if (isMobile()) return null
+        if (windows.state.value.windows.size >= MAX_WINDOWS) return null
+        val windowId = windows.open(WindowKind.TabHost, buildJsonObject {
+            put("originPanelId", JsonNull)
+            put("title", JsonPrimitive(def.title))
+            put("closeTabsOnClose", JsonPrimitive(true))
+        }, rect)
+        val panelId = windowPanelId(windowId)
+        val baseId = deriveTabId(def.type, def.metadata, randomId)
+        // The same session may be open in a grid too: a tab id is unique across every panel.
+        val taken = s.panels.values.any { panel -> panel.tabs.any { it.id == baseId } }
+        val id = if (taken) "$baseId@$panelId" else baseId
+        val tab = def.withId(id).withMetadata("lastActiveAt" to JsonPrimitive(now()))
+        commit(s.copy(panels = s.panels + (panelId to createPanel(panelId, listOf(tab), id))))
+        persist()
+        return id to windowId
     }
 
     /**

@@ -87,6 +87,8 @@ data class QueuedMessage(
     /** The sending device's id for it, which the echo carries when the AI starts on it. */
     val clientMessageId: String? = null,
     val queuedAt: String? = null,
+    /** Kept through a Stop: it goes out only when the person sends it (Send now) or edits it. */
+    val paused: Boolean = false,
 ) {
     companion object {
         fun from(json: JsonElement?): QueuedMessage? {
@@ -97,6 +99,7 @@ data class QueuedMessage(
                 imageCount = json["imageCount"].int ?: 0,
                 clientMessageId = json["clientMessageId"].string,
                 queuedAt = json["queuedAt"].string,
+                paused = json["paused"].bool == true,
             )
         }
 
@@ -334,14 +337,13 @@ sealed interface ChatFrame {
 }
 
 /**
- * The choices a message carries (`TurnSettings` plus the composer's mode and priority); a value
- * left null is left out of the frame.
+ * The choices a message carries (`TurnSettings` plus the composer's mode); a value left null is
+ * left out of the frame. A message carries no priority: Queue and Send now are the only two ways
+ * a message sent during a turn goes ([ChatClientMessage.Message.queued], `sendNow`).
  */
 data class TurnOptions(
     /** `default`, `acceptEdits`, `plan` or `bypassPermissions`; without one the server uses the session's last, then its config. */
     val permissionMode: String? = null,
-    /** `now`, `next` or `later`, for a message sent while a turn runs. */
-    val priority: String? = null,
     val model: String? = null,
     val effort: String? = null,
     val thinking: Boolean? = null,
@@ -395,7 +397,6 @@ sealed interface ChatClientMessage {
                 if (queued) put("queued", true)
                 if (queued && sendNow) put("sendNow", true)
                 options.permissionMode?.let { put("permissionMode", it) }
-                options.priority?.let { put("priority", it) }
                 if (images.isNotEmpty()) {
                     put(
                         "images",

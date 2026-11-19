@@ -120,6 +120,13 @@ class MessageQueueTest {
     }
 
     @Test
+    fun `an entry a Stop kept is marked paused, and one without the field is not`() {
+        val chat = ChatTranscript()
+        chat.handle(frame("""{"type":"queue_state","queue":[{"id":"q1","content":"a","imageCount":0,"paused":true},{"id":"q2","content":"b","imageCount":0}]}"""))
+        assertEquals(listOf(true, false), chat.queue.messages.map { it.paused })
+    }
+
+    @Test
     fun `Send now is its own frame`() {
         assertEquals("""{"type":"queue_send_now"}""", ChatClientMessage.QueueSendNow.json.toString())
     }

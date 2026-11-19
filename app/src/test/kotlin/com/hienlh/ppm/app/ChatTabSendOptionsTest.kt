@@ -2,7 +2,7 @@ package com.hienlh.ppm.app
 
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import com.hienlh.ppm.protocol.SessionInfo
-import com.hienlh.ppm.state.MessagePriority
+import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.state.PermissionMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,42 +10,32 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The priority chip's side of a send (`executeSend`): what the message carries, and the box and chip after it. */
-class ChatTabPriorityTest {
+/**
+ * What a send carries (`executeSend`) and the box after it. A message carries no priority (Queue and
+ * Send now are the only two ways a message sent during a turn goes), and the frame never names one.
+ */
+class ChatTabSendOptionsTest {
     private val tab = ChatTab("t", SessionInfo("s", "mock", "Chat"), "p", "mock")
 
     @Test
-    fun `a message sent during a turn carries the priority the chip shows, Queue until it is pressed`() {
-        assertEquals("next", tab.sendOptions(running = true).priority)
-        tab.priority = tab.priority.following
-        assertEquals("later", tab.sendOptions(running = true).priority)
-        tab.priority = tab.priority.following
-        assertEquals("now", tab.sendOptions(running = true).priority)
-        tab.priority = tab.priority.following
-        assertEquals("next", tab.sendOptions(running = true).priority)
-    }
-
-    @Test
-    fun `a message sent while no turn runs carries none, whatever the chip was left on`() {
-        tab.priority = MessagePriority.NOW
-        assertNull(tab.sendOptions(running = false).priority)
+    fun `a message carries no priority, during a turn or not`() {
+        val frame = ChatClientMessage.Message("c1", "hi", tab.sendOptions(), queued = true).json
+        assertFalse("priority" in frame)
+        assertEquals("true", frame["queued"].toString())
     }
 
     @Test
     fun `the mode goes with it, and none is sent until one is picked`() {
-        assertNull(tab.sendOptions(running = true).permissionMode)
+        assertNull(tab.sendOptions().permissionMode)
         tab.permissionMode = PermissionMode.PLAN
-        assertEquals("plan", tab.sendOptions(running = true).permissionMode)
-        assertEquals("plan", tab.sendOptions(running = false).permissionMode)
+        assertEquals("plan", tab.sendOptions().permissionMode)
     }
 
     @Test
-    fun `a send leaves the box empty and the chip on Queue`() {
-        tab.priority = MessagePriority.NOW
+    fun `a send leaves the box empty`() {
         tab.draft.setTextAndPlaceCursorAtEnd("one more thing")
         tab.agent = "reviewer"
         tab.emptyBox()
-        assertEquals(MessagePriority.NEXT, tab.priority)
         assertEquals("", tab.draft.text.toString())
         assertNull(tab.agent)
         assertFalse(tab.hasContent)
