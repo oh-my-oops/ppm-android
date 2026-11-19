@@ -387,7 +387,7 @@ enum class SessionCollabAnswer(val wire: String) {
 sealed interface SessionCollabApprovalInput {
     /** The answers a card of this kind offers (`sessionCollabAnswersFor`). */
     val answers: List<SessionCollabAnswer>
-        get() = if (this is PairLimit) listOf(SessionCollabAnswer.ALLOW_ONCE, SessionCollabAnswer.DENY) else SessionCollabAnswer.entries
+        get() = if (this is PairLimit || this is Schedule) listOf(SessionCollabAnswer.ALLOW_ONCE, SessionCollabAnswer.DENY) else SessionCollabAnswer.entries
 
     data class Create(val title: String, val providerId: String, val model: String?, val task: String, val depth: Int) : SessionCollabApprovalInput
 
@@ -401,6 +401,21 @@ sealed interface SessionCollabApprovalInput {
         val message: String,
     ) : SessionCollabApprovalInput
 
+    /**
+     * A chat's AI asks to create a script schedule, or to turn on (or pause) one of its project's
+     * schedules (`SessionCollabScheduleApproval`). The card is the server's [summary], the same one
+     * the PPM Assistant's schedule cards carry. Answered once or not at all.
+     */
+    data class Schedule(val action: String, val summary: ApprovalSummary) : SessionCollabApprovalInput {
+        /** The card's heading (`heading` in collab-approval-card.tsx). */
+        val heading: String
+            get() = when (action) {
+                "create_script" -> "The AI proposes a script schedule"
+                "enable" -> "The AI wants to turn on a schedule"
+                else -> "The AI wants to pause a schedule"
+            }
+    }
+
     companion object {
         /** An approval's input narrowed to a session tool's card, or null (`sessionCollabApprovalInput`). */
         fun from(tool: String, input: JsonElement?): SessionCollabApprovalInput? {
@@ -411,6 +426,8 @@ sealed interface SessionCollabApprovalInput {
                 "create" -> Create(text("title"), text("providerId"), input["model"].string, text("task"), number("depth"))
                 "pair_limit" -> PairLimit(text("targetSessionId"), text("targetTitle"), number("sent"), number("limit"), number("grant"))
                 "escalation" -> Escalation(text("targetSessionId"), text("targetTitle"), text("senderMode"), text("targetMode"), text("message"))
+                // Only with a summary that has a headline, as the web narrows it.
+                "schedule" -> ApprovalSummary.from(input["summary"])?.let { Schedule(text("action"), it) }
                 else -> null
             }
         }

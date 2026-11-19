@@ -55,4 +55,27 @@ class NeedsYouTest {
         transcript.handle(frame("""{"type":"approval_resolved","requestId":"req-1","approved":true}"""))
         assertEquals(NeedsYouState.None, transcript.needsYouState(atBottom = false))
     }
+
+    @Test
+    fun `a schedule card's pill names what it asks, and the transcript keeps its summary`() {
+        val propose = ApprovalRequest(
+            "r-s",
+            "ppm:session_collab",
+            json("""{"kind":"schedule","action":"create_script","summary":{"headline":"Create it","facts":[]}}"""),
+        )
+        assertEquals("The AI proposes a script schedule", needsYouPillLabel(propose))
+        val pause = ApprovalRequest("r-p", "ppm:session_collab", json("""{"kind":"schedule","action":"disable","summary":{"headline":"Pause it","facts":[]}}"""))
+        assertEquals("The AI wants to pause a schedule", resolveNeedsYouState(pause, atBottom = false).label)
+
+        val transcript = ChatTranscript()
+        transcript.handle(
+            frame(
+                """{"type":"approval_request","requestId":"req-e","tool":"schedule_propose_script","input":{},"origin":"endpoint",""" +
+                    """"summary":{"headline":"Create the script schedule","facts":[{"label":"Cron","value":"0 9 * * *"}],"reviewInPpm":"Only in PPM"}}""",
+            ),
+        )
+        val pending = transcript.pendingApproval
+        assertEquals("Create the script schedule", pending?.summary?.headline)
+        assertEquals("Only in PPM", pending?.summary?.reviewInPpm)
+    }
 }

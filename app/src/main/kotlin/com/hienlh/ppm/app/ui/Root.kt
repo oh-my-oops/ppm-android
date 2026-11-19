@@ -181,6 +181,8 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             LocalTabScrollStore provides tabScrollStore,
             // PPM's own approvals are answered over HTTP, and a from-session bubble or turn chip opens its session.
             LocalPpmApprovals provides model.api?.let(::ServerPpmApprovals),
+            // An endpoint approval card is headed with the Assistant's own name.
+            com.hienlh.ppm.chat.LocalAssistantName provides assistantDisplayName(model),
             LocalChatSessionOpener provides remember(model) {
                 ChatSessionOpener { target ->
                     val turnId = target.turnId

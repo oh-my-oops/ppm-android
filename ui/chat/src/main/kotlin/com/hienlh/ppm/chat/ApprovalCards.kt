@@ -126,10 +126,14 @@ fun PendingApprovalCard(request: ApprovalRequest, respond: (approved: Boolean, d
 private val xs = ppmText(12f, lineHeight = 16f)
 private val xsMedium = ppmText(12f, FontWeight.Medium, lineHeight = 16f)
 
-/** `ApprovalCard` in message-list.tsx. */
+/**
+ * `ApprovalCard` in approval-card.tsx: a provider's card shows the tool's input; a PPM Assistant
+ * endpoint card shows what the server says will happen (its summary), answered on the socket.
+ */
 @Composable
 private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonElement?) -> Unit, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
+    val summary = request.summary
     val shape = RoundedCornerShape(12.dp)
     Column(
         modifier
@@ -141,7 +145,19 @@ private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonEl
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PpmIcon(ProductIcon.ShieldAlert, 16.dp, tokens.warning.color)
-            BasicText("Tool Approval Required", style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.warning.color))
+            // A PPM Assistant endpoint card says who asks; its body is the server's own summary.
+            val heading = if (summary != null) LocalAssistantName.current + " asks for approval" else "Tool Approval Required"
+            BasicText(heading, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.warning.color))
+        }
+        if (summary != null) {
+            ApprovalSummaryBody(summary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // `min-h-11 md:min-h-0`.
+                val tall = if (LocalPpmMobile.current) Modifier.heightIn(min = 44.dp) else Modifier
+                SolidButton("Allow", tokens.success, tall) { respond(true, null) }
+                SolidButton("Deny", tokens.error, tall) { respond(false, null) }
+            }
+            return@Column
         }
         BasicText(request.tool, style = xsMedium.copy(color = tokens.text.color))
         val pre = RoundedCornerShape(4.dp)

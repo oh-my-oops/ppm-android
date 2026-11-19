@@ -1,6 +1,7 @@
 package com.hienlh.ppm.state
 
 import com.hienlh.ppm.protocol.ApprovalRequest
+import com.hienlh.ppm.protocol.SessionCollabApprovalInput
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.get
@@ -149,8 +150,9 @@ fun needsYouPillLabel(request: ApprovalRequest): String = when (request.waitingC
     WaitingCardKind.ELEVATE_SESSION -> "The AI wants to message a session with more rights"
     WaitingCardKind.RATE_LIMIT -> "These sessions reached their message limit"
     WaitingCardKind.TOOL_APPROVAL -> {
-        val cleanTool = request.tool.trim().ifEmpty { "Tool" }
-        "Waiting for approval · $cleanTool"
+        // A schedule card names what it asks, as its heading does.
+        val schedule = SessionCollabApprovalInput.from(request.tool, request.input) as? SessionCollabApprovalInput.Schedule
+        schedule?.heading ?: "Waiting for approval · ${request.tool.trim().ifEmpty { "Tool" }}"
     }
 }
 

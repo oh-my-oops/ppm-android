@@ -24,9 +24,16 @@ data class ToolOutcome(val output: String, val isError: Boolean, val exitCode: I
 
 /**
  * A tool waiting for the user (`approval_request`, or `session_state.pendingApproval`). [approved]
- * is stamped by the server on a request it replays after it was answered.
+ * is stamped by the server on a request it replays after it was answered. [summary]: a PPM
+ * Assistant endpoint card's own account of what will happen (`EndpointApprovalRequest`).
  */
-data class ApprovalRequest(val requestId: String, val tool: String, val input: JsonElement, val approved: Boolean? = null) {
+data class ApprovalRequest(
+    val requestId: String,
+    val tool: String,
+    val input: JsonElement,
+    val approved: Boolean? = null,
+    val summary: ApprovalSummary? = null,
+) {
     /** The questions of an `AskUserQuestion` request. */
     val questions: List<Question>
         get() = input["questions"].array.orEmpty().mapNotNull(Question::from)
@@ -34,7 +41,7 @@ data class ApprovalRequest(val requestId: String, val tool: String, val input: J
     companion object {
         fun from(json: JsonElement): ApprovalRequest? {
             val requestId = json["requestId"].string ?: return null
-            return ApprovalRequest(requestId, json["tool"].string ?: "unknown", json["input"] ?: JsonNull, json["approved"].bool)
+            return ApprovalRequest(requestId, json["tool"].string ?: "unknown", json["input"] ?: JsonNull, json["approved"].bool, ApprovalSummary.from(json["summary"]))
         }
     }
 }

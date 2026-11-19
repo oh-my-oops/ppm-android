@@ -262,6 +262,7 @@ private fun collabHeading(input: SessionCollabApprovalInput): String = when (inp
     is SessionCollabApprovalInput.Create -> "The AI wants to create a session"
     is SessionCollabApprovalInput.PairLimit -> "These sessions reached their message limit"
     is SessionCollabApprovalInput.Escalation -> "The AI wants to message a session with more rights"
+    is SessionCollabApprovalInput.Schedule -> input.heading
 }
 
 /** How long a text is, as the card states it (`lengthLabel`). */
@@ -286,7 +287,8 @@ internal fun providerLabel(providerId: String?): String = when (providerId) {
 
 /**
  * A session tool's card (`collab-approval-card.tsx`): an AI asking to create a session, two
- * sessions at their message limit, or a message to a session with more rights. The answer goes
+ * sessions at their message limit, a message to a session with more rights, or a script
+ * schedule to create or a schedule to pause or turn on. The answer goes
  * over HTTP; the card leaves when `approval_resolved` arrives. Every title and text came from an
  * AI, so all of it is text.
  */
@@ -386,6 +388,8 @@ private fun CollabApprovalBody(input: SessionCollabApprovalInput) {
                 style = xs.copy(color = tokens.text3.color),
             )
         }
+        // The server's own summary of the schedule, as the Assistant's schedule cards show it.
+        is SessionCollabApprovalInput.Schedule -> ApprovalSummaryBody(input.summary)
     }
 }
 
