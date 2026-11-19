@@ -145,7 +145,7 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
     ),
     PpmToolGroup(
         title = "Schedules",
-        intro = "Prompts a chat schedules into itself. Each one is listed in Settings → Schedules, where you can turn it off or delete it.",
+        intro = "Prompts a chat schedules into itself, and script schedules it proposes for its project behind a card. Each one is listed in Settings → Schedules, where you can turn it off or delete it.",
         tools = listOf(
             PpmToolDef(
                 id = "session_schedule_create",
@@ -161,6 +161,16 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
                 id = "session_schedule_delete",
                 label = "Delete schedules",
                 note = "Deletes a prompt scheduled into its own chat. Another chat's schedules are out of its reach.",
+            ),
+            PpmToolDef(
+                id = "session_schedule_set_enabled",
+                label = "Pause and resume schedules",
+                note = "Pauses any schedule of its project at once, and says which. Turns a prompt scheduled into its own chat back on at once, and any other schedule of its project only after you allow a card.",
+            ),
+            PpmToolDef(
+                id = "session_schedule_propose_script",
+                label = "Propose script schedules",
+                note = "Proposes a script schedule for its project. Nothing is created until you allow a card in PPM showing the whole script, where it runs, when, and which chats it messages.",
             ),
         ),
     ),
@@ -281,7 +291,12 @@ val PPM_FEATURE_INTROS: List<PpmFeatureIntro> = listOf(
     ),
     PpmFeatureIntro(
         id = "session-schedules-2026-11",
-        tools = listOf("session_schedule_create", "session_schedule_list", "session_schedule_delete"),
+        tools = listOf("session_schedule_create", "session_schedule_list", "session_schedule_delete", "session_schedule_set_enabled"),
+    ),
+    // A question of its own: turning prompts on never agreed to code that runs on this machine.
+    PpmFeatureIntro(
+        id = "script-schedule-proposals-2026-11",
+        tools = listOf("session_schedule_propose_script"),
     ),
     PpmFeatureIntro(
         id = "ppm-memory-2026-11",

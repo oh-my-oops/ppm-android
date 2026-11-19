@@ -34,6 +34,7 @@ class SettingsAiStateTest {
                 "search_sessions", "list_session_turns", "read_session_turns", "db_query", "open_query", "db_execute",
                 "create_session", "send_to_session", "session_status", "design_screenshot",
                 "session_schedule_create", "session_schedule_list", "session_schedule_delete",
+                "session_schedule_set_enabled", "session_schedule_propose_script",
                 "ppm_task_list", "ppm_task_get", "ppm_task_project", "ppm_task_create", "ppm_task_update", "ppm_task_close",
                 "ppm_task_reorder", "ppm_task_undo", "ppm_task_project_update", "ppm_task_notify_manager",
                 "vault_list", "vault_read", "vault_propose",
@@ -62,6 +63,11 @@ class SettingsAiStateTest {
         assertFalse(isPpmToolEnabled(emptyMap(), "session_schedule_create"))
         assertFalse(isPpmToolEnabled(mapOf("create_session" to true), "session_schedule_create"))
         assertTrue(isPpmToolEnabled(mapOf("session_schedule_list" to true), "session_schedule_delete"))
+        assertTrue(isPpmToolEnabled(mapOf("session_schedule_list" to true), "session_schedule_set_enabled"))
+        // Script proposals ask a question of their own: turning scheduled prompts on never turns them on.
+        assertFalse(isPpmToolEnabled(emptyMap(), "session_schedule_propose_script"))
+        assertFalse(isPpmToolEnabled(mapOf("session_schedule_create" to true, "session_schedule_list" to true), "session_schedule_propose_script"))
+        assertTrue(isPpmToolEnabled(mapOf("session_schedule_propose_script" to true), "session_schedule_propose_script"))
         assertEquals(
             mapOf("memory_search" to false, "memory_read" to true, "memory_write" to false, "memory_forget" to false),
             patchPpmToolSwitches(emptyMap(), "memory_read", true),
