@@ -162,7 +162,7 @@ class ComposerModelColumnsTest {
     }
 
     @Test
-    fun `Antigravity's Auto is the model its list marks, keeps Claude prefix, offers three efforts and hides Thinking`() {
+    fun `Antigravity's Auto is the model its list marks, keeps Claude prefix, offers four efforts up to Extra and hides Thinking`() {
         val api = ApiClient(server.url("/"), "secret")
         chat = ChatController(api, "p", null, scope, providerId = "antigravity")
         compose.setContent {
@@ -172,12 +172,11 @@ class ComposerModelColumnsTest {
         }
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Gemini 4 Argon").fetchSemanticsNodes().isNotEmpty() }
 
-        // No model chosen resolves to the one the list marks isDefault; Claude Opus 5.5 keeps "Claude "; only Low/Medium/High exist; no Thinking switch
+        // No model chosen resolves to the one the list marks isDefault; Claude Opus 5.5 keeps "Claude "; Low/Medium/High/Extra exist, no Max; no Thinking switch
         assertEquals(
             listOf("Gemini 4 Argon", "High"),
-            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High"),
+            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High", "Extra"),
         )
-        compose.onNodeWithText("Extra").assertDoesNotExist()
         compose.onNodeWithText("Max").assertDoesNotExist()
         compose.onNodeWithText("Thinking").assertDoesNotExist()
 
@@ -186,7 +185,15 @@ class ComposerModelColumnsTest {
         compose.waitForIdle()
         assertEquals(
             listOf("Claude Opus 5.5", "Medium"),
-            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High"),
+            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High", "Extra"),
+        )
+
+        // A model saved with agy's xhigh suffix reads as Extra
+        chat.setModel("gemini-4-argon-xhigh")
+        compose.waitForIdle()
+        assertEquals(
+            listOf("Gemini 4 Argon", "Extra"),
+            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High", "Extra"),
         )
     }
 }

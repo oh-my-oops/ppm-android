@@ -40,7 +40,7 @@ enum class Effort(val value: String, val label: String) {
 
         /** The effort choices offered in the picker (`model-thinking-selector.tsx` `effortOptions`). */
         fun optionsFor(providerId: String): List<Effort> =
-            if (providerId == "antigravity") listOf(LOW, MEDIUM, HIGH) else entries
+            if (providerId == "antigravity") listOf(LOW, MEDIUM, HIGH, XHIGH) else entries
 
         /** The label for a value from the server; one this app does not know shows as given. */
         fun label(value: String?): String = if (value.isNullOrEmpty()) "" else of(value)?.label ?: value
@@ -48,7 +48,7 @@ enum class Effort(val value: String, val label: String) {
 }
 
 object ModelNames {
-    private val antigravityEffortSuffix = Regex("-(low|medium|high)$", RegexOption.IGNORE_CASE)
+    private val antigravityEffortSuffix = Regex("-(low|medium|high|xhigh)$", RegexOption.IGNORE_CASE)
     private val claudeId = Regex("claude-([a-z]+)((?:-\\d{1,2})+)(?:-\\d{8})?", RegexOption.IGNORE_CASE)
     private val geminiId = Regex("gemini-(\\d+(?:\\.\\d+)?)((?:-[a-z]+)+)", RegexOption.IGNORE_CASE)
     private val claudePrefix = Regex("^claude\\s+", RegexOption.IGNORE_CASE)
@@ -101,7 +101,7 @@ object ModelNames {
         return chosen?.takeIf { it.isNotEmpty() } ?: models.firstOrNull { it.isDefault }?.value
     }
 
-    /** Effort suffix (`low`, `medium`, `high`) embedded in a legacy Antigravity model id, if any. */
+    /** Effort suffix (`low`, `medium`, `high`, `xhigh`) embedded in a legacy Antigravity model id, if any. */
     fun suffixEffort(model: String?, providerId: String): String? =
         if (providerId == "antigravity" && model != null) {
             antigravityEffortSuffix.find(model)?.groupValues?.get(1)?.lowercase()

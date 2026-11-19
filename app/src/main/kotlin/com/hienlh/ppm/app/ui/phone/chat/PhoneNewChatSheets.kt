@@ -63,7 +63,7 @@ data class PhoneProviderOption(
     val subtitle: String,
     val supportsThinkingToggle: Boolean = id.equals("claude", ignoreCase = true),
     val effortLevels: List<String> = if (id.equals("antigravity", ignoreCase = true) || id.equals("agy", ignoreCase = true)) {
-        listOf("Low", "Medium", "High")
+        listOf("Low", "Medium", "High", "Extra")
     } else {
         listOf("Low", "Medium", "High", "Max")
     },

@@ -101,6 +101,7 @@ internal val AntigravityEffortOptions = listOf(
     SelectOption("low", "Low"),
     SelectOption("medium", "Medium"),
     SelectOption("high", "High"),
+    SelectOption("xhigh", "Extra"),
 )
 
 private val PermissionModeOptions = listOf(

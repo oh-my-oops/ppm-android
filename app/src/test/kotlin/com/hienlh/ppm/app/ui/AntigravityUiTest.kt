@@ -442,7 +442,7 @@ class AntigravityUiTest {
                 "Antigravity reads these only when PPM starts a new chat, and a chat keeps the ones it started with.",
             ).assertIsDisplayed()
             assertEquals(
-                listOf("low" to "Low", "medium" to "Medium", "high" to "High"),
+                listOf("low" to "Low", "medium" to "Medium", "high" to "High", "xhigh" to "Extra"),
                 AntigravityEffortOptions.map { it.value to it.label },
             )
 

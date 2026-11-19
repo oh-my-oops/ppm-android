@@ -84,6 +84,7 @@ val PhoneAntigravityEffortOptions: List<PhoneSelectOption> = listOf(
     PhoneSelectOption("low", "Low", "Low", "Quick answers for simple tasks."),
     PhoneSelectOption("medium", "Medium", "Medium", "Balanced reasoning and speed."),
     PhoneSelectOption("high", "High", "High", "Deep reasoning for complex coding."),
+    PhoneSelectOption("xhigh", "Extra", "Extra", "Extended reasoning for complex refactors."),
 )
 
 val PhonePermissionModeOptions: List<PhoneSelectOption> = listOf(

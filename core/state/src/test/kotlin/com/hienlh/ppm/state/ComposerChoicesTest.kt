@@ -87,10 +87,12 @@ class ComposerChoicesTest {
 
         assertEquals("medium", ModelNames.suffixEffort("claude-opus-5-5-medium", "antigravity"))
         assertEquals("high", ModelNames.suffixEffort("gemini-4-argon-HIGH", "antigravity"))
+        assertEquals("xhigh", ModelNames.suffixEffort("gemini-4-neon-xhigh", "antigravity"))
+        assertEquals("Gemini 4 Neon", ModelNames.displayName("gemini-4-neon-xhigh"))
         assertNull(ModelNames.suffixEffort("gemini-4-argon", "antigravity"))
         assertNull(ModelNames.suffixEffort("claude-opus-5-5-medium", "claude"))
 
-        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH), Effort.optionsFor("antigravity"))
+        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH, Effort.XHIGH), Effort.optionsFor("antigravity"))
         assertEquals(Effort.entries, Effort.optionsFor("claude"))
     }
 
