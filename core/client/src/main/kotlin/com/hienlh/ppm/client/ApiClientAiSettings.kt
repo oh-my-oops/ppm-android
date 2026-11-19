@@ -8,9 +8,7 @@ import com.hienlh.ppm.protocol.TeamActivityFeed
 import com.hienlh.ppm.protocol.TeamInfo
 import com.hienlh.ppm.protocol.TeamMessage
 import com.hienlh.ppm.protocol.array
-import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
-import com.hienlh.ppm.protocol.string
 import kotlinx.serialization.json.JsonObject
 
 /** `GET /api/settings/ai`: the AI settings, API keys masked. */
@@ -31,10 +29,7 @@ suspend fun ApiClient.probeProvider(providerId: String): ProviderProbeStatus =
 
 /** `GET /api/settings/ai/providers/:id/models`: the models Settings offers for a provider, no project needed. */
 suspend fun ApiClient.settingsModels(providerId: String): List<ModelOption> =
-    call("GET", "/api/settings/ai/providers/${ApiClient.escape(providerId)}/models").array.orEmpty().mapNotNull { entry ->
-        val value = entry["value"].string ?: return@mapNotNull null
-        ModelOption(value, entry["label"].string ?: value, isDefault = entry["isDefault"].bool == true)
-    }
+    call("GET", "/api/settings/ai/providers/${ApiClient.escape(providerId)}/models").array.orEmpty().mapNotNull(ModelOption::from)
 
 /** `GET /api/teams`: the agent teams on the server's machine. */
 suspend fun ApiClient.teams(): List<TeamInfo> = call("GET", "/api/teams").array.orEmpty().mapNotNull(TeamInfo::from)

@@ -65,9 +65,18 @@ class ComposerModelColumnsTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val body = if (request.url.encodedPath.endsWith("/antigravity/models")) {
-                    """{"ok":true,"data":[{"value":"gemini-4-argon","label":"Gemini 4 Argon","isDefault":true},{"value":"claude-opus-5-5","label":"Claude Opus 5.5"}]}"""
+                    """{"ok":true,"data":[
+                        {"value":"gemini-4-neon","label":"Gemini 4 Neon","isDefault":true,"supportedEfforts":["low","medium","high","xhigh"]},
+                        {"value":"gemini-4-carbon","label":"Gemini 4 Carbon","supportedEfforts":["low","medium","high"]},
+                        {"value":"claude-opus-5-5","label":"Claude Opus 5.5","supportedEfforts":["low","medium","high"]}
+                    ]}"""
                 } else {
-                    """{"ok":true,"data":[{"value":"opus","label":"Claude Opus"},{"value":"sonnet","label":"Claude Sonnet"}]}"""
+                    """{"ok":true,"data":[
+                        {"value":"opus","label":"Claude Opus"},
+                        {"value":"sonnet","label":"Claude Sonnet"},
+                        {"value":"claude-sonnet-4-6","label":"Claude Sonnet 4.6","supportedEfforts":["low","medium","high","max"]},
+                        {"value":"claude-haiku-4-5","label":"Claude Haiku 4.5","supportedEfforts":[]}
+                    ]}"""
                 }
                 return MockResponse.Builder().code(200)
                     .addHeader("Content-Type", "application/json")
@@ -162,7 +171,7 @@ class ComposerModelColumnsTest {
     }
 
     @Test
-    fun `Antigravity's Auto is the model its list marks, keeps Claude prefix, offers four efforts up to Extra and hides Thinking`() {
+    fun `Antigravity offers Extra only on models with xhigh, resets to High when switching away, and hides Thinking`() {
         val api = ApiClient(server.url("/"), "secret")
         chat = ChatController(api, "p", null, scope, providerId = "antigravity")
         compose.setContent {
@@ -170,30 +179,67 @@ class ComposerModelColumnsTest {
             val state by chat.state.collectAsState()
             ModelColumns(catalog, chat, state, Modifier.width(320.dp), Modifier, onPicked = { closed++ })
         }
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("Gemini 4 Argon").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Gemini 4 Neon").fetchSemanticsNodes().isNotEmpty() }
 
-        // No model chosen resolves to the one the list marks isDefault; Claude Opus 5.5 keeps "Claude "; Low/Medium/High/Extra exist, no Max; no Thinking switch
+        // Default model (Gemini 4 Neon) supports xhigh: Extra is offered, Max and Thinking stay hidden; Claude keeps its prefix
         assertEquals(
-            listOf("Gemini 4 Argon", "High"),
-            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High", "Extra"),
+            listOf("Gemini 4 Neon", "High"),
+            checked("Gemini 4 Neon", "Gemini 4 Carbon", "Claude Opus 5.5", "Low", "Medium", "High", "Extra"),
         )
         compose.onNodeWithText("Max").assertDoesNotExist()
         compose.onNodeWithText("Thinking").assertDoesNotExist()
 
+        // Picking Extra on Neon, then switching to Carbon (no xhigh) hides Extra and resets effort to High
+        press("Extra")
+        assertEquals(Effort.XHIGH.value, chat.state.value.effort)
+        press("Gemini 4 Carbon")
+        assertEquals("gemini-4-carbon", chat.state.value.model)
+        assertEquals(Effort.HIGH.value, chat.state.value.effort)
+        compose.onNodeWithText("Extra").assertDoesNotExist()
+        assertEquals(
+            listOf("Gemini 4 Carbon", "High"),
+            checked("Gemini 4 Neon", "Gemini 4 Carbon", "Claude Opus 5.5", "Low", "Medium", "High"),
+        )
+
         // Legacy suffixed model id highlights base model + suffixed effort
         chat.setModel("claude-opus-5-5-medium")
+        chat.setEffort(Effort.MEDIUM)
         compose.waitForIdle()
         assertEquals(
             listOf("Claude Opus 5.5", "Medium"),
-            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High", "Extra"),
+            checked("Gemini 4 Neon", "Gemini 4 Carbon", "Claude Opus 5.5", "Low", "Medium", "High"),
         )
+        compose.onNodeWithText("Extra").assertDoesNotExist()
 
-        // A model saved with agy's xhigh suffix reads as Extra
-        chat.setModel("gemini-4-argon-xhigh")
+        // A model saved with agy's xhigh suffix reads as Extra when that model supports xhigh
+        chat.setModel("gemini-4-neon-xhigh")
+        chat.setEffort(Effort.XHIGH)
         compose.waitForIdle()
         assertEquals(
-            listOf("Gemini 4 Argon", "Extra"),
-            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High", "Extra"),
+            listOf("Gemini 4 Neon", "Extra"),
+            checked("Gemini 4 Neon", "Gemini 4 Carbon", "Claude Opus 5.5", "Low", "Medium", "High", "Extra"),
         )
+    }
+
+    @Test
+    fun `Claude hides Extra on 4_6 models and hides Extra and Max on Haiku 4_5`() {
+        chat.setModel("opus")
+        chat.setEffort(Effort.XHIGH)
+        show()
+        assertEquals(listOf("Opus", "Extra"), checked("Opus", "Sonnet", "Sonnet 4.6", "Haiku 4.5", "Low", "Medium", "High", "Extra", "Max"))
+
+        // Switching to Sonnet 4.6 (no xhigh) hides Extra, keeps Max, and resets Extra -> High
+        press("Sonnet 4.6")
+        assertEquals("claude-sonnet-4-6", chat.state.value.model)
+        assertEquals(Effort.HIGH.value, chat.state.value.effort)
+        compose.onNodeWithText("Extra").assertDoesNotExist()
+        compose.onNodeWithText("Max").assertExists()
+
+        // Switching to Haiku 4.5 (supportedEfforts: []) hides both Extra and Max
+        press("Haiku 4.5")
+        assertEquals("claude-haiku-4-5", chat.state.value.model)
+        compose.onNodeWithText("Extra").assertDoesNotExist()
+        compose.onNodeWithText("Max").assertDoesNotExist()
+        assertEquals(listOf("Haiku 4.5", "High"), checked("Opus", "Sonnet", "Sonnet 4.6", "Haiku 4.5", "Low", "Medium", "High"))
     }
 }

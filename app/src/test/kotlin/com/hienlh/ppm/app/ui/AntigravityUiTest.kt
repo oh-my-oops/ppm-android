@@ -441,9 +441,15 @@ class AntigravityUiTest {
             composeRule.onNodeWithText(
                 "Antigravity reads these only when PPM starts a new chat, and a chat keeps the ones it started with.",
             ).assertIsDisplayed()
+            val neon = com.hienlh.ppm.protocol.ModelOption("gemini-4-neon", "Gemini 4 Neon", supportedEfforts = listOf("low", "medium", "high", "xhigh"))
+            val carbon = com.hienlh.ppm.protocol.ModelOption("gemini-4-carbon", "Gemini 4 Carbon", supportedEfforts = listOf("low", "medium", "high"))
             assertEquals(
                 listOf("low" to "Low", "medium" to "Medium", "high" to "High", "xhigh" to "Extra"),
-                AntigravityEffortOptions.map { it.value to it.label },
+                effortSelectOptions("antigravity", neon).map { it.value to it.label },
+            )
+            assertEquals(
+                listOf("low" to "Low", "medium" to "Medium", "high" to "High"),
+                effortSelectOptions("antigravity", carbon).map { it.value to it.label },
             )
 
             // Switching to the Claude tab hides Antigravity-only link and system-prompt helper note

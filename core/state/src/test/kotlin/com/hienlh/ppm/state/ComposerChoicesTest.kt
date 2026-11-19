@@ -92,8 +92,35 @@ class ComposerChoicesTest {
         assertNull(ModelNames.suffixEffort("gemini-4-argon", "antigravity"))
         assertNull(ModelNames.suffixEffort("claude-opus-5-5-medium", "claude"))
 
-        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH, Effort.XHIGH), Effort.optionsFor("antigravity"))
+        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH), Effort.optionsFor("antigravity"))
+        assertEquals(
+            listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH, Effort.XHIGH),
+            Effort.optionsFor("antigravity", keepLevels = listOf("xhigh")),
+        )
+        val agyNeon = ModelOption("gemini-4-neon", "Gemini 4 Neon", isDefault = true, supportedEfforts = listOf("low", "medium", "high", "xhigh"))
+        val agyCarbon = ModelOption("gemini-4-carbon", "Gemini 4 Carbon", supportedEfforts = listOf("low", "medium", "high"))
+        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH, Effort.XHIGH), Effort.optionsFor("antigravity", agyNeon))
+        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH), Effort.optionsFor("antigravity", agyCarbon))
+        assertEquals("xhigh", Effort.effectiveEffort("xhigh", "antigravity", agyNeon))
+        assertEquals("high", Effort.effectiveEffort("xhigh", "antigravity", agyCarbon))
+        assertEquals("xhigh", Effort.effectiveEffort("xhigh", "antigravity", null))
+        assertTrue(Effort.shouldResetOnModelSwitch("xhigh", "antigravity", agyCarbon))
+        assertFalse(Effort.shouldResetOnModelSwitch("xhigh", "antigravity", agyNeon))
+
         assertEquals(Effort.entries, Effort.optionsFor("claude"))
+        val sonnet55 = ModelOption("claude-sonnet-5-5", "Claude Sonnet 5.5", supportedEfforts = listOf("low", "medium", "high", "xhigh", "max"))
+        val sonnet46 = ModelOption("claude-sonnet-4-6", "Claude Sonnet 4.6", supportedEfforts = listOf("low", "medium", "high", "max"))
+        val haiku45 = ModelOption("claude-haiku-4-5", "Claude Haiku 4.5", supportedEfforts = emptyList())
+        assertEquals(Effort.entries, Effort.optionsFor("claude", sonnet55))
+        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH, Effort.MAX), Effort.optionsFor("claude", sonnet46))
+        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH), Effort.optionsFor("claude", haiku45))
+        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH, Effort.MAX), Effort.optionsFor("claude", haiku45, keepLevels = listOf("max")))
+        assertEquals("high", Effort.effectiveEffort("xhigh", "claude", sonnet46))
+        assertEquals("high", Effort.effectiveEffort("xhigh", "claude", haiku45))
+        assertEquals("xhigh", Effort.effectiveEffort("xhigh", "claude", sonnet55))
+        assertTrue(Effort.shouldResetOnModelSwitch("xhigh", "claude", sonnet46))
+        assertTrue(Effort.shouldResetOnModelSwitch("xhigh", "claude", haiku45))
+        assertFalse(Effort.shouldResetOnModelSwitch("xhigh", "claude", sonnet55))
     }
 
     @Test

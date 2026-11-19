@@ -63,9 +63,9 @@ data class PhoneProviderOption(
     val subtitle: String,
     val supportsThinkingToggle: Boolean = id.equals("claude", ignoreCase = true),
     val effortLevels: List<String> = if (id.equals("antigravity", ignoreCase = true) || id.equals("agy", ignoreCase = true)) {
-        listOf("Low", "Medium", "High", "Extra")
+        listOf("Low", "Medium", "High")
     } else {
-        listOf("Low", "Medium", "High", "Max")
+        listOf("Low", "Medium", "High", "Extra", "Max")
     },
 )
 
@@ -78,6 +78,8 @@ data class PhoneModelOption(
     val description: String,
     val defaultEffort: String = "Medium",
     val badge: String? = null,
+    /** Effort labels this model offers (`null` falls back to [PhoneProviderOption.effortLevels]). */
+    val effortLevels: List<String>? = null,
 )
 
 /**
@@ -665,6 +667,12 @@ fun PhoneModelEffortSheet(
                     style = ppmText(11f, FontWeight.Bold, lineHeight = 14f)
                         .copy(color = tokens.text3.color, letterSpacing = 0.6.sp),
                 )
+                val effortLevels = currentModel?.effortLevels ?: currentProvider.effortLevels
+                val effectiveSelectedEffort = if (effortLevels.any { it.equals(selectedEffort, ignoreCase = true) }) {
+                    selectedEffort
+                } else {
+                    effortLevels.firstOrNull { it.equals("High", ignoreCase = true) } ?: selectedEffort
+                }
                 val segShape = RoundedCornerShape(12.dp)
                 Row(
                     modifier = Modifier
@@ -676,8 +684,8 @@ fun PhoneModelEffortSheet(
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    currentProvider.effortLevels.forEach { level ->
-                        val active = level.equals(selectedEffort, ignoreCase = true)
+                    effortLevels.forEach { level ->
+                        val active = level.equals(effectiveSelectedEffort, ignoreCase = true)
                         val pillShape = RoundedCornerShape(9.dp)
                         Box(
                             modifier = Modifier
@@ -704,7 +712,7 @@ fun PhoneModelEffortSheet(
                     }
                 }
                 BasicText(
-                    text = "Default: $defaultEffort · In effect: ${inEffectEffort ?: selectedEffort}",
+                    text = "Default: $defaultEffort · In effect: ${inEffectEffort ?: effectiveSelectedEffort}",
                     style = ppmText(11.5f, FontWeight.Normal, FontKind.MONO, lineHeight = 16f)
                         .copy(color = tokens.text3.color),
                 )

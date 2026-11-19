@@ -4,10 +4,8 @@ import com.hienlh.ppm.protocol.ChatSearchPage
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.SessionLink
 import com.hienlh.ppm.protocol.array
-import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
-import com.hienlh.ppm.protocol.string
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -91,10 +89,7 @@ suspend fun ApiClient.resetTags(project: String) {
 
 /** The models a provider offers. An empty list also means the provider could not be asked. */
 suspend fun ApiClient.providerModels(project: String, providerId: String): List<ModelOption> =
-    call("GET", "${chatPath(project)}/providers/${ApiClient.escape(providerId)}/models").array.orEmpty().mapNotNull { entry ->
-        val value = entry["value"].string ?: return@mapNotNull null
-        ModelOption(value, entry["label"].string ?: value, isDefault = entry["isDefault"].bool == true)
-    }
+    call("GET", "${chatPath(project)}/providers/${ApiClient.escape(providerId)}/models").array.orEmpty().mapNotNull(ModelOption::from)
 
 /** The links the server holds for [sessionId]: its creator, its children, and sessions it messaged (`fetchSessionLinks`). */
 suspend fun ApiClient.sessionLinks(project: String, sessionId: String): List<SessionLink> =

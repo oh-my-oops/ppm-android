@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui.phone.settings
 
+import com.hienlh.ppm.state.Effort
 import com.hienlh.ppm.state.ModelNames
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -62,7 +63,9 @@ import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ProviderProbeStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import com.hienlh.ppm.app.asksForTextFocus
 
 data class PhoneSelectOption(
@@ -86,6 +89,20 @@ val PhoneAntigravityEffortOptions: List<PhoneSelectOption> = listOf(
     PhoneSelectOption("high", "High", "High", "Deep reasoning for complex coding."),
     PhoneSelectOption("xhigh", "Extra", "Extra", "Extended reasoning for complex refactors."),
 )
+
+fun phoneEffortOptionsFor(
+    providerId: String,
+    model: ModelOption?,
+    keepEffort: String? = null,
+): List<PhoneSelectOption> {
+    val isAntigravity = providerId.equals("antigravity", ignoreCase = true)
+    val byValue = (if (isAntigravity) PhoneAntigravityEffortOptions else PhoneEffortOptions).associateBy { it.value }
+    return Effort.optionsFor(
+        providerId,
+        model,
+        keepLevels = listOfNotNull(keepEffort),
+    ).mapNotNull { byValue[it.value] }
+}
 
 val PhonePermissionModeOptions: List<PhoneSelectOption> = listOf(
     PhoneSelectOption(
@@ -248,7 +265,26 @@ fun PhoneAiProviderPage(
             probing = probing,
             errorMsg = errorMsg,
             onSelectModel = { chosen ->
-                saveField(activeProvider, "model", chosen.takeUnless { it == PHONE_DEFAULT_MODEL })
+                val nextModel = chosen.takeUnless { it == PHONE_DEFAULT_MODEL }
+                val target = if (isSdk) {
+                    models.firstOrNull { it.value == nextModel }
+                } else {
+                    models.firstOrNull { it.value == (nextModel ?: models.firstOrNull { m -> m.isDefault }?.value) }
+                }
+                if (Effort.shouldResetOnModelSwitch(currentConfig?.effort, activeProvider, target)) {
+                    savePatch(
+                        AiSettingsPatch.provider(
+                            activeProvider,
+                            mapOf(
+                                "model" to (nextModel?.let(::JsonPrimitive) ?: JsonNull),
+                                "effort" to JsonPrimitive(Effort.HIGH.value),
+                            ),
+                        ),
+                        updateProvider(activeProvider) { it.copy(model = nextModel, effort = Effort.HIGH.value) },
+                    )
+                } else {
+                    saveField(activeProvider, "model", nextModel)
+                }
             },
             onSelectEffort = { chosen ->
                 saveField(activeProvider, "effort", chosen)
@@ -358,12 +394,18 @@ fun PhoneAiProviderContent(
             else -> PhoneSelectOption(modelValue, modelValue, modelValue)
         }
 
-    val effortOptions = if (activeProvider.equals("antigravity", ignoreCase = true)) {
-        PhoneAntigravityEffortOptions
+    val effectiveModel = if (modelValue == PHONE_DEFAULT_MODEL || modelValue.isBlank()) {
+        models.firstOrNull { it.isDefault }
     } else {
-        PhoneEffortOptions
+        models.firstOrNull { it.value == modelValue }
     }
-    val selectedEffortOption = effortOptions.firstOrNull { it.value == effortValue }
+    val effortOptions = phoneEffortOptionsFor(
+        activeProvider,
+        effectiveModel,
+        keepEffort = effortValue.takeIf { activeProvider.equals("antigravity", ignoreCase = true) && it == Effort.XHIGH.value },
+    )
+    val effectiveEffortValue = Effort.effectiveEffort(effortValue, activeProvider, effectiveModel) ?: Effort.DEFAULT.value
+    val selectedEffortOption = effortOptions.firstOrNull { it.value == effectiveEffortValue }
         ?: effortOptions.firstOrNull { it.value == "high" }
         ?: effortOptions.first()
 

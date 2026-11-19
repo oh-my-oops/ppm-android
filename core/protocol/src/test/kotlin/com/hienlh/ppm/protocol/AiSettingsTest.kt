@@ -125,4 +125,23 @@ class AiSettingsTest {
         assertNull(counted.createdAt)
         assertEquals(0, TeamInfo.from(WireJson.parse("""{"name":"empty"}"""))!!.memberCount)
     }
+
+    @Test
+    fun `ModelOption reads supportedEfforts including an empty list versus absent`() {
+        val neon = ModelOption.from(
+            WireJson.parse("""{"value":"gemini-4-neon","label":"Gemini 4 Neon","isDefault":true,"supportedEfforts":["low","medium","high","xhigh"]}"""),
+        )!!
+        assertEquals("gemini-4-neon", neon.value)
+        assertEquals("Gemini 4 Neon", neon.label)
+        assertTrue(neon.isDefault)
+        assertEquals(listOf("low", "medium", "high", "xhigh"), neon.supportedEfforts)
+
+        val haiku45 = ModelOption.from(
+            WireJson.parse("""{"value":"claude-haiku-4-5","label":"Claude Haiku 4.5","supportedEfforts":[]}"""),
+        )!!
+        assertEquals(emptyList<String>(), haiku45.supportedEfforts)
+
+        val legacy = ModelOption.from(WireJson.parse("""{"value":"gpt-6-sol","label":"GPT-6 Sol"}"""))!!
+        assertNull(legacy.supportedEfforts)
+    }
 }

@@ -17,6 +17,9 @@ import com.hienlh.ppm.app.ui.TABLET_RAIL_LANDSCAPE_WIDTH
 import com.hienlh.ppm.app.ui.TABLET_RAIL_PORTRAIT_WIDTH
 import com.hienlh.ppm.app.ui.TabletSettingsLayout
 import com.hienlh.ppm.app.ui.tabletSettingsRailWidth
+import com.hienlh.ppm.app.ui.phone.chat.PhoneModelEffortSheet
+import com.hienlh.ppm.app.ui.phone.chat.PhoneModelOption
+import com.hienlh.ppm.app.ui.phone.chat.PhoneProviderOption
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.ServerProfile
 import com.hienlh.ppm.design.BuiltInThemes
@@ -299,5 +302,117 @@ class PhoneSettingsTest {
         assertEquals(SettingsCategory.Accounts, activeCategory)
         composeRule.onNodeWithTag("tablet-settings-detail-accounts").assertIsDisplayed()
         composeRule.onNodeWithText("Detail pane for Accounts").assertIsDisplayed()
+    }
+
+    @Test
+    fun `phone AI Provider page shows Extra only when the chosen model supports xhigh`() {
+        var activeProvider by mutableStateOf("antigravity")
+        var selectedModel by mutableStateOf("gemini-4-neon")
+        var selectedEffort by mutableStateOf("xhigh")
+        val agyModels = listOf(
+            ModelOption("gemini-4-neon", "Gemini 4 Neon", isDefault = true, supportedEfforts = listOf("low", "medium", "high", "xhigh")),
+            ModelOption("gemini-4-carbon", "Gemini 4 Carbon", supportedEfforts = listOf("low", "medium", "high")),
+        )
+        val claudeModels = listOf(
+            ModelOption("claude-sonnet-5-5", "Claude Sonnet 5.5", supportedEfforts = listOf("low", "medium", "high", "xhigh", "max")),
+            ModelOption("claude-sonnet-4-6", "Claude Sonnet 4.6", supportedEfforts = listOf("low", "medium", "high", "max")),
+            ModelOption("claude-haiku-4-5", "Claude Haiku 4.5", supportedEfforts = emptyList()),
+        )
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                PhoneAiProviderContent(
+                    providerTabs = listOf("claude", "antigravity"),
+                    activeProvider = activeProvider,
+                    onSelectProvider = { activeProvider = it },
+                    modelValue = selectedModel,
+                    models = if (activeProvider == "antigravity") agyModels else claudeModels,
+                    includeAutoDefaultModel = activeProvider != "claude",
+                    effortValue = selectedEffort,
+                    permissionModeValue = "bypassPermissions",
+                    onSelectModel = { selectedModel = it },
+                    onSelectEffort = { selectedEffort = it },
+                    onSelectPermissionMode = {},
+                )
+            }
+        }
+
+        // Antigravity Neon has Extra, no Max
+        composeRule.onNodeWithTag("phone-ai-effort-xhigh").assertIsDisplayed()
+        composeRule.onNodeWithTag("phone-ai-effort-max").assertDoesNotExist()
+
+        // Switching to Carbon (no xhigh) hides Extra
+        selectedModel = "gemini-4-carbon"
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("phone-ai-effort-xhigh").assertDoesNotExist()
+        composeRule.onNodeWithTag("phone-ai-effort-high").assertIsDisplayed()
+
+        // Claude Sonnet 5.5 has Extra and Max
+        activeProvider = "claude"
+        selectedModel = "claude-sonnet-5-5"
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("phone-ai-effort-xhigh").assertIsDisplayed()
+        composeRule.onNodeWithTag("phone-ai-effort-max").assertIsDisplayed()
+
+        // Claude Sonnet 4.6 hides Extra, keeps Max
+        selectedModel = "claude-sonnet-4-6"
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("phone-ai-effort-xhigh").assertDoesNotExist()
+        composeRule.onNodeWithTag("phone-ai-effort-max").assertIsDisplayed()
+
+        // Claude Haiku 4.5 (supportedEfforts: []) hides Extra and Max
+        selectedModel = "claude-haiku-4-5"
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("phone-ai-effort-xhigh").assertDoesNotExist()
+        composeRule.onNodeWithTag("phone-ai-effort-max").assertDoesNotExist()
+        composeRule.onNodeWithTag("phone-ai-effort-high").assertIsDisplayed()
+    }
+
+    @Test
+    fun `phone Model & Effort sheet shows per-model effort levels`() {
+        var selectedModel by mutableStateOf("gemini-4-neon")
+        val models = listOf(
+            PhoneModelOption(
+                id = "gemini-4-neon",
+                name = "Gemini 4 Neon",
+                description = "Default",
+                effortLevels = listOf("Low", "Medium", "High", "Extra"),
+            ),
+            PhoneModelOption(
+                id = "gemini-4-carbon",
+                name = "Gemini 4 Carbon",
+                description = "",
+                effortLevels = listOf("Low", "Medium", "High"),
+            ),
+        )
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                PhoneModelEffortSheet(
+                    providers = listOf(PhoneProviderOption(id = "antigravity", name = "Antigravity", subtitle = "Active provider")),
+                    selectedProviderId = "antigravity",
+                    models = models,
+                    selectedModelId = selectedModel,
+                    selectedEffort = "Extra",
+                    thinkingEnabled = false,
+                    providerLocked = true,
+                    onSelectProvider = {},
+                    onSelectModel = { selectedModel = it },
+                    onSelectEffort = {},
+                    onToggleThinking = {},
+                    onResetEffortToDefault = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        // Neon offers Extra
+        composeRule.onNodeWithText("Extra").assertIsDisplayed()
+
+        // Switching to Carbon hides Extra and clamps the In effect line to High
+        selectedModel = "gemini-4-carbon"
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Extra").assertDoesNotExist()
+        composeRule.onNodeWithText("In effect: High", substring = true).assertIsDisplayed()
     }
 }

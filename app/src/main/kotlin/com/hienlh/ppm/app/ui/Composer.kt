@@ -472,11 +472,13 @@ fun ChatComposer(
                 if (!tab.providerPending && !tab.firstSendPending) {
                     // `[data-model-slot]` (`shrink` while siblings stay `shrink-0`): the only chip that yields width.
                     Box(Modifier.weight(1f, fill = false).testTag("composer-model-slot")) {
+                        val currentModel = currentModelOption(model, chat, state)
                         ComposerModelChip(
                             name = name,
                             state = state,
                             providerId = chat.providerId,
                             narrow = narrow,
+                            currentModel = currentModel,
                         ) {
                             modelOpen = if (mobile) true else !modelOpen
                         }
@@ -708,6 +710,18 @@ private fun modelName(model: AppModel, chat: ChatController, state: ChatState): 
     }
 }
 
+/** The catalog's [ModelOption] for the chat's active model (including Auto → default), if loaded. */
+@Composable
+private fun currentModelOption(model: AppModel, chat: ChatController, state: ChatState): ModelOption? {
+    val catalog = model.models
+    val entries = catalog?.entries?.collectAsState()?.value
+    return remember(entries, state.model, chat.providerId) {
+        val list = catalog?.models(chat.providerId).orEmpty()
+        val effective = ModelNames.effectiveModel(state.model, chat.providerId, list)
+        list.firstOrNull { it.value == effective }
+    }
+}
+
 /**
  * A chip as the web's `<button aria-label=[name] disabled>` is to a screen reader: one node with the
  * name, a button's role, its press ([action]) and, while [enabled] is false, disabled.
@@ -830,10 +844,12 @@ internal fun ComposerModelChip(
     state: ChatState,
     providerId: String = "claude",
     narrow: Boolean = false,
+    currentModel: ModelOption? = null,
     onClick: () -> Unit,
 ) {
     val isAntigravity = providerId == "antigravity"
-    val effort = state.effort ?: ModelNames.suffixEffort(state.model, providerId) ?: Effort.DEFAULT.value
+    val rawEffort = state.effort ?: ModelNames.suffixEffort(state.model, providerId) ?: Effort.DEFAULT.value
+    val effort = Effort.effectiveEffort(rawEffort, providerId, currentModel) ?: Effort.DEFAULT.value
     val showThinking = !isAntigravity && state.thinking
     val text = ModelNames.chipLabel(name, effort)
     val running = state.isRunning
@@ -1440,13 +1456,19 @@ internal fun ModelColumns(
     val models: List<ModelOption> = remember(catalog, entries, chat.providerId) { catalog?.models(chat.providerId).orEmpty() }
     val status: ModelListStatus? = remember(catalog, entries, chat.providerId) { catalog?.status(chat.providerId) ?: ModelListStatus.LOADING }
     val effectiveModel = ModelNames.effectiveModel(state.model, chat.providerId, models)
-    val effectiveEffort = Effort.of(state.effort ?: ModelNames.suffixEffort(state.model, chat.providerId)) ?: Effort.DEFAULT
+    val currentModel = models.firstOrNull { it.value == effectiveModel }
+    val rawEffort = state.effort ?: ModelNames.suffixEffort(state.model, chat.providerId)
+    val effectiveEffort = Effort.of(Effort.effectiveEffort(rawEffort, chat.providerId, currentModel)) ?: Effort.DEFAULT
     ModelPickerColumns(
         models, status, effectiveModel, effectiveEffort, state.thinking, box, inner,
         providerId = chat.providerId,
         header = header,
-        onModel = {
-            chat.setModel(it)
+        onModel = { picked ->
+            chat.setModel(picked)
+            val target = models.firstOrNull { it.value == picked }
+            if (Effort.shouldResetOnModelSwitch(rawEffort, chat.providerId, target)) {
+                chat.setEffort(Effort.HIGH)
+            }
             onPicked()
         },
         onEffort = {
@@ -1503,7 +1525,8 @@ internal fun ModelPickerColumns(
             }
             Column(Modifier.weight(1f).fillMaxHeight().cssBorder(tokens.border.color, sides = CssSides.Start).padding(vertical = 4.dp)) {
                 SectionLabel("Effort")
-                for (option in Effort.optionsFor(providerId)) {
+                val currentModel = models.firstOrNull { it.value == model }
+                for (option in Effort.optionsFor(providerId, currentModel)) {
                     OptionRow(active = option == effort, onClick = { onEffort(option) }) {
                         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                             BasicText(option.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1)

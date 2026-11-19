@@ -452,6 +452,26 @@ fun List<SessionInfo>.sortedForList(): List<SessionInfo> = sortedWith(
 
 /**
  * A model a provider offers (`GET …/chat/providers/:id/models`). [isDefault] marks the model the
- * provider itself picks when the user has not chosen one ("Auto").
+ * provider itself picks when the user has not chosen one ("Auto"); [supportedEfforts] carries the
+ * effort values (`low`, `medium`, `high`, `xhigh`, `max`) the model takes when known per model
+ * (`emptyList()` means the model ignores effort, `null` means unspecified).
  */
-data class ModelOption(val value: String, val label: String, val isDefault: Boolean = false)
+data class ModelOption(
+    val value: String,
+    val label: String,
+    val isDefault: Boolean = false,
+    val supportedEfforts: List<String>? = null,
+) {
+    companion object {
+        fun from(entry: JsonElement?): ModelOption? {
+            val value = entry["value"].string ?: return null
+            val supported = entry["supportedEfforts"].array?.mapNotNull { it.string }
+            return ModelOption(
+                value = value,
+                label = entry["label"].string ?: value,
+                isDefault = entry["isDefault"].bool == true,
+                supportedEfforts = supported,
+            )
+        }
+    }
+}

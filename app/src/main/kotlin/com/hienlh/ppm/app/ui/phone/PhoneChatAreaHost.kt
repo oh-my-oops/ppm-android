@@ -171,12 +171,16 @@ internal fun PhoneChatContent(
     val catalogEntries = catalog?.entries?.collectAsState()?.value
     LaunchedEffect(catalog, providerId) { catalog?.load(providerId) }
     val stateModel = chatState?.model
+    val catalogModels = remember(catalogEntries, providerId) { catalog?.models(providerId).orEmpty() }
+    val effectiveModelId = ModelNames.effectiveModel(stateModel, providerId, catalogModels)
+    val currentModelOption = catalogModels.firstOrNull { it.value == effectiveModelId }
     val modelLabel = remember(catalogEntries, stateModel, providerId) {
         catalog?.displayName(stateModel, providerId)
             ?: ModelNames.effectiveModel(stateModel, providerId)?.let(ModelNames::displayName)
             ?: "Model"
     }
-    val effortValue = chatState?.effort ?: ModelNames.suffixEffort(stateModel, providerId) ?: Effort.DEFAULT.value
+    val rawEffortValue = chatState?.effort ?: ModelNames.suffixEffort(stateModel, providerId) ?: Effort.DEFAULT.value
+    val effortValue = Effort.effectiveEffort(rawEffortValue, providerId, currentModelOption) ?: Effort.DEFAULT.value
     val effortLabel = Effort.label(effortValue)
     // What the turns actually run at (`effort_status`): a setting outside PPM, a cap or the model can
     // override the pick, and the chip shows what runs, as the web's does. Nothing known: the pick.
@@ -455,13 +459,18 @@ internal fun PhoneChatContent(
             }
             val defaults = model.newChatCache.settings()?.defaults?.get(providerId)
             val defaultEffortLabel = Effort.label(defaults?.effort ?: Effort.DEFAULT.value)
-            val availableModels = remember(catalogEntries, providerId, defaults) {
-                catalog?.models(providerId).orEmpty().map { option ->
+            val availableModels = remember(catalogModels, providerId, defaults, shownEffort.level) {
+                catalogModels.map { option ->
                     PhoneModelOption(
                         id = option.value,
                         name = ModelNames.shortLabel(option.label, providerId),
                         description = if (option.value == defaults?.model) "Default" else "",
                         defaultEffort = defaultEffortLabel,
+                        effortLevels = Effort.optionsFor(
+                            providerId,
+                            option,
+                            keepLevels = listOfNotNull(shownEffort.level?.value),
+                        ).map { it.label },
                     )
                 }
             }
@@ -469,12 +478,18 @@ internal fun PhoneChatContent(
                 providers = providers,
                 selectedProviderId = providerId,
                 models = availableModels,
-                selectedModelId = ModelNames.effectiveModel(stateModel, providerId, catalog?.models(providerId).orEmpty()).orEmpty(),
+                selectedModelId = effectiveModelId.orEmpty(),
                 selectedEffort = effortLabel,
                 thinkingEnabled = thinkingEnabled,
                 providerLocked = chatTab?.session != null || chatTab == null,
                 onSelectProvider = { id -> chatTab?.let { model.newChats.pickProvider(it, id) } },
-                onSelectModel = { id -> chatController?.setModel(id) },
+                onSelectModel = { id ->
+                    chatController?.setModel(id)
+                    val target = catalogModels.firstOrNull { it.value == id }
+                    if (Effort.shouldResetOnModelSwitch(rawEffortValue, providerId, target)) {
+                        chatController?.setEffort(Effort.HIGH)
+                    }
+                },
                 onSelectEffort = { label ->
                     Effort.entries.firstOrNull { it.label.equals(label, ignoreCase = true) }?.let { chatController?.setEffort(it) }
                 },

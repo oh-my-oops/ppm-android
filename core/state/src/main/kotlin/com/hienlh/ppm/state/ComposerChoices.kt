@@ -38,9 +38,71 @@ enum class Effort(val value: String, val label: String) {
 
         fun of(value: String?): Effort? = entries.firstOrNull { it.value == value }
 
-        /** The effort choices offered in the picker (`model-thinking-selector.tsx` `effortOptions`). */
-        fun optionsFor(providerId: String): List<Effort> =
-            if (providerId == "antigravity") listOf(LOW, MEDIUM, HIGH, XHIGH) else entries
+        /** Whether an Antigravity model exposes `xhigh` ("Extra") in its picker. */
+        fun antigravityModelSupportsXhigh(model: ModelOption?): Boolean =
+            model?.supportedEfforts?.contains(XHIGH.value) == true
+
+        /**
+         * The effort choices offered in the picker (`effortOptionsForModel` in
+         * `model-thinking-selector-helpers.ts`): omits levels [model] does not support (notably
+         * `xhigh` on Antigravity models without an `-xhigh` variant, Opus/Sonnet 4.6, and Haiku 4.5).
+         * [keepLevels] keeps an already-active or externally-overridden level visible so the UI
+         * never loses an "In effect" marker or flashes while the list loads.
+         */
+        fun optionsFor(
+            providerId: String,
+            model: ModelOption? = null,
+            keepLevels: Collection<String?> = emptyList(),
+        ): List<Effort> {
+            val keep = keepLevels.mapNotNull { it?.takeIf(String::isNotEmpty) }.toSet()
+            if (providerId.equals("antigravity", ignoreCase = true)) {
+                val allowXhigh = if (model != null) antigravityModelSupportsXhigh(model) else XHIGH.value in keep
+                return entries.filter {
+                    it == LOW || it == MEDIUM || it == HIGH || (it == XHIGH && allowXhigh)
+                }
+            }
+            val supported = model?.supportedEfforts ?: return entries
+            if (supported.isEmpty()) {
+                return entries.filter { (it != XHIGH && it != MAX) || it.value in keep }
+            }
+            return entries.filter { it.value in supported || it.value in keep }
+        }
+
+        /**
+         * Clamp a picked effort to [HIGH] when [model] is known not to support it (e.g. `xhigh`
+         * on an Antigravity model without `-xhigh`, or on Claude 4.6 / Haiku 4.5).
+         */
+        fun effectiveEffort(
+            effort: String?,
+            providerId: String,
+            model: ModelOption?,
+        ): String? {
+            if (model == null) return effort
+            val isAntigravity = providerId.equals("antigravity", ignoreCase = true)
+            if (isAntigravity && !antigravityModelSupportsXhigh(model) && (effort == XHIGH.value || effort == MAX.value)) {
+                return HIGH.value
+            }
+            val supported = model.supportedEfforts
+            if (!isAntigravity && supported != null && XHIGH.value !in supported && effort == XHIGH.value) {
+                return HIGH.value
+            }
+            return effort
+        }
+
+        /** True when switching to [target] should reset the current [effort] back to [HIGH]. */
+        fun shouldResetOnModelSwitch(
+            currentEffort: String?,
+            providerId: String,
+            target: ModelOption?,
+        ): Boolean {
+            if (target == null) return false
+            val isAntigravity = providerId.equals("antigravity", ignoreCase = true)
+            if (isAntigravity && (currentEffort == XHIGH.value || currentEffort == MAX.value) && !antigravityModelSupportsXhigh(target)) {
+                return true
+            }
+            val supported = target.supportedEfforts
+            return !isAntigravity && currentEffort == XHIGH.value && supported != null && XHIGH.value !in supported
+        }
 
         /** The label for a value from the server; one this app does not know shows as given. */
         fun label(value: String?): String = if (value.isNullOrEmpty()) "" else of(value)?.label ?: value

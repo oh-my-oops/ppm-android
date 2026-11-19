@@ -82,27 +82,25 @@ import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ProviderProbeStatus
 import com.hienlh.ppm.protocol.TeamInfo
 import com.hienlh.ppm.protocol.jsNumber
+import com.hienlh.ppm.state.Effort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.math.abs
 import kotlin.math.floor
 
-private val EffortOptions = listOf(
-    SelectOption("low", "Low"),
-    SelectOption("medium", "Medium"),
-    SelectOption("high", "High"),
-    SelectOption("xhigh", "Extra"),
-    SelectOption("max", "Max"),
-)
-
-internal val AntigravityEffortOptions = listOf(
-    SelectOption("low", "Low"),
-    SelectOption("medium", "Medium"),
-    SelectOption("high", "High"),
-    SelectOption("xhigh", "Extra"),
-)
+internal fun effortSelectOptions(
+    providerId: String,
+    model: ModelOption?,
+    keepEffort: String? = null,
+): List<SelectOption> = Effort.optionsFor(
+    providerId,
+    model,
+    keepLevels = listOfNotNull(keepEffort),
+).map { SelectOption(it.value, it.label) }
 
 private val PermissionModeOptions = listOf(
     SelectOption("bypassPermissions", "Bypass permissions (default)"),
@@ -403,6 +401,16 @@ private fun ProviderSettings(
             ) { model.openSettings("accounts") }
         }
         val models = state.models
+        val antigravityModel = if (provider == "antigravity") {
+            models.firstOrNull { it.value == (config?.model?.ifEmpty { null } ?: models.firstOrNull { m -> m.isDefault }?.value) }
+        } else {
+            null
+        }
+        val sdkModel = if (isSdk) {
+            models.firstOrNull { it.value == (config?.model ?: models.firstOrNull()?.value) }
+        } else {
+            null
+        }
         if (models.isNotEmpty()) {
             val target = rememberLabelTarget()
             Field("Model", target) {
@@ -410,7 +418,27 @@ private fun ProviderSettings(
                 SelectField(
                     if (isSdk) config?.model ?: models.first().value else config?.model?.ifEmpty { null } ?: DEFAULT_MODEL,
                     if (isSdk) options else listOf(SelectOption(DEFAULT_MODEL, ModelNames.autoModelLabel(models))) + options,
-                    onValueChange = { state.saveField(provider, "model", it.takeUnless { v -> v == DEFAULT_MODEL }) },
+                    onValueChange = { picked ->
+                        val nextModel = picked.takeUnless { v -> v == DEFAULT_MODEL }
+                        val targetModel = if (isSdk) {
+                            models.firstOrNull { it.value == nextModel }
+                        } else {
+                            models.firstOrNull { it.value == (nextModel ?: models.firstOrNull { m -> m.isDefault }?.value) }
+                        }
+                        if (Effort.shouldResetOnModelSwitch(config?.effort, provider, targetModel)) {
+                            state.save(
+                                AiSettingsPatch.provider(
+                                    provider,
+                                    mapOf(
+                                        "model" to (nextModel?.let(::JsonPrimitive) ?: JsonNull),
+                                        "effort" to JsonPrimitive(Effort.HIGH.value),
+                                    ),
+                                ),
+                            )
+                        } else {
+                            state.saveField(provider, "model", nextModel)
+                        }
+                    },
                     enabled = !state.modelsLoading,
                     placeholder = if (state.modelsLoading) "Loading models..." else "Select model",
                     label = target,
@@ -419,10 +447,16 @@ private fun ProviderSettings(
         }
         if (provider == "antigravity") {
             val effortTarget = rememberLabelTarget()
+            val antigravityEfforts = effortSelectOptions(
+                "antigravity",
+                antigravityModel,
+                keepEffort = config?.effort?.takeIf { it == Effort.XHIGH.value },
+            )
+            val antigravityEffortValue = Effort.effectiveEffort(config?.effort, "antigravity", antigravityModel) ?: Effort.DEFAULT.value
             Field("Effort", effortTarget) {
                 SelectField(
-                    config?.effort ?: "high",
-                    AntigravityEffortOptions,
+                    antigravityEffortValue,
+                    antigravityEfforts,
                     onValueChange = { state.saveField(provider, "effort", it) },
                     label = effortTarget,
                 )
@@ -448,8 +482,12 @@ private fun ProviderSettings(
                 help = "Direct API key or OAuth token. Leave empty to use connected accounts.",
             ) { typed -> AiSettingsPatch.apiKey(provider, typed)?.let(state::save) }
             val effortTarget = rememberLabelTarget()
+            val sdkEfforts = effortSelectOptions(provider, sdkModel)
+            val sdkEffortValue = Effort.effectiveEffort(config?.effort, provider, sdkModel)
+                ?.takeIf { eff -> sdkEfforts.any { it.value == eff } }
+                ?: Effort.DEFAULT.value
             Field("Effort", effortTarget) {
-                SelectField(config?.effort ?: "high", EffortOptions, onValueChange = { state.saveField(provider, "effort", it) }, label = effortTarget)
+                SelectField(sdkEffortValue, sdkEfforts, onValueChange = { state.saveField(provider, "effort", it) }, label = effortTarget)
             }
             val turns = config?.maxTurns
             TextSetting(

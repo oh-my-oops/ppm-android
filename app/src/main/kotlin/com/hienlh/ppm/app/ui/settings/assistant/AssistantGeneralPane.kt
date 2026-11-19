@@ -42,7 +42,6 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
-import com.hienlh.ppm.protocol.ASSISTANT_EFFORTS
 import com.hienlh.ppm.protocol.AssistantAddressForm
 import com.hienlh.ppm.protocol.AssistantGeneralDraft
 import com.hienlh.ppm.protocol.AssistantMcpServer
@@ -56,6 +55,7 @@ import com.hienlh.ppm.protocol.PERSONA_ADDRESS_WHEN_MAX_CHARS
 import com.hienlh.ppm.protocol.PERSONA_MAX_ADDRESS_FORMS
 import com.hienlh.ppm.protocol.PERSONA_NAME_MAX_CHARS
 import com.hienlh.ppm.protocol.PERSONA_SOUL_MAX_CHARS
+import com.hienlh.ppm.state.Effort
 import com.hienlh.ppm.state.assistant.appendToInstructions
 import com.hienlh.ppm.state.assistant.foldMcpName
 import kotlinx.coroutines.CancellationException
@@ -273,6 +273,17 @@ private fun ProviderDefaultsRow(api: ApiClient, id: String, name: String, value:
     // A saved model the list does not hold (a renamed or retired one) still shows as chosen.
     val options = models.map { SelectOption(it.value, it.label) } +
         listOfNotNull(value.model?.takeIf { m -> models.none { it.value == m } }?.let { SelectOption(it, it) })
+    val effectiveModel = models.firstOrNull {
+        it.value == (value.model ?: models.firstOrNull { m -> m.isDefault }?.value)
+    }
+    val effortOptions = Effort.optionsFor(
+        id,
+        effectiveModel,
+        keepLevels = listOfNotNull(value.effort?.takeIf { id.equals("antigravity", ignoreCase = true) && it == Effort.XHIGH.value }),
+    ).map { SelectOption(it.value, it.label) }
+    val effectiveEffort = value.effort?.let { current ->
+        Effort.effectiveEffort(current, id, effectiveModel)?.takeIf { eff -> effortOptions.any { it.value == eff } } ?: Effort.HIGH.value
+    }
     val shape = RoundedCornerShape(8.dp)
     Column(
         Modifier.fillMaxWidth().cssBorder(tokens.border.color, shape).padding(12.dp).testTag("asst-provider-$id"),
@@ -284,7 +295,12 @@ private fun ProviderDefaultsRow(api: ApiClient, id: String, name: String, value:
             SelectField(
                 value = value.model ?: CHAT_DEFAULT,
                 options = listOf(SelectOption(CHAT_DEFAULT, "Same as chats")) + options,
-                onValueChange = { v -> onChange(value.copy(model = v.takeIf { it != CHAT_DEFAULT })) },
+                onValueChange = { v ->
+                    val nextModel = v.takeIf { it != CHAT_DEFAULT }
+                    val target = models.firstOrNull { it.value == (nextModel ?: models.firstOrNull { m -> m.isDefault }?.value) }
+                    val nextEffort = if (Effort.shouldResetOnModelSwitch(value.effort, id, target)) Effort.HIGH.value else value.effort
+                    onChange(value.copy(model = nextModel, effort = nextEffort))
+                },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = enabled,
             )
@@ -292,8 +308,8 @@ private fun ProviderDefaultsRow(api: ApiClient, id: String, name: String, value:
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             BasicText("Effort", style = asstNote())
             SelectField(
-                value = value.effort ?: CHAT_DEFAULT,
-                options = listOf(SelectOption(CHAT_DEFAULT, "Same as chats")) + ASSISTANT_EFFORTS.map { SelectOption(it.first, it.second) },
+                value = effectiveEffort ?: CHAT_DEFAULT,
+                options = listOf(SelectOption(CHAT_DEFAULT, "Same as chats")) + effortOptions,
                 onValueChange = { v -> onChange(value.copy(effort = v.takeIf { it != CHAT_DEFAULT })) },
                 modifier = Modifier.fillMaxWidth().testTag("asst-effort-$id"),
                 enabled = enabled,
