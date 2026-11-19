@@ -10,6 +10,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import kotlinx.serialization.json.JsonElement
+import androidx.compose.ui.test.isFocused
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import com.hienlh.ppm.app.withComposeActivity
@@ -254,6 +257,22 @@ class TranscriptCardsTest {
         composeRule.onNodeWithText("Preview · Small").performClick()
         composeRule.onNodeWithText("1. edit\n2. test").assertExists()
         assertEquals(0, composeRule.onAllNodesWithText("Preview · Big").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun `a tap anywhere on the Other row lets you type an answer of your own, and Submit sends it`() {
+        var sent: JsonElement? = null
+        content {
+            PendingApprovalCard(
+                request("q3", "AskUserQuestion", """{"questions":[{"question":"Which?","header":"Pick","options":[{"label":"A"},{"label":"B"}]}]}"""),
+                { _, data -> sent = data },
+            )
+        }
+        // The "O" square at the row's start, not the field: the whole row is the target, as the web's label is.
+        composeRule.onNodeWithText("O", useUnmergedTree = true).performClick()
+        composeRule.onNode(hasSetTextAction() and isFocused()).performTextInput("Neither")
+        composeRule.onNodeWithText("Submit ✓").performClick()
+        assertTrue(sent.toString(), sent.toString().contains("Neither"))
     }
 
     @Test

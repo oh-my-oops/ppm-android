@@ -1,5 +1,6 @@
 package com.hienlh.ppm.chat
 
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
@@ -464,6 +465,7 @@ internal fun QuestionCard(
                 }
                 OtherRow(
                     ringed = focused == other,
+                    filled = custom[active].orEmpty().isNotEmpty(),
                     source = otherSource,
                     focusRequester = otherField,
                     value = custom[active].orEmpty(),
@@ -585,6 +587,7 @@ private fun NumberSquare(text: String, selected: Boolean) {
 @Composable
 private fun OtherRow(
     ringed: Boolean,
+    filled: Boolean,
     source: MutableInteractionSource,
     focusRequester: FocusRequester,
     value: String,
@@ -594,26 +597,37 @@ private fun OtherRow(
     val tokens = LocalPpmTokens.current
     val focused by source.collectIsFocusedAsState()
     val text = if (LocalPpmMobile.current) ppmText(16f, lineHeight = 64f / 3) else xs
-    val dash = tokens.border.color
+    // Something typed: the row reads as the chosen answer, solid like a picked option (`tileOn`).
+    val edge = if (filled) tokens.accent.color else tokens.border.color
+    val keyboard = LocalSoftwareKeyboardController.current
+    val rowShape = RoundedCornerShape(4.dp)
     Row(
         Modifier
             .fillMaxWidth()
             .focusRing(ringed)
+            .clip(rowShape)
+            .background(if (filled) tokens.accent.opacity(0.1).color else Color.Transparent)
+            // The whole row is the target, not only the field inside it: a tap on the "O" or the
+            // padding around the field opens it for typing.
+            .ppmClickable(pressedColor = tokens.surfaceHover.color) {
+                focusRequester.requestFocus()
+                keyboard?.show()
+            }
             .drawBehind {
                 val line = cssBorderPx(1.dp).toFloat()
                 drawRoundRect(
-                    dash,
+                    edge,
                     topLeft = Offset(line / 2, line / 2),
                     size = Size(size.width - line, size.height - line),
                     cornerRadius = CornerRadius(4.dp.toPx()),
-                    style = Stroke(line, pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 2.dp.toPx()))),
+                    style = Stroke(line, pathEffect = if (filled) null else PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 2.dp.toPx()))),
                 )
             }
             .cssBorderInset(1.dp)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        NumberSquare("O", selected = false)
+        NumberSquare("O", selected = filled)
         val fieldShape = RoundedCornerShape(4.dp)
         BasicTextField(
             value,
