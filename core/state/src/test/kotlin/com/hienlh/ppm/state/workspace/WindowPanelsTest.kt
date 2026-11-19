@@ -292,4 +292,18 @@ class WindowPanelsTest {
         assertNull(saveWindowPanels(mapOf("__win__:w9" to WorkspacePanel("__win__:w9"))))
         assertNotNull(saveWindowPanels(loaded))
     }
+
+    @Test
+    fun `a pin set in a floating window is saved with the window panels, and so is taking it off`() {
+        val storage = Storage("app" to twoPanels())
+        val store = store(storage)
+        val windowId = store.popOutTab("editor:a.kt", "p1")!!
+        val panelId = windowPanelId(windowId)
+
+        store.setTabPinned("editor:a.kt", true)
+        assertTrue(loadWindowPanels(storage.windowPanels).getValue(panelId).tabs.single().pinned)
+
+        store.setTabPinned("editor:a.kt", false)
+        assertFalse(loadWindowPanels(storage.windowPanels).getValue(panelId).tabs.single().pinned)
+    }
 }
