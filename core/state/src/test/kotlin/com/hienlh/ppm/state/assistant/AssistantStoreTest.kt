@@ -110,7 +110,7 @@ class AssistantStoreTest {
     }
 
     @Test
-    fun `a decision set keeps its order, marks a card answered elsewhere, and sends a pick`() = withStore(
+    fun `a decision set keeps its order, sends a pick and says so in one line, the card gone from the set`() = withStore(
         base + ("POST /api/assistant/cards/w1/ok" to """{"card":${cardJson("w1", 2, status = "answered")},"to":"manager"}"""),
     ) { store, routes ->
         store.start()
@@ -119,11 +119,38 @@ class AssistantStoreTest {
         assertEquals(listOf("w1"), store.view.value.decisions.order)
         val w1 = store.view.value.open!!.single()
         store.pick(w1, DecisionAnswer.Ok(null))
-        store.sendOne(w1)
-        waitFor("the send") { store.view.value.decisions.done["w1"] != null }
+        var left = false
+        store.sendOne(w1) { left = true }
+        waitFor("the send") { store.view.value.decisions.flash != null }
         assertTrue(routes.asked.contains("POST /api/assistant/cards/w1/ok"))
-        assertEquals("OK — go ahead", store.view.value.decisions.done["w1"]!!.note)
+        val d = store.view.value.decisions
+        assertEquals(SetFlash(sent = true, text = "Sent “Tw1”: OK — go ahead"), d.flash)
+        assertTrue(left)
+        assertTrue(d.sending.isEmpty())
+        assertTrue(d.picks.isEmpty())
         assertTrue(store.view.value.open!!.isEmpty())
+        store.clearFlash()
+        assertNull(store.view.value.decisions.flash)
+    }
+
+    @Test
+    fun `a decision answered elsewhere leaves the set at once and takes its pick with it`() = withStore(
+        base + ("GET /api/assistant/cards/open" to """{"cards":[${cardJson("w1", 2)},${cardJson("w2", 3)}]}"""),
+    ) { store, _ ->
+        store.start()
+        waitFor("the waiting list") { store.view.value.open?.size == 2 && store.view.value.cards != null }
+        store.syncDecisionOrder()
+        val (w1, w2) = store.view.value.open!!
+        store.pick(w1, DecisionAnswer.Ok(null))
+        store.pick(w2, DecisionAnswer.Ok(null))
+        // Answered on Telegram: the event takes it off the waiting list.
+        store.handleEvent("assistant:card", WireJson.parse("""{"type":"assistant:card","card":${cardJson("w1", 2, status = "answered")}}"""))
+        store.syncDecisionOrder()
+        val d = store.view.value.decisions
+        assertEquals(listOf("w2"), d.order)
+        assertEquals(setOf("w2"), d.picks.keys)
+        assertNull(d.flash)
+        assertEquals(listOf("w2"), decisionTabs(d.order, store.view.value.open!!, d.sending) { true }.map { it.id })
     }
 
     @Test

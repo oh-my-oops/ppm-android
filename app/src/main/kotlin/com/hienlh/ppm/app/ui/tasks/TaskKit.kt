@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.tasks
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -202,14 +204,18 @@ private fun sessionTone(tokens: ThemeTokens, tone: String): Color = when (tone) 
 @Composable
 internal fun SessionChip(working: TaskWorkingSession, check: TaskCheckSummary?, onClick: (sessionId: String?) -> Unit) {
     val tokens = LocalPpmTokens.current
+    // On a phone the chip row's 26 dp, at least 44 dp wide; a touch smaller than 48 dp is still
+    // taken by Compose's minimum touch target, so its press stays thumb-sized.
+    val phone = LocalPpmMobile.current
     val view = sessionChipView(working, check, System.currentTimeMillis())
     val color = sessionTone(tokens, view.tone)
     val shape = RoundedCornerShape(50)
+    val text = if (phone) 12.5f else 11f
     Row(
-        Modifier.heightIn(min = 20.dp).clip(shape)
+        Modifier.heightIn(min = if (phone) 26.dp else 20.dp).widthIn(min = if (phone) 44.dp else 0.dp).clip(shape)
             .then(if (view.tone == "none") Modifier.border(1.dp, tokens.border.color, shape) else Modifier.background(tokens.panel2.color, shape))
             .ppmClickable(shape = shape, onClickLabel = view.title) { onClick(view.sessionId) }
-            .padding(horizontal = 6.dp, vertical = 1.dp)
+            .padding(horizontal = if (phone) 8.dp else 6.dp, vertical = 1.dp)
             .semantics { contentDescription = view.title }
             .testTag("task-session-chip"),
         verticalAlignment = Alignment.CenterVertically,
@@ -217,8 +223,8 @@ internal fun SessionChip(working: TaskWorkingSession, check: TaskCheckSummary?, 
     ) {
         if (view.tone != "none") Box(Modifier.size(6.dp).clip(CircleShape).background(color))
         else PpmIcon(ProductIcon.Plus, 11.dp, color)
-        T(view.label, 11f, if (view.tone == "none") tokens.text2.color else tokens.text.color, modifier = Modifier.weight(1f, fill = false))
-        view.detail?.let { T(it, 11f, color) }
+        T(view.label, text, if (view.tone == "none") tokens.text2.color else tokens.text.color, modifier = Modifier.weight(1f, fill = false))
+        view.detail?.let { T(it, text, color) }
     }
 }
 

@@ -108,7 +108,7 @@ fun sendPlan(cards: List<AssistantCard>, picks: Map<String, DecisionPick>): List
 
 fun isStaleForReply(card: AssistantCard, now: Long): Boolean = now - card.createdAt > STALE_REPLY_MS
 
-/** The answer in a few words, as the review step and a sent tab name it. */
+/** The answer in a few words, as the review step and the line after a send name it. */
 fun answerLabel(card: AssistantCard, answer: DecisionAnswer): String = when (answer) {
     is DecisionAnswer.Choose -> "Chose “${card.payload.options.firstOrNull { it.id == answer.optionId }?.label ?: answer.optionId}”"
     is DecisionAnswer.Ok -> card.payload.draft?.let { "OK — send the draft to ${escapeHiddenCharacters(it.to)}" } ?: "OK — go ahead"
@@ -124,7 +124,11 @@ fun answerLabel(card: AssistantCard, answer: DecisionAnswer): String = when (ans
 fun projectCounts(cards: List<AssistantCard>): String =
     cards.groupingBy { it.projectName ?: "Assistant" }.eachCount().entries.joinToString(" · ") { "${it.key} ${it.value}" }
 
-/** The order the set's tabs keep: new cards at the end, gone ones dropped unless kept. */
+/**
+ * The order the set's tabs keep: the order it had, with cards that arrived since added at the end
+ * (a new card never moves the tab the user is on), and ids that are neither waiting nor kept (a
+ * card being sent from here) dropped.
+ */
 fun nextTabOrder(previous: List<String>, waitingInOrder: List<String>, keep: Set<String>): List<String> {
     val waiting = waitingInOrder.toSet()
     val kept = previous.filter { it in waiting || it in keep }.toMutableList()
@@ -132,6 +136,62 @@ fun nextTabOrder(previous: List<String>, waitingInOrder: List<String>, keep: Set
     for (id in waitingInOrder) if (known.add(id)) kept += id
     return kept
 }
+
+/**
+ * The set's tabs (`decisionTabs`): every card that still waits, plus a card whose answer is on its
+ * way from here. That one leaves the waiting list the moment the server marks it answered, before
+ * the answer comes back, and keeps its tab until the send says how it went (a failed forward puts
+ * it back). A card answered anywhere else — Telegram, another window, dismissed, closed by its
+ * manager — is simply gone: what happened to it is told where the conversation is, never in the set.
+ */
+fun decisionTabs(
+    order: List<String>,
+    waiting: List<AssistantCard>,
+    inFlight: Map<String, AssistantCard>,
+    scope: (AssistantCard) -> Boolean,
+): List<AssistantCard> {
+    val byId = waiting.associateBy { it.id }
+    val tabs = mutableListOf<AssistantCard>()
+    val placed = HashSet<String>()
+    for (id in order) {
+        val card = byId[id] ?: inFlight[id]
+        if (card != null && id !in placed && scope(card)) tabs += card
+        placed += id
+    }
+    // The order catches up a moment later; a card shown before that still gets its tab.
+    for (card in waiting) if (card.id !in placed && scope(card)) {
+        tabs += card
+        placed += card.id
+    }
+    return tabs
+}
+
+/**
+ * Which tab is open (`activeTabIndex`). The card the user chose while it is still there; else the
+ * tab now standing where the open one stood — the next waiting card, or the last one when it was at
+ * the end — so a card answered elsewhere under the user's eyes moves them on rather than back to
+ * the start; else (a set just shown) the first. -1 with no tab.
+ */
+fun activeTabIndex(tabIds: List<String>, activeId: String?, lastIndex: Int): Int {
+    if (tabIds.isEmpty()) return -1
+    val at = activeId?.let(tabIds::indexOf) ?: -1
+    if (at >= 0) return at
+    if (activeId == null) return 0
+    return lastIndex.coerceAtLeast(0).coerceAtMost(tabIds.size - 1)
+}
+
+/** The next card after [fromId] that still waits (not being sent), wrapping round; null when none. */
+fun nextWaitingTab(tabIds: List<String>, fromId: String, sending: Set<String>): String? {
+    val at = tabIds.indexOf(fromId)
+    for (i in 1..tabIds.size) {
+        val next = tabIds[Math.floorMod(at + i, tabIds.size)]
+        if (next != fromId && next !in sending) return next
+    }
+    return null
+}
+
+/** One line about the last send from here, the card itself having left the set (`SetFlash`). */
+data class SetFlash(val sent: Boolean, val text: String)
 
 /** The routes a send goes through; the app passes its API client, a test a fake. */
 interface DecisionSendApi {

@@ -305,18 +305,24 @@ fun ManagerChatWaitingCards(model: AppModel, sessionId: String?) {
             .cssBorder(tokens.border.color, shape)
             .testTag("manager-waiting-cards"),
     ) {
+        // A phone names the card on one row at the chip row's 26 dp and opens it in a sheet, where the
+        // pager is; a tablet keeps the pager on the row.
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 44.dp).ppmClickable(shape = shape) { open = !open }.padding(start = 12.dp, end = 6.dp),
+            Modifier.fillMaxWidth().heightIn(min = if (mobile) 26.dp else 44.dp).ppmClickable(shape = shape) { open = !open }.padding(start = 12.dp, end = 6.dp)
+                .testTag("manager-waiting-toggle"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(Modifier.size(24.dp).background(tokens.error.opacity(0.1).color, CircleShape), contentAlignment = Alignment.Center) {
-                PpmIcon(ProductIcon.BellRing, 14.dp, tokens.error.color)
+            Box(Modifier.size(if (mobile) 20.dp else 24.dp).background(tokens.error.opacity(0.1).color, CircleShape), contentAlignment = Alignment.Center) {
+                PpmIcon(ProductIcon.BellRing, if (mobile) 12.dp else 14.dp, tokens.error.color)
             }
             BasicText(WAITING_LABEL, style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color))
-            WaitingBadge(entries.size)
+            // Counts cards, not entries: the set of decisions is one entry holding several.
+            Box(Modifier.testTag("manager-waiting-count")) { WaitingBadge(mine.size) }
             BasicText(if (mobile || !open) summary else "", Modifier.weight(1f), style = ppmText(12f).copy(color = tokens.text2.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (entries.size > 1) {
+            if (mobile) {
+                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) { PpmIcon(ProductIcon.ChevronUp, 16.dp, tokens.text2.color) }
+            } else if (entries.size > 1) {
                 HeadIconButton(ProductIcon.ChevronLeft, "Previous waiting card", { step(-1) })
                 BasicText("${index + 1}/${entries.size}", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
                 HeadIconButton(ProductIcon.ChevronRight, "Next waiting card", { step(1) })
@@ -330,8 +336,20 @@ fun ManagerChatWaitingCards(model: AppModel, sessionId: String?) {
         }
     }
     if (mobile && open) {
-        AssistantSheet(title = WAITING_LABEL, onDismiss = { open = false }, subtitle = if (entries.size > 1) "${index + 1}/${entries.size}" else null) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp)) { body() }
+        AssistantSheet(title = WAITING_LABEL, onDismiss = { open = false }) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp)) {
+                // The sheet's head: how many cards wait, and the pager through the entries.
+                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    WaitingBadge(mine.size)
+                    Spacer(Modifier.weight(1f))
+                    if (entries.size > 1) {
+                        HeadIconButton(ProductIcon.ChevronLeft, "Previous waiting card", { step(-1) })
+                        BasicText("${index + 1}/${entries.size}", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
+                        HeadIconButton(ProductIcon.ChevronRight, "Next waiting card", { step(1) })
+                    }
+                }
+                body()
+            }
         }
     }
 }

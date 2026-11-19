@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -220,7 +221,10 @@ fun TaskPeekHost(model: AppModel, target: TaskTarget) {
     }
 }
 
-/** A task's quick view: code and title, the fields a glance ends in changing, the links, Open chat and the full page. */
+/**
+ * A task's quick view: code and title, the fields a glance ends in changing, the links, Open chat (a
+ * chat the task was handed to), Ask manager (the project's manager chat) and the full page.
+ */
 @Composable
 internal fun ColumnScope.TaskPeekBody(
     model: AppModel,
@@ -265,18 +269,36 @@ internal fun ColumnScope.TaskPeekBody(
         }
     }
     Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.borderSoft.color))
-    Row(Modifier.fillMaxWidth().padding(horizontal = if (sheet) 12.dp else 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        val sid = chat?.sessionId
-        PillButton("Open chat", primary = false, enabled = sid != null && chat.tone != "gone", icon = ProductIcon.MessageCircle, modifier = Modifier.testTag("task-peek-chat")) {
-            if (task != null && sid != null && chat.tone != "gone") {
-                onLeave()
-                actions.openChat(task, sid)
+    // Open chat only for a chat the task was handed to; the manager chat is Ask manager's (`taskChatButtons`).
+    val buttons = task?.let { model.tasks.chatButtons(it) }
+    BoxWithConstraints(Modifier.fillMaxWidth().testTag("task-peek-footer")) {
+        // Both beside the page button do not fit a narrow footer with their icons: below 350 dp the
+        // two drop their icons and keep their whole words.
+        val bare = buttons?.crowded == true && maxWidth < 350.dp
+        Row(Modifier.fillMaxWidth().padding(horizontal = if (sheet) 12.dp else 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            buttons?.openChat?.let { open ->
+                PillButton("Open chat", primary = false, enabled = chat?.tone != "gone", icon = ProductIcon.MessageCircle.takeUnless { bare }, modifier = Modifier.testTag("task-peek-chat")) {
+                    if (task != null && chat?.tone != "gone") {
+                        onLeave()
+                        actions.openChat(task, open.sessionId)
+                    }
+                }
             }
+            if (buttons?.askManager != null) {
+                // A manager chat working on the task that was deleted: nothing to ask.
+                val gone = buttons.openChat == null && chat?.tone == "gone"
+                PillButton("Ask manager", primary = false, enabled = !gone, icon = ProductIcon.MessageSquare.takeUnless { bare }, modifier = Modifier.testTag("task-peek-ask-manager")) {
+                    if (task != null && !gone) {
+                        onLeave()
+                        actions.askManager(task)
+                    }
+                }
+            }
+            Box(Modifier.weight(1f))
+            val page = task?.target() ?: target
+            if (sheet) PillButton("Full screen", icon = ProductIcon.Maximize2, modifier = Modifier.testTag("task-peek-page")) { onOpenPage(page) }
+            else PillButton("Open in window", icon = ProductIcon.AppWindow, modifier = Modifier.testTag("task-peek-page")) { onOpenPage(page) }
         }
-        Box(Modifier.weight(1f))
-        val page = task?.target() ?: target
-        if (sheet) PillButton("Full screen", icon = ProductIcon.Maximize2, modifier = Modifier.testTag("task-peek-page")) { onOpenPage(page) }
-        else PillButton("Open in window", icon = ProductIcon.AppWindow, modifier = Modifier.testTag("task-peek-page")) { onOpenPage(page) }
     }
 }
 

@@ -9,6 +9,13 @@ import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -97,8 +104,8 @@ class AssistantUiTest {
         "PUT /api/assistant/managers/web" to "{}",
     )
 
-    private fun start(open: List<String>): Pair<AppModel, AssistantStore> {
-        val routes = answers(open)
+    private fun start(open: List<String>, extra: Map<String, String> = emptyMap()): Pair<AppModel, AssistantStore> {
+        val routes = answers(open) + extra
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val line = request.method + " " + request.target
@@ -290,4 +297,112 @@ class AssistantUiTest {
     @Config(qualifiers = PHONE)
     @Test
     fun `the reply bar on a phone sends the words to the manager chat`() = checkReplyBar(mobile = true)
+
+    private fun height(node: SemanticsNodeInteraction): Dp = node.getUnclippedBoundsInRoot().height
+
+    /** A control's whole box: its press area sits inside a 1 dp CSS border, which takes layout space as in CSS. */
+    private fun boxHeight(node: SemanticsNodeInteraction): Dp = height(node) + 2.dp
+
+    /** The set's tabs are the waiting cards: one sent leaves at once, a line says so and the next opens (web 1fe1af822, e5ab663a1). */
+    private fun checkSentCardLeaves(mobile: Boolean) {
+        val (model, store) = start(listOf(decision, decision2))
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = mobile) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { DecisionSetView(model, store) }
+            }
+        }
+        waitRead(store)
+        node("2 decisions waiting").performClick()
+        composeRule.onNodeWithTag("assistant-decision-tab-d1").performClick()
+        composeRule.onNodeWithTag("assistant-decision-tile-ok").performScrollTo().performClick()
+        composeRule.onNodeWithTag("assistant-decision-send-one").performScrollTo().performClick()
+        waitAsked("POST /api/assistant/cards/d1/ok")
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasTestTag("assistant-decision-tab-d1")).fetchSemanticsNodes().isEmpty() }
+        node("1 decision waiting").assertIsDisplayed()
+        composeRule.onNodeWithTag("assistant-decision-tab-d2").assertIsDisplayed()
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasTestTag("assistant-decision-flash")).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNode(hasText("Sent “Title d1”", substring = true), useUnmergedTree = true).assertIsDisplayed()
+        assertEquals("Send all answered (0/1)", composeRule.onNodeWithTag("assistant-decision-send-all").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString { it.text })
+        assertTrue(store.view.value.decisions.picks.isEmpty())
+    }
+
+    @Test
+    fun `the decision set on a tablet drops a sent card at once and says it was sent`() = checkSentCardLeaves(mobile = false)
+
+    @Config(qualifiers = PHONE)
+    @Test
+    fun `the decision set on a phone drops a sent card at once and says it was sent`() = checkSentCardLeaves(mobile = true)
+
+    /** The manager chat's Waiting bar counts its cards, not its entries: two decisions are one entry and a 2 (web a6ab212c2). */
+    private fun checkWaitingBar(mobile: Boolean): AppModel {
+        val (model, store) = start(listOf(decision, decision2), extra = mapOf("GET /api/assistant/managers" to """{"managers":[{"projectName":"web","projectPath":"/w","sessionId":"m1","providerId":"claude","phase":"idle","waiting":5}]}"""))
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = mobile) { Column { ManagerChatWaitingCards(model, "m1") } }
+        }
+        waitRead(store)
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasTestTag("manager-waiting-toggle")).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNode(hasText("2") and hasAnyAncestor(hasTestTag("manager-waiting-count")), useUnmergedTree = true).assertExists()
+        return model
+    }
+
+    @Test
+    fun `the waiting bar on a tablet counts each decision and keeps its 44 dp row`() {
+        checkWaitingBar(mobile = false)
+        assertEquals(44.dp, height(composeRule.onNodeWithTag("manager-waiting-toggle")))
+    }
+
+    @Config(qualifiers = PHONE)
+    @Test
+    fun `the waiting bar on a phone counts each decision on a 26 dp row and opens a sheet with the count`() {
+        checkWaitingBar(mobile = true)
+        composeRule.onNodeWithTag("manager-waiting-toggle").assertHeightIsEqualTo(26.dp)
+        composeRule.onNodeWithTag("manager-waiting-toggle").performClick()
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasTestTag("assistant-decision-set"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        // The row's badge and the sheet's head both say 2.
+        assertEquals(2, composeRule.onAllNodes(hasText("2") and hasAnyAncestor(hasTestTag("assistant-waiting-badge")), useUnmergedTree = true).fetchSemanticsNodes().size)
+    }
+
+    /** The filter pill and the manager chips: 26 dp on a phone, 28 on a tablet (web 6fe4d8a15). */
+    private fun checkChipRow(mobile: Boolean, expected: Dp) {
+        showTab(mobile, listOf(decision, done))
+        composeRule.onNodeWithTag("assistant-manager-chip-web").assertHeightIsEqualTo(expected)
+        assertEquals(expected, boxHeight(composeRule.onNode(hasText("Filter: All") and hasClickAction())))
+    }
+
+    @Test
+    fun `the chip row on a tablet is 28 dp`() = checkChipRow(mobile = false, expected = 28.dp)
+
+    @Config(qualifiers = PHONE)
+    @Test
+    fun `the chip row on a phone is 26 dp`() = checkChipRow(mobile = true, expected = 26.dp)
+
+    private val chose = card("c1", "needs_decision", payload = """{"options":[{"id":"a","label":"Acme"},{"id":"b","label":"Globex"}]}""")
+
+    /** A card's buttons are the chip row's height on a phone; a card's choices at least 28 dp, 26 on a phone. */
+    private fun checkCardSizes(mobile: Boolean) {
+        val (model, store) = start(listOf(decision))
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = mobile) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    StreamCard(model, AssistantCard.from(WireJson.parse(decision))!!)
+                    StreamCard(model, AssistantCard.from(WireJson.parse(chose))!!)
+                }
+            }
+        }
+        waitRead(store)
+        // OK is filled, with no border: its press area is its whole box.
+        assertEquals(if (mobile) 26.dp else 32.dp, height(composeRule.onNode(hasText("OK") and hasClickAction())))
+        assertEquals(if (mobile) 26.dp else 32.dp, boxHeight(composeRule.onAllNodes(hasText("Reply") and hasClickAction())[0]))
+        for (id in listOf("a", "b")) {
+            val h = boxHeight(composeRule.onNodeWithTag("assistant-card-choice-$id"))
+            assertTrue("choice $id $h", h >= (if (mobile) 26.dp else 28.dp) && h < 44.dp)
+        }
+    }
+
+    @Test
+    fun `card buttons on a tablet keep 32 dp and choices are at least 28`() = checkCardSizes(mobile = false)
+
+    @Config(qualifiers = PHONE)
+    @Test
+    fun `card buttons on a phone are 26 dp and choices at least 26`() = checkCardSizes(mobile = true)
 }

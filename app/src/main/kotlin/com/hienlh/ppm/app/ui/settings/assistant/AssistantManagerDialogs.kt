@@ -17,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -47,7 +48,10 @@ import com.hienlh.ppm.protocol.ManagerChatSummary
 import com.hienlh.ppm.protocol.ManagerRulesView
 import com.hienlh.ppm.protocol.RULES_FILE_MAX_BYTES
 import com.hienlh.ppm.protocol.SessionInfo
+import com.hienlh.ppm.state.assistant.MANAGER_DELEGATE_RULE_PROSE
 import com.hienlh.ppm.state.assistant.RULES_GUARD_HINT
+import com.hienlh.ppm.state.assistant.hasManagerDelegateRule
+import com.hienlh.ppm.state.assistant.withManagerDelegateRule
 import com.hienlh.ppm.state.assistant.defaultManagerTitle
 import com.hienlh.ppm.state.assistant.managerModeLabel
 import com.hienlh.ppm.state.assistant.templateToStore
@@ -251,6 +255,11 @@ internal fun ManagerRulesDialog(model: AppModel, api: ApiClient, projectName: St
                     run(if (approve) "Change approved" else "Change reverted", close = false) { api.decideManagerRules(projectName, approve, hash) }
                 }
             }
+            if (!hasManagerDelegateRule(r.inForce)) {
+                NewDefaultRule(busy, dirty = text != r.inForce) {
+                    run("Rule added", close = false) { api.putManagerRules(projectName, withManagerDelegateRule(r.inForce)) }
+                }
+            }
             RulesTextarea(".ppm/manager.md", text, !busy, "asst-rules-text") { text = it }
             SizeCounter(bytes)
             if (r.addedSince.isNotEmpty()) {
@@ -266,6 +275,39 @@ internal fun ManagerRulesDialog(model: AppModel, api: ApiClient, projectName: St
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * A default rule PPM's template gained after this project's rules were seeded. PPM never writes it
+ * into the user's file by itself; Add saves it as the user's own edit. Held back while the text has
+ * unsaved edits, which Add would otherwise either save unseen or throw away.
+ */
+@Composable
+private fun NewDefaultRule(busy: Boolean, dirty: Boolean, onAdd: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        Modifier.fillMaxWidth().background(tokens.panel2.color, shape).cssBorder(tokens.border.color, shape).padding(12.dp).testTag("asst-new-default-rule"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BasicText("PPM has a new default rule", style = ppmText(14f, FontWeight.Medium).copy(color = tokens.text.color))
+        BasicText(
+            "New manager chats start with it. This project’s rules were written before it, so they do not have it yet.",
+            style = asstNote().copy(color = tokens.text2.color),
+        )
+        val inner = RoundedCornerShape(6.dp)
+        // As a paragraph: the file's own line breaks, wrapped again at this width, read as ragged fragments.
+        BasicText(
+            MANAGER_DELEGATE_RULE_PROSE,
+            Modifier.fillMaxWidth().background(tokens.panel.color, inner).cssBorder(tokens.border.color, inner).padding(horizontal = 12.dp, vertical = 8.dp)
+                .testTag("asst-new-default-rule-text"),
+            style = ppmText(12f, lineHeight = 19f).copy(color = tokens.text2.color),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            CardButton("Add", onAdd, Modifier.testTag("asst-new-default-rule-add"), icon = ProductIcon.Plus, variant = CardButtonVariant.PRIMARY, enabled = !busy && !dirty)
+            if (dirty) BasicText("Save or undo your edits first.", style = ppmText(12f).copy(color = tokens.text3.color))
         }
     }
 }
