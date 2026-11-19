@@ -262,6 +262,7 @@ private fun collabHeading(input: SessionCollabApprovalInput): String = when (inp
     is SessionCollabApprovalInput.Create -> "The AI wants to create a session"
     is SessionCollabApprovalInput.PairLimit -> "These sessions reached their message limit"
     is SessionCollabApprovalInput.Escalation -> "The AI wants to message a session with more rights"
+    is SessionCollabApprovalInput.Message -> "The Assistant wants to message a chat in ${input.projectName}"
 }
 
 /** How long a text is, as the card states it (`lengthLabel`). */
@@ -274,7 +275,7 @@ internal fun lengthLabel(text: String): String {
 
 private val MODE_LABELS = mapOf("plan" to "Plan", "default" to "Ask", "acceptEdits" to "Accept edits", "bypassPermissions" to "Bypass permissions")
 
-private fun modeLabel(mode: String) = MODE_LABELS[mode] ?: mode
+internal fun modeLabel(mode: String) = MODE_LABELS[mode] ?: mode
 
 /** `providerLabel` in session-collab-client.ts. */
 internal fun providerLabel(providerId: String?): String = when (providerId) {
@@ -367,6 +368,7 @@ private fun CollabApprovalBody(input: SessionCollabApprovalInput) {
             },
             style = primary,
         )
+        is SessionCollabApprovalInput.Message -> CollabMessageBody(input)
         is SessionCollabApprovalInput.Escalation -> {
             BasicText(
                 buildAnnotatedString {
@@ -394,7 +396,7 @@ private fun CollabApprovalBody(input: SessionCollabApprovalInput) {
  * buttons off screen (`max-h-60`). Nothing is cut.
  */
 @Composable
-private fun WholeText(label: String, text: String) {
+internal fun WholeText(label: String, text: String) {
     val tokens = LocalPpmTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         BasicText("$label (${lengthLabel(text)}):", style = xs.copy(color = tokens.text3.color))

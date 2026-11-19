@@ -381,13 +381,13 @@ enum class SessionCollabAnswer(val wire: String) {
 
 /**
  * What a session tool's card asks (`SessionCollabApprovalInput` in `shared/session-collab.ts`):
- * creating a session, messaging past the pair limit, or messaging a session with more rights.
- * Every title and text came from an AI.
+ * creating a session, messaging past the pair limit, messaging a session with more rights, or the
+ * PPM Assistant messaging one of the user's chats. Every title and text came from an AI.
  */
 sealed interface SessionCollabApprovalInput {
     /** The answers a card of this kind offers (`sessionCollabAnswersFor`). */
     val answers: List<SessionCollabAnswer>
-        get() = if (this is PairLimit) listOf(SessionCollabAnswer.ALLOW_ONCE, SessionCollabAnswer.DENY) else SessionCollabAnswer.entries
+        get() = if (this is PairLimit || this is Message) listOf(SessionCollabAnswer.ALLOW_ONCE, SessionCollabAnswer.DENY) else SessionCollabAnswer.entries
 
     data class Create(val title: String, val providerId: String, val model: String?, val task: String, val depth: Int) : SessionCollabApprovalInput
 
@@ -401,6 +401,19 @@ sealed interface SessionCollabApprovalInput {
         val message: String,
     ) : SessionCollabApprovalInput
 
+    /**
+     * The PPM Assistant asks to message one of the user's chats (`SessionCollabMessageApproval`). The
+     * chat works on it in its own mode, which the card names. Answered once or not at all.
+     */
+    data class Message(
+        val targetSessionId: String,
+        val targetTitle: String,
+        val projectName: String,
+        val providerId: String,
+        val permissionMode: String,
+        val message: String,
+    ) : SessionCollabApprovalInput
+
     companion object {
         /** An approval's input narrowed to a session tool's card, or null (`sessionCollabApprovalInput`). */
         fun from(tool: String, input: JsonElement?): SessionCollabApprovalInput? {
@@ -411,6 +424,7 @@ sealed interface SessionCollabApprovalInput {
                 "create" -> Create(text("title"), text("providerId"), input["model"].string, text("task"), number("depth"))
                 "pair_limit" -> PairLimit(text("targetSessionId"), text("targetTitle"), number("sent"), number("limit"), number("grant"))
                 "escalation" -> Escalation(text("targetSessionId"), text("targetTitle"), text("senderMode"), text("targetMode"), text("message"))
+                "message" -> Message(text("targetSessionId"), text("targetTitle"), text("projectName"), text("providerId"), text("permissionMode"), text("message"))
                 else -> null
             }
         }
