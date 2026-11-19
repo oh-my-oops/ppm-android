@@ -501,8 +501,9 @@ private fun SpecDocumentPane(
             }
         }
     }
+    // The card lays its content out in a column, where weight(1f) would take the pane's whole height.
     BottomActionCard(applyWindowInsets = LocalPpmMobile.current) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             BasicText(
                 SpecWorkflowCopy.phaseState(ph),
                 style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
@@ -535,8 +536,9 @@ private fun SpecDocumentPane(
 private fun SpecRunBar(view: SpecView, busy: String?, onRunAll: () -> Unit, onStop: () -> Unit) {
     val tokens = LocalPpmTokens.current
     if (!view.running && !view.interrupted && view.allDone) return
+    // The card lays its content out in a column, where weight(1f) would take the pane's whole height.
     BottomActionCard(applyWindowInsets = LocalPpmMobile.current) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val run = view.run
             if (view.running && run != null) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

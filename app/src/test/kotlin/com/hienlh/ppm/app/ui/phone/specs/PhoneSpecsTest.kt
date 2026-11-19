@@ -2,6 +2,7 @@ package com.hienlh.ppm.app.ui.phone.specs
 
 import android.app.Application
 import android.content.Context
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -160,6 +161,7 @@ class PhoneSpecsTest {
         showSpec(model)
 
         waitForTag("phone-spec-document")
+        composeRule.onNodeWithTag("phone-spec-document").assertIsDisplayed()
         composeRule.onNodeWithText("Submitted by the AI · waiting for you", useUnmergedTree = true).assertExists()
 
         composeRule.onNodeWithTag("phone-spec-request-changes").performClick()
@@ -198,7 +200,9 @@ class PhoneSpecsTest {
         showSpec(model(spec))
 
         waitForTag("phone-spec-run-all")
-        composeRule.onNodeWithTag("phone-spec-task:1").assertExists()
+        // Displayed, not only present: the Run all bar once took the pane's whole height and hid every task.
+        composeRule.onNodeWithTag("phone-spec-task:1").assertIsDisplayed()
+        composeRule.onNodeWithTag("phone-spec-task:2").assertIsDisplayed()
         composeRule.onNodeWithTag("phone-spec-run-all").performClick()
         waitForRequest(spec, "POST /api/project/ppm/specs/login/run")
         waitForTag("phone-spec-stop")
