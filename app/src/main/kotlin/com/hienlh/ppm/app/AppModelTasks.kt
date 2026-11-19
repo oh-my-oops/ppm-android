@@ -16,6 +16,11 @@ import com.hienlh.ppm.client.taskStartChat
 import com.hienlh.ppm.client.tasksList
 import com.hienlh.ppm.client.tasksNotifyManager
 import com.hienlh.ppm.protocol.TaskDto
+import com.hienlh.ppm.state.tasks.TaskChatButtons
+import com.hienlh.ppm.state.tasks.TaskChatRef
+import com.hienlh.ppm.state.tasks.TaskManagerLike
+import com.hienlh.ppm.state.tasks.taskChatButtons
+import com.hienlh.ppm.state.tasks.taskManagerChat
 import com.hienlh.ppm.protocol.TaskProjectSettings
 import com.hienlh.ppm.protocol.TaskProjectSummary
 import com.hienlh.ppm.protocol.TaskWriteResult
@@ -235,6 +240,14 @@ class AppTasks internal constructor(private val model: AppModel) {
     /** The project's manager chat, if it has one. */
     fun managerOf(project: String): ManagerChatRef? = managers?.firstOrNull { it.projectName == project }
 
+    private fun managerList(): List<TaskManagerLike>? = managers?.map { TaskManagerLike(it.projectName, it.sessionId, it.providerId) }
+
+    /** The task's manager chat: the listed one, else the task's own working session while the list loads (`taskManagerChat`). */
+    fun managerChatOf(task: TaskDto): TaskChatRef? = taskManagerChat(task, managerList())
+
+    /** Open chat and Ask manager, one button per chat (`taskChatButtons`). */
+    fun chatButtons(task: TaskDto): TaskChatButtons = taskChatButtons(task, managerList())
+
     /** The project [sessionId] is the manager chat of, or null (`managerProjectOf`). */
     fun managerProjectOf(sessionId: String?): String? = sessionId?.let { id -> managers?.firstOrNull { it.sessionId == id }?.projectName }
 
@@ -414,7 +427,7 @@ class AppTasks internal constructor(private val model: AppModel) {
 
     /** "Ask manager": opens the manager chat with the task in its composer, nothing sent. */
     fun askManager(task: TaskDto) {
-        val manager = managerOf(task.project)
+        val manager = managerChatOf(task)
         if (manager == null) {
             info("${task.project} has no manager chat yet")
             return

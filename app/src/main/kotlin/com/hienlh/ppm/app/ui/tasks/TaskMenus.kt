@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
@@ -92,12 +93,22 @@ internal fun pickDay(context: Context, initial: String?, min: String?, onPick: (
 
 /** A menu row: icon, label, its detail at the right; 44px on a phone. */
 @Composable
-internal fun TaskMenuRow(label: String, icon: ImageVector?, modifier: Modifier = Modifier, detail: String? = null, enabled: Boolean = true, accent: Boolean = false, onClick: () -> Unit) {
+internal fun TaskMenuRow(
+    label: String,
+    icon: ImageVector?,
+    modifier: Modifier = Modifier,
+    detail: String? = null,
+    enabled: Boolean = true,
+    accent: Boolean = false,
+    /** A phone row's least height: 44 dp in menus, the chip row's 26 dp in the long-press sheet. */
+    phoneMinHeight: Dp = 44.dp,
+    onClick: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val shape = RoundedCornerShape(6.dp)
     Row(
-        modifier.fillMaxWidth().heightIn(min = if (mobile) 44.dp else 28.dp).clip(shape)
+        modifier.fillMaxWidth().heightIn(min = if (mobile) phoneMinHeight else 28.dp).clip(shape)
             .ppmClickable(enabled = enabled, shape = shape, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -226,13 +237,14 @@ internal fun TaskStatusGrid(project: String, statuses: List<TaskStatusDef>, curr
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (s in row) {
                     val on = s.id == currentId
-                    val shape = RoundedCornerShape(12.dp)
+                    val shape = RoundedCornerShape(8.dp)
+                    // At least the chip row's 26 dp, taller for a two-line name.
                     Row(
-                        Modifier.weight(1f).heightIn(min = 48.dp).clip(shape)
+                        Modifier.weight(1f).heightIn(min = 26.dp).clip(shape)
                             .border(1.dp, if (on) tokens.accentWashBorder.color else tokens.borderSoft.color, shape)
                             .background(if (on) tokens.accentWash.color else tokens.panel.color)
                             .ppmClickable(shape = shape) { onPick(s.id) }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
                             .testTag("status-${s.id}"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -246,6 +258,9 @@ internal fun TaskStatusGrid(project: String, statuses: List<TaskStatusDef>, curr
         }
     }
 }
+
+/** The long-press sheet's rows: the chip row's 26 dp, the user's pick over the 44 dp rule. */
+private val SHEET_ROW = 26.dp
 
 /**
  * The sheet a long-press on a phone task row opens: the statuses, Urgency, Reorder… (Move up /
@@ -276,14 +291,14 @@ internal fun TaskRowActionSheet(
             }
             TaskStatusGrid(task.project, statuses.orEmpty(), task.statusId) { id -> act { actions.setStatus(task, id, statuses) } }
             Box(Modifier.padding(vertical = 8.dp).fillMaxWidth().heightIn(min = 1.dp).background(tokens.borderSoft.color))
-            TaskMenuRow("Urgency", ProductIcon.Zap.vector, detail = urgencyLabel(task.effectiveUrgency)) { open = if (open == "urgency") null else "urgency" }
+            TaskMenuRow("Urgency", ProductIcon.Zap.vector, phoneMinHeight = SHEET_ROW, detail = urgencyLabel(task.effectiveUrgency)) { open = if (open == "urgency") null else "urgency" }
             if (open == "urgency") {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (u in TaskConst.URGENCIES) {
                         val on = task.urgency == u
-                        val shape = RoundedCornerShape(12.dp)
+                        val shape = RoundedCornerShape(8.dp)
                         Box(
-                            Modifier.weight(1f).heightIn(min = 44.dp).clip(shape)
+                            Modifier.weight(1f).heightIn(min = 26.dp).clip(shape)
                                 .border(1.dp, if (on) tokens.accentWashBorder.color else tokens.borderSoft.color, shape)
                                 .background(if (on) tokens.accentWash.color else tokens.panel.color)
                                 .ppmClickable(shape = shape) { act { actions.moveUrgency(task, u) } }
@@ -293,26 +308,26 @@ internal fun TaskRowActionSheet(
                     }
                 }
             }
-            TaskMenuRow("Reorder…", ProductIcon.ArrowUpDown.vector) { open = if (open == "reorder") null else "reorder" }
+            TaskMenuRow("Reorder…", ProductIcon.ArrowUpDown.vector, phoneMinHeight = SHEET_ROW) { open = if (open == "reorder") null else "reorder" }
             if (open == "reorder") {
                 Column(Modifier.padding(start = 32.dp)) {
-                    TaskMenuRow("Move up", ProductIcon.ArrowUp.vector, enabled = up != null) { up?.let { act { actions.reorder(task, it.id, null) } } }
-                    TaskMenuRow("Move down", ProductIcon.ArrowDown.vector, enabled = down != null) { down?.let { act { actions.reorder(task, null, it.id) } } }
+                    TaskMenuRow("Move up", ProductIcon.ArrowUp.vector, phoneMinHeight = SHEET_ROW, enabled = up != null) { up?.let { act { actions.reorder(task, it.id, null) } } }
+                    TaskMenuRow("Move down", ProductIcon.ArrowDown.vector, phoneMinHeight = SHEET_ROW, enabled = down != null) { down?.let { act { actions.reorder(task, null, it.id) } } }
                     if (up == null && down == null) {
                         T("Order changes only among tasks of the same urgency, importance and project.", 12f, tokens.text3.color, maxLines = 3, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
                     }
                 }
             }
             if (task.baseGroup != "closed") {
-                TaskMenuRow("Snooze until…", ProductIcon.Moon.vector, detail = if (task.snoozed) snoozeBadgeText(task, localYmd()) else null) {
+                TaskMenuRow("Snooze until…", ProductIcon.Moon.vector, phoneMinHeight = SHEET_ROW, detail = if (task.snoozed) snoozeBadgeText(task, localYmd()) else null) {
                     open = if (open == "snooze") null else "snooze"
                 }
                 if (open == "snooze") {
                     Box(Modifier.padding(start = 32.dp, bottom = 8.dp)) { TaskSnoozeOptions(task, { p -> act { actions.snooze(task, p, announce = true) } }) }
                 }
             }
-            if (hasManager) TaskMenuRow("Ask manager about this", ProductIcon.MessageSquare.vector) { act { actions.askManager(task) } }
-            TaskMenuRow("Copy link", ProductIcon.Link.vector) { act { actions.copyLink(task) } }
+            if (hasManager) TaskMenuRow("Ask manager about this", ProductIcon.MessageSquare.vector, phoneMinHeight = SHEET_ROW) { act { actions.askManager(task) } }
+            TaskMenuRow("Copy link", ProductIcon.Link.vector, phoneMinHeight = SHEET_ROW) { act { actions.copyLink(task) } }
         }
     }
 }

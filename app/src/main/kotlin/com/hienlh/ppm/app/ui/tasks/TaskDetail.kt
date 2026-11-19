@@ -89,6 +89,7 @@ import com.hienlh.ppm.state.tasks.taskWaiting
 import com.hienlh.ppm.state.tasks.typeLabel
 import com.hienlh.ppm.state.tasks.viaText
 import com.hienlh.ppm.state.tasks.whenShort
+import com.hienlh.ppm.state.tasks.workingIsManager
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.design.vector
 import androidx.compose.ui.draw.alpha
@@ -170,10 +171,11 @@ fun TaskSheet(model: AppModel, taskId: String, project: String, onClose: () -> U
 @Composable
 fun TaskDetailView(model: AppModel, detail: TaskDetail, settings: TaskProjectSettings?, preview: Boolean, sheet: TaskSheetControls?, onBack: (() -> Unit)? = null) {
     val actions = rememberTaskActions(model)
-    val hasManager = model.tasks.managerOf(detail.task.project) != null
+    // The listed manager chat, else the task's own working session while the list loads.
+    val manager = model.tasks.managerChatOf(detail.task)
     var childOpen by remember { mutableStateOf(false) }
     var fieldsOpen by remember { mutableStateOf(false) }
-    val pieces = TaskPagePieces(model, detail, settings, actions, hasManager, onAddChild = { childOpen = true }, onManageFields = { fieldsOpen = true })
+    val pieces = TaskPagePieces(model, detail, settings, actions, manager != null, manager?.sessionId, onAddChild = { childOpen = true }, onManageFields = { fieldsOpen = true })
     if (LocalPpmMobile.current) TaskDetailPhone(pieces, sheet, onBack) else TaskDetailTablet(pieces, preview)
     if (childOpen) {
         TaskNewDialog(model, "project", detail.task.project, emptyList(), parent = detail.task, onDismiss = { childOpen = false }) { c ->
@@ -190,6 +192,8 @@ class TaskPagePieces(
     val settings: TaskProjectSettings?,
     val actions: TaskActions,
     val hasManager: Boolean,
+    /** The project's manager chat: a task handed to it by id is worked on by the manager all the same. */
+    val managerSessionId: String?,
     val onAddChild: () -> Unit,
     val onManageFields: () -> Unit,
 ) {
@@ -212,7 +216,7 @@ private fun TaskDetailTablet(p: TaskPagePieces, preview: Boolean) {
             HistoryTimeline(p, phone = false)
         }
         val aside: @Composable ColumnScope.() -> Unit = {
-            WorkingSessionBlock(p)
+            WorkingSessionBlock(p, phone = false)
             PropertiesPanel(p)
         }
         if (maxWidth >= 760.dp) {
@@ -456,11 +460,22 @@ private fun ResultCard(p: TaskPagePieces) {
             Modifier.fillMaxWidth().clip(shape).border(1.dp, tokens.success.color.copy(alpha = 0.3f), shape).background(tokens.success.color.copy(alpha = 0.05f)).padding(12.dp).testTag("task-card-result"),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // Who and when sits beside Edit, which keeps its width; on a tablet it is cut with "…", on a
+            // phone (no hover to read a cut line) it takes a line of its own under "Result" and wraps.
+            val meta = "${result.by} · ${whenShort(result.at)}"
+            val phone = LocalPpmMobile.current
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 PpmIcon(ProductIcon.CheckCircle2, 14.dp, tokens.success.color)
-                T("Result", 12f, tokens.text.color, weight = FontWeight.Medium)
-                T("${result.by} · ${whenShort(result.at)}", 12f, tokens.text3.color, modifier = Modifier.weight(1f))
-                LinkButton("Edit", icon = ProductIcon.Pencil) { editing = true }
+                if (phone) {
+                    Column(Modifier.weight(1f)) {
+                        T("Result", 12f, tokens.text.color, weight = FontWeight.Medium)
+                        T(meta, 12f, tokens.text3.color, maxLines = Int.MAX_VALUE, modifier = Modifier.testTag("task-result-meta"))
+                    }
+                } else {
+                    T("Result", 12f, tokens.text.color, weight = FontWeight.Medium)
+                    T(meta, 12f, tokens.text3.color, modifier = Modifier.weight(1f).testTag("task-result-meta"))
+                }
+                LinkButton("Edit", Modifier.testTag("task-result-edit"), icon = ProductIcon.Pencil) { editing = true }
             }
             T(result.text, 13f, tokens.text2.color, maxLines = 40)
         }
@@ -703,9 +718,16 @@ private fun HistoryRow(e: TaskHistoryItem, statuses: List<TaskStatusDef>?, membe
     }
 }
 
-/** The chat doing the task, its live state and the work check; Open chat, or Start chat. */
+/**
+ * The chat doing the task, its live state and the work check; Open chat, or Start chat.
+ *
+ * Open chat is for a chat the task was handed to. When the manager chat itself works on the task,
+ * opening it is Ask manager's job: on a phone (whose page has no other) the block shows Ask manager
+ * instead, on a tablet no button (the header has one), so two buttons never open the same chat.
+ * A phone also offers Ask manager under Open chat when the project has a manager chat.
+ */
 @Composable
-private fun WorkingSessionBlock(p: TaskPagePieces) {
+private fun WorkingSessionBlock(p: TaskPagePieces, phone: Boolean) {
     val tokens = LocalPpmTokens.current
     val task = p.task
     val working = task.workingSession
@@ -725,7 +747,7 @@ private fun WorkingSessionBlock(p: TaskPagePieces) {
         }
         return
     }
-    val manager = working.kind == "manager"
+    val manager = workingIsManager(task, p.managerSessionId)
     val live = when {
         view.tone == "stalled" -> "Stalled"
         view.tone == "finished" -> "Finished, no report"
@@ -755,7 +777,17 @@ private fun WorkingSessionBlock(p: TaskPagePieces) {
                 T(if (manager) "The project's manager chat · not handed to a child chat" else "Handed to this chat", 12f, tokens.text3.color, maxLines = 2)
             }
         }
-        PillButton("Open chat", enabled = s.state != "gone", icon = ProductIcon.ExternalLink, modifier = Modifier.fillMaxWidth().testTag("task-open-chat")) { p.actions.openChat(task, s.sessionId) }
+        val askHere = phone && p.hasManager
+        if (manager) {
+            if (askHere) {
+                PillButton("Ask manager", enabled = s.state != "gone", icon = ProductIcon.MessageSquare, modifier = Modifier.fillMaxWidth().testTag("task-working-ask-manager")) { p.actions.askManager(task) }
+            }
+        } else {
+            PillButton("Open chat", enabled = s.state != "gone", icon = ProductIcon.ExternalLink, modifier = Modifier.fillMaxWidth().testTag("task-open-chat")) { p.actions.openChat(task, s.sessionId) }
+            if (askHere) {
+                PillButton("Ask manager", primary = false, icon = ProductIcon.MessageSquare, modifier = Modifier.fillMaxWidth().testTag("task-working-ask-manager")) { p.actions.askManager(task) }
+            }
+        }
         LinkButton("Start a new chat for this task", Modifier.fillMaxWidth(), color = tokens.text3.color) { p.actions.startChat(task) }
     }
 }
@@ -986,7 +1018,7 @@ private fun TaskDetailPhone(p: TaskPagePieces, sheet: TaskSheetControls?, onBack
                 }
                 if (task.type == "decision" || task.decision != null) DecisionCard(p)
                 RemindersCard(p.model, task.id)
-                WorkingSessionBlock(p)
+                WorkingSessionBlock(p, phone = true)
                 ResultCard(p)
                 NotesCard(p)
                 LinksCard(p)
@@ -996,30 +1028,31 @@ private fun TaskDetailPhone(p: TaskPagePieces, sheet: TaskSheetControls?, onBack
                 HistoryTimeline(p, phone = true)
             }
         }
+        // The status and Done at the chip row's phone height, 26 dp (docs/design-guidelines.md rule 3).
         Row(Modifier.fillMaxWidth().background(tokens.panel.color).padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val shape = RoundedCornerShape(12.dp)
+            val shape = RoundedCornerShape(50)
             Row(
-                Modifier.weight(1f).height(48.dp).clip(shape).border(1.dp, tokens.border.color, shape).background(tokens.panel.color)
+                Modifier.weight(1f).height(26.dp).clip(shape).border(1.dp, tokens.border.color, shape).background(tokens.panel.color)
                     .ppmClickable(shape = shape, onClickLabel = "Status: ${task.statusName}. Change") { statusOpen = true }
                     .padding(horizontal = 12.dp).testTag("task-status-button"),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
             ) {
-                StatusGlyph(task.baseGroup, task.closedAs, 16.dp)
-                T(task.statusName, 15f, tokens.text.color, modifier = Modifier.weight(1f, fill = false))
-                PpmIcon(ProductIcon.ChevronDown, 16.dp, tokens.text3.color)
+                StatusGlyph(task.baseGroup, task.closedAs, 14.dp)
+                T(task.statusName, 12.5f, tokens.text.color, modifier = Modifier.weight(1f, fill = false))
+                PpmIcon(ProductIcon.ChevronDown, 14.dp, tokens.text3.color)
             }
             Row(
-                Modifier.weight(1f).height(48.dp).clip(shape)
+                Modifier.weight(1f).height(26.dp).clip(shape)
                     .then(if (closed) Modifier.border(1.dp, tokens.accent.color, shape) else Modifier.background(tokens.accent.color))
                     .ppmClickable(shape = shape) { if (closed) p.actions.reopen(task) else p.actions.close(task) }
                     .testTag(if (closed) "task-reopen" else "task-mark-done"),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
             ) {
                 val fg = if (closed) tokens.accent.color else tokens.accentFg.color
-                PpmIcon(if (closed) ProductIcon.RotateCcw else ProductIcon.Check, 18.dp, fg)
-                T(if (closed) "Reopen" else "Done", 15f, fg, weight = FontWeight.Medium)
+                PpmIcon(if (closed) ProductIcon.RotateCcw else ProductIcon.Check, 14.dp, fg)
+                T(if (closed) "Reopen" else "Done", 12.5f, fg, weight = FontWeight.Medium)
             }
         }
     }
@@ -1052,6 +1085,5 @@ private fun PhoneChips(p: TaskPagePieces) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         TaskSnoozeButton(task) { patch -> p.actions.patch(task, snoozeJson(patch)) }
         TaskRemindButton(p.model, task)
-        if (p.hasManager) PillButton("Ask manager", primary = false, icon = ProductIcon.MessageSquare) { p.actions.askManager(task) }
     }
 }
