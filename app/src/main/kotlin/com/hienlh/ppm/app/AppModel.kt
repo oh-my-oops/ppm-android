@@ -631,6 +631,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var inlineBlame by mutableStateOf(true)
         private set
 
+    /** The editor's gutter change bars (`gutterChanges`), install-wide; off until the tour's question is answered. */
+    var gutterChanges by mutableStateOf(false)
+        private set
+
     /**
      * Diffs side by side rather than inline (`diffSideBySide`, on by default), shared through the
      * server's UI prefs: the diff tab and Review changes. A phone is always inline.
@@ -718,6 +722,25 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         tabWrap = enabled
         saveUiPrefs()
         putUiPref { put("tabWrap", enabled) }
+    }
+
+    /** Settings → Appearance's switch; saving it also answers the tour's question about the bars (the server settles it). */
+    fun setGutterChangesPref(on: Boolean) {
+        gutterChanges = on
+        saveUiPrefs()
+        putUiPref { put("gutterChanges", on) }
+    }
+
+    /** Reads `gutterChanges` back from the server, where a tour answer is written; unset keeps it off. */
+    fun reloadGutterChangesPref() {
+        val api = api ?: return
+        scope.launch {
+            val saved = quietly { api.uiPrefs() }?.gutterChanges ?: return@launch
+            if (saved != gutterChanges) {
+                gutterChanges = saved
+                saveUiPrefs()
+            }
+        }
     }
 
     fun setWordWrapPref(enabled: Boolean) {
@@ -1743,6 +1766,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     prefs.wordWrap?.let { wordWrap = it }
                     prefs.editorTabStyle?.let { editorTabStyle = it }
                     prefs.inlineBlame?.let { inlineBlame = it }
+                    prefs.gutterChanges?.let { gutterChanges = it }
                     prefs.diffSideBySide?.let { diffSideBySide = it }
                     prefs.designWindows?.let { designWindows = it }
                     prefs.remoteDesktopStatsVisible?.let { remoteDesktopStatsVisible = it }
@@ -1805,6 +1829,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         wordWrap = saved.wordWrap ?: true
         editorTabStyle = saved.editorTabStyle ?: "default"
         inlineBlame = saved.inlineBlame ?: true
+        gutterChanges = saved.gutterChanges ?: false
         diffSideBySide = saved.diffSideBySide ?: true
         designWindows = saved.designWindows ?: false
         remoteDesktopStatsVisible = saved.remoteDesktopStatsVisible ?: false
@@ -1847,6 +1872,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             wordWrap = wordWrap,
             editorTabStyle = editorTabStyle,
             inlineBlame = inlineBlame,
+            gutterChanges = gutterChanges,
             diffSideBySide = diffSideBySide,
             designWindows = designWindows,
             remoteDesktopStatsVisible = remoteDesktopStatsVisible,
@@ -1907,6 +1933,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             }
         }
         wireLiveSync(events)
+        // The tour's answer about an editor setting is saved by the server into `ui_prefs`, here or on another device.
+        events.onFeatureIntrosChanged { change, _ -> if (change == "answer" || change == "settings") reloadGutterChangesPref() }
         events.onLogsIssuesChanged {
             if (openLogsWindowCount == 0) {
                 refreshLogsIssuesSummary()

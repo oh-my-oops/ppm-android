@@ -829,6 +829,15 @@ internal fun AppearanceExtrasSection(model: AppModel) {
             testTag = "settings-word-wrap",
         )
 
+        // Saving this switch also answers the tour's "PPM has new features" question about it.
+        SettingsToggleRow(
+            title = "Changed Lines in the Gutter",
+            subtitle = "Mark lines that differ from what git has staged. Each open editor checks git every few seconds.",
+            checked = model.gutterChanges,
+            onCheckedChange = { model.setGutterChangesPref(it) },
+            testTag = "settings-gutter-changes",
+        )
+
         Separator()
 
         // Tab Style

@@ -21,6 +21,7 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -57,10 +58,12 @@ class EditorGutterChangesTest {
         return server to seen
     }
 
-    private fun model(server: MockWebServer, repos: GitRepos?): AppModel =
+    /** [switchedOn]: Settings → Appearance's "Changed Lines in the Gutter", off until the tour asks. */
+    private fun model(server: MockWebServer, repos: GitRepos?, switchedOn: Boolean = true): AppModel =
         AppModel(ApplicationProvider.getApplicationContext<Application>()).apply {
             api = ApiClient(server.url("/"), "secret")
             if (repos != null) gitDiscovery["app"] = repos
+            if (switchedOn) setGutterChangesPref(true)
         }
 
     private val rootRepo = GitRepos(rootIsRepo = true, repos = listOf(GitRepo("/w/app", "app", ".")), root = "/w/app")
@@ -133,6 +136,43 @@ class EditorGutterChangesTest {
             assertTrue("never asked once the repository was known: $seen", ok)
             composeRule.waitForIdle()
             composeRule.onAllNodesWithTag("editor-gutter-added-1", useUnmergedTree = true).assertCountEquals(0)
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w1024dp-h768dp-xhdpi")
+    fun `switched off a tablet editor asks git nothing, switched on it draws the bars`() {
+        val (server, seen) = serve { """{"state":"ok","oid":"b1","content":"a\nb\n"}""" }
+        try {
+            val model = model(server, rootRepo, switchedOn = false)
+            assertFalse("off until the tour's question is answered", model.gutterChanges)
+            composeRule.setContent {
+                var wrap by remember { mutableStateOf(true) }
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    EditableFileCodeView(
+                        model = model,
+                        project = "app",
+                        path = "notes.txt",
+                        initialContent = "a\nB\n",
+                        initialLanguage = "plaintext",
+                        wrap = wrap,
+                        onToggleWrap = { wrap = !wrap },
+                    )
+                }
+            }
+            composeRule.waitForIdle()
+            composeRule.mainClock.advanceTimeBy(GUTTER_POLL_MS + 100)
+            composeRule.waitForIdle()
+            assertTrue("asked git while switched off: $seen", seen.none { it.contains("index-base") })
+            composeRule.onAllNodesWithTag("editor-gutter-modified-2", useUnmergedTree = true).assertCountEquals(0)
+
+            composeRule.runOnIdle { model.setGutterChangesPref(true) }
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithTag("editor-gutter-modified-2", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertTrue(seen.any { it.contains("index-base") })
         } finally {
             server.close()
         }
