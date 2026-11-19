@@ -30,6 +30,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,7 +51,10 @@ import com.hienlh.ppm.protocol.AssistantCard
 import com.hienlh.ppm.state.assistant.AssistantStore
 import com.hienlh.ppm.state.assistant.DecisionAnswer
 import com.hienlh.ppm.state.assistant.DecisionSetState
-import com.hienlh.ppm.state.assistant.DoneTab
+import com.hienlh.ppm.state.assistant.SetFlash
+import com.hienlh.ppm.state.assistant.activeTabIndex
+import com.hienlh.ppm.state.assistant.decisionTabs
+import com.hienlh.ppm.state.assistant.nextWaitingTab
 import com.hienlh.ppm.state.assistant.answerIsReady
 import com.hienlh.ppm.state.assistant.answerLabel
 import com.hienlh.ppm.state.assistant.cardTime
@@ -62,22 +68,15 @@ import com.hienlh.ppm.state.assistant.projectCounts
 import com.hienlh.ppm.state.assistant.sameAnswer
 import com.hienlh.ppm.state.assistant.sendPlan
 
-/** One tab of the set: a card still waiting, or one that ended here. */
-private class SetTab(val id: String, val card: AssistantCard, val done: DoneTab?)
-
-private fun setTabs(waiting: List<AssistantCard>, d: DecisionSetState, holds: (AssistantCard) -> Boolean): List<SetTab> {
-    val byId = waiting.associateBy { it.id }
-    return d.order.mapNotNull { id ->
-        val done = d.done[id]
-        val card = done?.card?.takeIf(holds) ?: byId[id] ?: return@mapNotNull null
-        SetTab(id, card, done)
-    }
-}
-
 /**
  * The waiting decisions as one set (`DecisionSet`): a folded line with where they come from, and
  * open, one tab per card, each answered with a tile or words, sent alone or all together after a
  * review. Answers stay on this device until sent.
+ *
+ * Every tab is a card that still waits (or one whose answer is on its way from here), so the
+ * heading, the strip and "N/M" count the same cards the Waiting chip does. A card answered anywhere
+ * leaves at once; when it was the one shown, the card now in its place opens. A send from here says
+ * how it went in one line above the card shown.
  */
 @Composable
 fun DecisionSetView(
@@ -94,24 +93,40 @@ fun DecisionSetView(
     }
     LaunchedEffect(view.open, view.cards) { store.syncDecisionOrder() }
     val d = view.decisions
-    val tabs = setTabs(waiting, d) { c -> scope?.invoke(c) ?: (view.filter == null || c.projectName == view.filter) }
-    if (tabs.isEmpty()) return
-    val tokens = LocalPpmTokens.current
-    val mobile = LocalPpmMobile.current
+    val tabs = decisionTabs(d.order, waiting, d.sending) { c -> scope?.invoke(c) ?: (view.filter == null || c.projectName == view.filter) }
     var open by remember { mutableStateOf(startOpen) }
-    var index by remember { mutableIntStateOf(0) }
+    var activeId by remember { mutableStateOf<String?>(null) }
+    var lastIndex by remember { mutableIntStateOf(0) }
     var review by remember { mutableStateOf(false) }
+    val ids = tabs.map { it.id }
+    val index = activeTabIndex(ids, activeId, lastIndex)
+    /** The user moved: the line about the last send is about a card no longer in view. */
+    fun show(id: String) {
+        store.clearFlash()
+        activeId = id
+    }
     // A jump to a card of the set opens the set on it.
     LaunchedEffect(view.jumpNonce) {
         val id = view.jumpCardId ?: return@LaunchedEffect
-        val at = tabs.indexOfFirst { it.id == id }
-        if (at >= 0) {
+        if (id in ids) {
             open = true
-            index = at
+            show(id)
         }
     }
-    val current = tabs[index.coerceIn(0, tabs.size - 1)]
-    val picked = waiting.count { c -> currentPick(c, d.picks)?.let { answerIsReady(c, it.answer) } == true && c.id !in d.done }
+    // The tab shown left (answered elsewhere): the card now in its place is the one shown, and stays
+    // shown when other cards come and go.
+    val shownId = tabs.getOrNull(index)?.id
+    LaunchedEffect(index, shownId) {
+        if (index >= 0) lastIndex = index
+        if (shownId != null && activeId != null && shownId != activeId) activeId = shownId
+    }
+    if (tabs.isEmpty()) return
+    val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val current = tabs[index]
+    val plan = sendPlan(waiting.filter { it.id !in d.sending }, d.picks)
+    val count = tabs.size
+    val picked = plan.size
     val shape = RoundedCornerShape(12.dp)
     Column(
         modifier
@@ -132,7 +147,8 @@ fun DecisionSetView(
             PpmIcon(ProductIcon.BellRing, 16.dp, tokens.warning.color)
             Column(Modifier.weight(1f)) {
                 BasicText(
-                    "${waiting.size} decision${if (waiting.size == 1) "" else "s"} waiting",
+                    "$count decision${if (count == 1) "" else "s"} waiting",
+                    Modifier.testTag("assistant-decision-heading"),
                     style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color),
                 )
                 BasicText(
@@ -150,11 +166,10 @@ fun DecisionSetView(
         ) {
             tabs.forEachIndexed { i, t ->
                 val on = t.id == current.id
-                val pick = currentPick(t.card, d.picks)
+                val pick = currentPick(t, d.picks)
                 val mark = when {
-                    t.done != null -> if (t.done.sent) "✓" else "–"
-                    t.card.kind == "urgent" -> "!"
-                    pick != null && answerIsReady(t.card, pick.answer) -> "●"
+                    t.kind == "urgent" -> "!"
+                    pick != null && answerIsReady(t, pick.answer) -> "●"
                     else -> "${i + 1}"
                 }
                 val tabShape = RoundedCornerShape(8.dp)
@@ -163,54 +178,56 @@ fun DecisionSetView(
                         .heightIn(min = if (mobile) 44.dp else 32.dp)
                         .background((if (on) tokens.accentWash else tokens.panel2).color, tabShape)
                         .cssBorder((if (on) tokens.accent else tokens.border).color, tabShape)
-                        .ppmClickable(shape = tabShape) { index = i }
+                        .ppmClickable(shape = tabShape) { show(t.id) }
                         .padding(horizontal = 10.dp)
                         .testTag("assistant-decision-tab-${t.id}"),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BasicText(mark, style = ppmText(12f, FontWeight.SemiBold).copy(color = (if (t.card.kind == "urgent" && t.done == null) tokens.error else tokens.text2).color))
-                    BasicText(t.card.projectName ?: "Assistant", style = ppmText(12f).copy(color = tokens.text.color), maxLines = 1)
+                    BasicText(mark, style = ppmText(12f, FontWeight.SemiBold).copy(color = (if (t.kind == "urgent") tokens.error else tokens.text2).color))
+                    BasicText(t.projectName ?: "Assistant", style = ppmText(12f).copy(color = tokens.text.color), maxLines = 1)
                 }
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (current.done != null) DoneTabBody(current.done) else DecisionTabBody(model, store, current.card, d)
+            d.flash?.let { FlashLine(it) }
+            DecisionTabBody(model, store, current, d)
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
-        val plan = sendPlan(waiting.filter { it.id !in d.done && it.id !in d.sending }, d.picks)
-        val currentReady = current.done == null && currentPick(current.card, d.picks)?.let { answerIsReady(current.card, it.answer) } == true
+        val currentReady = currentPick(current, d.picks)?.let { answerIsReady(current, it.answer) } == true
         val sending = current.id in d.sending
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            HeadIconButton(ProductIcon.ChevronLeft, "Previous card", { index = (index - 1).coerceAtLeast(0) })
-            HeadIconButton(ProductIcon.ChevronRight, "Next card", { index = (index + 1).coerceAtMost(tabs.size - 1) })
+            HeadIconButton(ProductIcon.ChevronLeft, "Previous card", { show(ids[(index - 1).coerceAtLeast(0)]) })
+            HeadIconButton(ProductIcon.ChevronRight, "Next card", { show(ids[(index + 1).coerceAtMost(ids.size - 1)]) })
             Spacer(Modifier.weight(1f))
-            if (current.done == null) {
-                CardButton(
-                    if (sending) "Sending…" else "Send this one",
-                    { store.sendOne(current.card) },
-                    icon = ProductIcon.Send,
-                    enabled = currentReady && !sending,
-                    modifier = Modifier.testTag("assistant-decision-send-one"),
-                )
-            }
             CardButton(
-                "Send all answered (${plan.size}/${waiting.count { it.id !in d.done }})",
+                if (sending) "Sending…" else "Send this one",
+                {
+                    // Held on this card while it goes; once it leaves, the next card that waits opens.
+                    val next = nextWaitingTab(ids, current.id, d.sending.keys)
+                    show(current.id)
+                    store.sendOne(current) { if (next != null) activeId = next }
+                },
+                icon = ProductIcon.Send,
+                enabled = currentReady && !sending,
+                modifier = Modifier.testTag("assistant-decision-send-one"),
+            )
+            CardButton(
+                "Send all answered (${plan.size}/$count)",
                 { review = true },
                 variant = CardButtonVariant.PRIMARY,
-                enabled = plan.isNotEmpty(),
+                enabled = plan.isNotEmpty() && d.sending.isEmpty(),
                 modifier = Modifier.testTag("assistant-decision-send-all"),
             )
         }
     }
     if (review) {
-        val plan = sendPlan(waiting.filter { it.id !in d.done && it.id !in d.sending }, d.picks)
-        val left = waiting.filter { c -> c.id !in d.done && plan.none { it.first.id == c.id } }
+        val left = waiting.filter { c -> plan.none { it.first.id == c.id } }
         ReviewSheet(plan, left, onBack = { review = false }, onSend = {
             review = false
             store.sendAll(plan.map { it.first })
@@ -218,17 +235,18 @@ fun DecisionSetView(
     }
 }
 
+/** One line about the last send from here, the card itself having left the set (`FlashLine`). */
 @Composable
-private fun DoneTabBody(done: DoneTab) {
+private fun FlashLine(flash: SetFlash) {
     val tokens = LocalPpmTokens.current
-    BasicText(done.card.title, style = ppmText(14f, FontWeight.SemiBold).copy(color = tokens.text.color))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(22.dp).background((if (done.sent) tokens.success.opacity(0.1) else tokens.panel2).color, CircleShape), contentAlignment = Alignment.Center) {
-            PpmIcon(if (done.sent) ProductIcon.Check else ProductIcon.X, 13.dp, (if (done.sent) tokens.success else tokens.text2).color)
-        }
-        BasicText(done.note, style = ppmText(13f).copy(color = tokens.text2.color))
+    val ink = if (flash.sent) tokens.success else tokens.text2
+    Row(
+        Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.testTag("assistant-decision-flash"),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        PpmIcon(if (flash.sent) ProductIcon.Check else ProductIcon.Info, 14.dp, ink.color)
+        BasicText(flash.text, Modifier.weight(1f), style = ppmText(12f).copy(color = ink.color))
     }
-    if (done.sent) BasicText("Sent on its own · ${cardTime(done.at)} · the other cards still wait.", style = ppmText(12f).copy(color = tokens.text3.color))
 }
 
 /** One waiting card in the set: what it asks, its tiles, and the words field (`DecisionSetCard`). */

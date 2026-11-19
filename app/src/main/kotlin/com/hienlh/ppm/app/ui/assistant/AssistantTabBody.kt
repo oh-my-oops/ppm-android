@@ -183,7 +183,7 @@ private fun AssistantHead(model: AppModel, store: AssistantStore, view: Assistan
     Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
 }
 
-/** The manager chats as chips, and the stream's project filter (`ManagerChipRow`). */
+/** The manager chats as chips, and the stream's project filter (`ManagerChipRow`): 26 dp on a phone, the chip row's height. */
 @Composable
 private fun ManagerChipRow(model: AppModel, store: AssistantStore, view: AssistantView) {
     val tokens = LocalPpmTokens.current
@@ -203,7 +203,7 @@ private fun ManagerChipRow(model: AppModel, store: AssistantStore, view: Assista
         val pillShape = RoundedCornerShape(999.dp)
         Row(
             Modifier
-                .heightIn(min = if (mobile) 36.dp else 28.dp)
+                .heightIn(min = if (mobile) 26.dp else 28.dp)
                 .background((if (view.filter != null) tokens.accentWash else tokens.panel2).color, pillShape)
                 .cssBorder((if (view.filter != null) tokens.accentWashBorder else tokens.border).color, pillShape)
                 .ppmClickable(shape = pillShape) { picking = true }
@@ -233,7 +233,7 @@ private fun ManagerChip(model: AppModel, store: AssistantStore, view: AssistantV
     val shape = RoundedCornerShape(999.dp)
     Row(
         Modifier
-            .heightIn(min = if (mobile) 36.dp else 28.dp)
+            .heightIn(min = if (mobile) 26.dp else 28.dp)
             .background(tokens.panel2.color, shape)
             .cssBorder(tokens.border.color, shape)
             .testTag("assistant-manager-chip-${m.projectName}"),
@@ -241,7 +241,7 @@ private fun ManagerChip(model: AppModel, store: AssistantStore, view: AssistantV
     ) {
         Row(
             Modifier
-                .heightIn(min = if (mobile) 36.dp else 28.dp)
+                .heightIn(min = if (mobile) 26.dp else 28.dp)
                 .ppmClickable(shape = shape) { model.assistant.openManagerChat(m.projectName, m.sessionId, null, m.providerId) }
                 .semantics { contentDescription = "Open the ${m.projectName} manager chat · ${dot.label}" + if (waiting > 0) " · $waiting waiting" else "" }
                 .padding(start = 10.dp, end = if (waiting > 0) 4.dp else 10.dp),
@@ -254,7 +254,7 @@ private fun ManagerChip(model: AppModel, store: AssistantStore, view: AssistantV
         if (waiting > 0) {
             Box(
                 Modifier
-                    .heightIn(min = if (mobile) 36.dp else 28.dp)
+                    .heightIn(min = if (mobile) 26.dp else 28.dp)
                     .ppmClickable(shape = shape) {
                         store.setFilter(m.projectName)
                         view.open.orEmpty().firstOrNull { it.projectName == m.projectName && it.isWaiting }?.let { store.jumpTo(it.id) }

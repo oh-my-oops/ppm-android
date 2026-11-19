@@ -71,7 +71,13 @@ fun ManagerDotView(state: ManagerDot) {
 
 enum class CardButtonVariant { PRIMARY, DEFAULT, DANGER, GHOST }
 
-/** A card's button (`CardButton`): 44 dp on a phone, 32 dp on a tablet. */
+/**
+ * How tall a [CardButton] is on a phone: 44 dp in sheets and dialogs, the chip row's 26 dp on a card
+ * (`CardShell` provides it, as the web's card buttons are 26 px on a phone).
+ */
+val LocalCardButtonPhoneHeight = compositionLocalOf { 44.dp }
+
+/** A card's button (`CardButton`): [LocalCardButtonPhoneHeight] on a phone, 32 dp on a tablet. */
 @Composable
 fun CardButton(
     label: String,
@@ -93,7 +99,7 @@ fun CardButton(
     }
     Row(
         modifier
-            .height(if (mobile) 44.dp else 32.dp)
+            .height(if (mobile) LocalCardButtonPhoneHeight.current else 32.dp)
             .then(if (fill != null) Modifier.background(fill.color, shape) else Modifier)
             .then(if (border != null) Modifier.cssBorder(border.color, shape) else Modifier)
             .ppmClickable(enabled = enabled, shape = shape, onClick = onClick)
@@ -105,7 +111,7 @@ fun CardButton(
         if (icon != null) PpmIcon(icon, 14.dp, ink.color)
         BasicText(
             label,
-            style = ppmText(if (mobile) (if (secondary) 13f else 14f) else 12f, FontWeight.Medium).copy(color = ink.color),
+            style = ppmText(if (mobile) (if (secondary || LocalCardButtonPhoneHeight.current < 44.dp) 13f else 14f) else 12f, FontWeight.Medium).copy(color = ink.color),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

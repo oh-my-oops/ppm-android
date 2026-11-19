@@ -56,6 +56,38 @@ class DecisionSetTest {
         assertEquals(listOf("a", "b", "c"), nextTabOrder(listOf("a", "b"), listOf("a", "c"), setOf("b")))
     }
 
+    @Test
+    fun `the tabs are the cards that wait, plus one on its way from here, and nothing answered elsewhere stays`() {
+        val (a, c, d) = listOf("a", "c", "d").map { card(it) }
+        val all = { _: AssistantCard -> true }
+        // b was answered on Telegram, d dismissed: neither keeps a tab, whatever the order still says.
+        assertEquals(listOf("a", "c"), decisionTabs(listOf("a", "b", "c", "d"), listOf(a, c), emptyMap(), all).map { it.id })
+        // c is being sent from here: off the waiting list already, its tab stays until the send lands.
+        assertEquals(listOf("a", "c"), decisionTabs(listOf("a", "c"), listOf(a), mapOf("c" to c), all).map { it.id })
+        // A card the order has not caught up with yet still gets its tab, at the end.
+        assertEquals(listOf("a", "d"), decisionTabs(listOf("a"), listOf(a, d), emptyMap(), all).map { it.id })
+        // The surface's scope (a manager chat: its own cards) applies to the held card too.
+        val other = card("o").copy(sessionId = "elsewhere")
+        assertEquals(listOf("a"), decisionTabs(listOf("a", "o"), listOf(a), mapOf("o" to other)) { it.sessionId != "elsewhere" }.map { it.id })
+        assertTrue(decisionTabs(emptyList(), emptyList(), emptyMap(), all).isEmpty())
+    }
+
+    @Test
+    fun `the tab shown is the one chosen, once it leaves the one now in its place, at first the first`() {
+        assertEquals(0, activeTabIndex(listOf("a", "b", "c"), null, 0))
+        assertEquals(2, activeTabIndex(listOf("a", "b", "c"), "c", 0))
+        // b (index 1) was answered elsewhere: c now stands where it stood, and opens.
+        assertEquals(1, activeTabIndex(listOf("a", "c"), "b", 1))
+        // The last tab left: the one before it opens, never the first by default.
+        assertEquals(1, activeTabIndex(listOf("a", "b"), "c", 2))
+        assertEquals(-1, activeTabIndex(emptyList(), "a", 0))
+        // After a send the next card that still waits opens, wrapping round, never one being sent.
+        assertEquals("c", nextWaitingTab(listOf("a", "b", "c"), "b", emptySet()))
+        assertEquals("a", nextWaitingTab(listOf("a", "b", "c"), "c", emptySet()))
+        assertEquals("c", nextWaitingTab(listOf("a", "b", "c"), "a", setOf("b")))
+        assertNull(nextWaitingTab(listOf("a"), "a", emptySet()))
+    }
+
     private class FakeApi(val failWith: (String) -> Exception? = { null }) : DecisionSendApi {
         val calls = mutableListOf<String>()
         override suspend fun ok(cardId: String, draftSha256: String?): AssistantCard? {

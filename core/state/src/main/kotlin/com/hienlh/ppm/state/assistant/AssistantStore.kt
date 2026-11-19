@@ -36,19 +36,24 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 
-/** A tab of the decision set that no longer waits: how it ended, kept so the user sees it. */
-data class DoneTab(val card: AssistantCard, val sent: Boolean, val note: String, val at: Long)
-
-/** What the user picked on each waiting decision, and how each send went (`decision-set-store.ts`). */
+/**
+ * What the user picked on each waiting decision, and how each send went (`decision-set-store.ts`).
+ * The set holds only cards that still wait. A card answered anywhere — here, on Telegram, in another
+ * window, dismissed, closed by its manager — leaves it at once; the one exception is a card whose
+ * answer is on its way from here, held in [sending] until the send says how it went.
+ */
 data class DecisionSetState(
     val picks: Map<String, DecisionPick> = emptyMap(),
     /** A word on a tab: its pick was taken back, or its send failed. */
     val notices: Map<String, String> = emptyMap(),
     /** The server asks before sending this card's reply. */
     val confirms: Map<String, String> = emptyMap(),
-    val done: Map<String, DoneTab> = emptyMap(),
+    /** The tabs' order: waiting ids, and those being sent from here. */
     val order: List<String> = emptyList(),
-    val sending: Set<String> = emptySet(),
+    /** Cards being sent from here right now, as they were when sent. */
+    val sending: Map<String, AssistantCard> = emptyMap(),
+    /** One line about the last send from here; cleared when the user moves to another card. */
+    val flash: SetFlash? = null,
 )
 
 /** Everything the Assistant window and its chips show, read from the server and its events. */
@@ -100,7 +105,6 @@ class AssistantStore(
     private val api: ApiClient,
     private val scope: CoroutineScope,
     initialFilter: String? = null,
-    private val clock: () -> Long = System::currentTimeMillis,
     /** The filter is kept per device; the app stores it. */
     private val onFilterChanged: (String?) -> Unit = {},
 ) {
@@ -310,34 +314,35 @@ class AssistantStore(
 
     // The decision set
 
-    /** The waiting decisions, in the set's order: new cards at the end, sent ones kept. */
+    /**
+     * The waiting decisions, in the set's order: new cards at the end, a card being sent kept where it
+     * was. A card that left the waiting list without being sent from here takes what was picked or
+     * said about it with it; once nothing waits the set starts clean.
+     */
     fun syncDecisionOrder() {
         val v = _view.value
         val waiting = orderWaitingCards(v.open ?: return).filter(::isDecisionCard)
         val d = v.decisions
         val waitingIds = waiting.map { it.id }.toSet()
-        // A card that left without being sent from here was answered elsewhere.
-        val departed = d.order.filter { it !in waitingIds && it !in d.done && it !in d.sending }
-        val history = v.cards.orEmpty()
-        val done = d.done.toMutableMap()
-        for (id in departed) {
-            val latest = history.firstOrNull { it.id == id } ?: continue
-            done[id] = DoneTab(latest, false, if (latest.isOpen) "No longer waiting" else answerSummary(latest), clock())
-        }
-        val keep = done.keys + d.sending
+        val departed = d.order.filter { it !in waitingIds && it !in d.sending }.toSet()
         val outdated = outdatedPicks(waiting, d.picks)
-        val notices = d.notices + outdated.associateWith { "This card changed since you picked; look again." }
-        val order = nextTabOrder(d.order, waiting.map { it.id }, keep)
+        val notices = d.notices - departed + outdated.associateWith { "This card changed since you picked; look again." }
+        val order = nextTabOrder(d.order, waiting.map { it.id }, d.sending.keys)
         val next = if (waiting.isEmpty() && d.sending.isEmpty()) {
             DecisionSetState()
         } else {
-            d.copy(picks = d.picks - outdated.toSet(), notices = notices, done = trimDone(done), order = order)
+            d.copy(picks = d.picks - departed - outdated.toSet(), notices = notices, confirms = d.confirms - departed, order = order)
         }
         if (next != d) _view.update { it.copy(decisions = next) }
     }
 
-    private fun trimDone(done: Map<String, DoneTab>): Map<String, DoneTab> =
-        if (done.size <= MAX_DONE) done else done.entries.sortedByDescending { it.value.at }.take(MAX_DONE).associate { it.key to it.value }
+    /** A card stopped waiting: what was picked or said about it goes with it. */
+    private fun forgetCard(id: String) = updateDecisions { d -> d.copy(picks = d.picks - id, confirms = d.confirms - id, notices = d.notices - id) }
+
+    /** The user moved to another card: the line about the last send is about a card no longer in view. */
+    fun clearFlash() {
+        if (_view.value.decisions.flash != null) updateDecisions { it.copy(flash = null) }
+    }
 
     fun pick(card: AssistantCard, answer: DecisionAnswer?) = updateDecisions { d ->
         if (answer == null) d.copy(picks = d.picks - card.id, notices = d.notices - card.id, confirms = d.confirms - card.id)
@@ -346,10 +351,13 @@ class AssistantStore(
 
     private fun updateDecisions(change: (DecisionSetState) -> DecisionSetState) = _view.update { it.copy(decisions = change(it.decisions)) }
 
-    /** A decision set aside from the set: its tab then says "Dismissed". Null when it went, else why not. */
+    /**
+     * A decision set aside: dismissed is answered, so the card leaves the set and the next one
+     * waiting opens. Null when it went, else why not.
+     */
     suspend fun dismissDecision(card: AssistantCard): String? = try {
         val now = api.dismissAssistantCard(card.id)
-        updateDecisions { d -> d.copy(done = trimDone(d.done + (card.id to DoneTab(now ?: card, false, "Dismissed", clock())))) }
+        forgetCard(card.id)
         now?.let(::take)
         null
     } catch (e: CancellationException) {
@@ -360,44 +368,72 @@ class AssistantStore(
         refusal.error
     }
 
-    /** "Send this one": the card's pick, alone. */
-    fun sendOne(card: AssistantCard, confirmAge: Boolean = false) {
-        val answer = currentPick(card, _view.value.decisions.picks)?.answer ?: return
-        updateDecisions { it.copy(sending = it.sending + card.id, confirms = it.confirms - card.id) }
-        scope.launch { land(card, answer, sendDecision(card, answer, sendApi, confirmAge = confirmAge)) }
-    }
-
-    /** "Send all answered": every ready pick, one after another. */
-    fun sendAll(cards: List<AssistantCard>) {
-        val plan = sendPlan(cards, _view.value.decisions.picks)
-        if (plan.isEmpty()) return
-        updateDecisions { it.copy(sending = it.sending + plan.map { p -> p.first.id }) }
+    /**
+     * "Send this one": the card's pick, alone. When the card leaves the set (sent, or answered
+     * elsewhere first) a line says how it went and [onLeft] is told, so the next waiting card opens.
+     * One send per card at a time: a second press while the first is out does nothing.
+     */
+    fun sendOne(card: AssistantCard, confirmAge: Boolean = false, onLeft: (() -> Unit)? = null) {
+        val d = _view.value.decisions
+        if (card.id in d.sending) return
+        val answer = currentPick(card, d.picks)?.answer ?: return
+        updateDecisions { it.copy(sending = it.sending + (card.id to card), confirms = it.confirms - card.id, flash = null) }
         scope.launch {
-            val byId = plan.associateBy { it.first.id }
-            sendAllDecisions(plan, sendApi) { id, outcome -> byId[id]?.let { (card, answer) -> land(card, answer, outcome) } }
+            val said = land(card, answer, sendDecision(card, answer, sendApi, confirmAge = confirmAge))
+            if (said != null) {
+                updateDecisions { it.copy(flash = said) }
+                onLeft?.invoke()
+            }
         }
     }
 
-    private fun land(card: AssistantCard, answer: DecisionAnswer, outcome: SendOutcome) {
+    /** "Send all answered": every ready pick, one after another, then one line for all of them. */
+    fun sendAll(cards: List<AssistantCard>) {
+        val inFlight = _view.value.decisions.sending
+        val plan = sendPlan(cards.filter { it.id !in inFlight }, _view.value.decisions.picks)
+        if (plan.isEmpty()) return
+        updateDecisions { it.copy(sending = it.sending + plan.associate { p -> p.first.id to p.first }, flash = null) }
+        scope.launch {
+            val byId = plan.associateBy { it.first.id }
+            var sent = 0
+            val elsewhere = mutableListOf<String>()
+            sendAllDecisions(plan, sendApi) { id, outcome ->
+                val (card, answer) = byId[id] ?: return@sendAllDecisions
+                val said = land(card, answer, outcome)
+                if (said?.sent == true) sent++ else if (said != null) elsewhere += said.text
+            }
+            val parts = listOfNotNull(if (sent > 0) "Sent $sent answer${if (sent == 1) "" else "s"}." else null) + elsewhere
+            if (parts.isNotEmpty()) updateDecisions { it.copy(flash = SetFlash(sent = elsewhere.isEmpty(), text = parts.joinToString(" "))) }
+        }
+    }
+
+    /** What the server said about one card; the line to show when the card left the set, else null. */
+    private fun land(card: AssistantCard, answer: DecisionAnswer, outcome: SendOutcome): SetFlash? {
         updateDecisions { it.copy(sending = it.sending - card.id) }
-        val now = clock()
-        when (outcome) {
+        return when (outcome) {
             is SendOutcome.Sent -> {
-                updateDecisions { d -> d.copy(done = trimDone(d.done + (card.id to DoneTab(outcome.card ?: card, true, answerLabel(card, answer), now))), picks = d.picks - card.id) }
+                forgetCard(card.id)
                 outcome.card?.let(::take)
+                SetFlash(sent = true, text = "Sent “${card.title}”: ${answerLabel(card, answer)}")
             }
             is SendOutcome.Elsewhere -> {
-                updateDecisions { d -> d.copy(done = trimDone(d.done + (card.id to DoneTab(outcome.card ?: card, false, outcome.message, now)))) }
+                forgetCard(card.id)
                 outcome.card?.let(::take)
+                SetFlash(sent = false, text = "“${card.title}”: ${outcome.message}")
             }
-            is SendOutcome.Confirm -> updateDecisions { it.copy(confirms = it.confirms + (card.id to outcome.question)) }
+            is SendOutcome.Confirm -> {
+                updateDecisions { it.copy(confirms = it.confirms + (card.id to outcome.question)) }
+                null
+            }
             is SendOutcome.Changed -> {
                 updateDecisions { it.copy(notices = it.notices + (card.id to outcome.message), picks = it.picks - card.id) }
                 outcome.card?.let(::take)
+                null
             }
             is SendOutcome.Failed -> {
                 updateDecisions { it.copy(notices = it.notices + (card.id to outcome.message)) }
                 outcome.card?.let(::take)
+                null
             }
         }
     }
@@ -410,10 +446,5 @@ class AssistantStore(
         } catch (_: Exception) {
             // An older server, or none: the window shows what it has.
         }
-    }
-
-    companion object {
-        /** Finished tabs the set keeps. */
-        const val MAX_DONE = 6
     }
 }

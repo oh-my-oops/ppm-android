@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -159,6 +160,8 @@ fun CardShell(
     val host = LocalCardReplyHost.current
     var menu by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(12.dp)
+    // A card's buttons are the chip row's 26 dp on a phone.
+    CompositionLocalProvider(LocalCardButtonPhoneHeight provides 26.dp) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -243,6 +246,7 @@ fun CardShell(
         } else if (error != null) {
             CardError(error, Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp))
         }
+    }
     }
     if (menu) CardMenuSheet(model, card, host, onDismiss = { menu = false })
 }
@@ -396,14 +400,15 @@ fun CardChoices(options: List<CardOption>, pressable: Boolean, chosenId: String?
         options.forEachIndexed { i, o ->
             val chosen = o.id == chosenId
             val shape = RoundedCornerShape(8.dp)
+            // At least the chip row's height (28 dp, 26 on a phone), taller when the words need it.
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 44.dp)
+                    .heightIn(min = if (LocalPpmMobile.current) 26.dp else 28.dp)
                     .background((if (chosen) tokens.accentWash else tokens.panel).color, shape)
                     .cssBorder((if (chosen) tokens.accent else tokens.border).color, shape)
                     .ppmClickable(enabled = pressable && !disabled, shape = shape) { onChoose(o.id) }
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
                     .testTag("assistant-card-choice-${o.id}"),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
