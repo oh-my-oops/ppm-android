@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Parcelable
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -87,7 +88,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * What the paperclip opens, as Chrome answers `<input type="file" multiple>` on Android: the
- * system chooser with the camera, the camcorder and Files. [onPicked] gets what came back.
+ * system chooser with the photo picker (several pictures at once), the camera, the camcorder and
+ * Files. [onPicked] gets what came back.
  */
 @Composable
 fun rememberAttachPicker(onPicked: (List<Uri>) -> Unit): () -> Unit {
@@ -139,9 +141,20 @@ private fun attachChooser(context: Context, photo: File): Intent {
         .setType("*/*")
         .addCategory(Intent.CATEGORY_OPENABLE)
         .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-    val extra = listOf(camera, camcorder).filter { it.resolveActivity(context.packageManager) != null }
+    val extra = listOfNotNull(photoPickerIntent(), camera, camcorder).filter { it.resolveActivity(context.packageManager) != null }
     return Intent.createChooser(files, null).putExtra(Intent.EXTRA_INITIAL_INTENTS, extra.toTypedArray<Parcelable>())
 }
+
+/**
+ * The system photo picker, where several pictures are ticked at once (Files picks one per tap
+ * unless the user knows to long-press), or null before Android 13.
+ */
+internal fun photoPickerIntent(): Intent? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Intent(MediaStore.ACTION_PICK_IMAGES).putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit())
+    } else {
+        null
+    }
 
 /**
  * The text menu's Paste with a picture on the clipboard, as the web's `handlePaste` takes it: the
