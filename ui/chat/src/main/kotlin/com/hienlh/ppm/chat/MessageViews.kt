@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -141,7 +141,7 @@ fun ChatMessageView(
 /**
  * Time, Copy and Reply under a message (`MessageActionBar`), then [extra] (a user message's Edit
  * and Fork, an answer's change pill): `flex-wrap gap-0.5`, so what does not fit goes to a line of
- * its own. Reply is a 44 px target on a phone, which makes its line that tall. The time's `title`
+ * its own. Reply is the chip row's 26 px on a phone ([ActionButton]'s `standardSize`). The time's `title`
  * is the full date. A user's bar is flush with the end of the column ([alignEnd]); each item is
  * where its exact place in the row puts it, as the labels' widths are not whole pixels.
  */
@@ -163,7 +163,7 @@ internal fun MessageActionBar(
             }
         }
         CopyActionButton(copyText)
-        if (onReply != null) ActionButton(ProductIcon.RotateCcw, "Reply", "Reply to this message", touchTarget = true, onClick = onReply)
+        if (onReply != null) ActionButton(ProductIcon.RotateCcw, "Reply", "Reply to this message", standardSize = true, onClick = onReply)
         extra()
     }
 }
@@ -186,15 +186,16 @@ internal fun CopyActionButton(text: String) {
 
 /**
  * The action bar's ghost pill (`ActionButton`): subtle, `hover:text-text-primary hover:bg-surface`,
- * and so while pressed, with its [title] for a mouse. A [touchTarget] is at least 44 px square on a
- * phone, its content centred.
+ * and so while pressed, with its [title] for a mouse. A [standardSize] one takes the chip row's size
+ * on a phone (`PHONE_TEXT_CONTROL_HEIGHT`, `PHONE_ICON_CONTROL_SIZE`): 26 px tall, or 22 px square
+ * when it shows only its icon there; its content centred.
  */
 @Composable
 internal fun ActionButton(
     icon: ProductIcon,
     label: String,
     title: String,
-    touchTarget: Boolean = false,
+    standardSize: Boolean = false,
     /** The icon's own colour, kept while lit (`text-primary` on Link ready). */
     iconTint: Color? = null,
     spinning: Boolean = false,
@@ -209,7 +210,10 @@ internal fun ActionButton(
     val lit = (if (pressed) 1f else colorsFade(hovered)).toDouble()
     val color = tokens.text.mix(tokens.text3, lit).color
     val shape = RoundedCornerShape(8.dp)
-    val target = if (touchTarget && LocalPpmMobile.current) 44.dp else 0.dp
+    val mobile = LocalPpmMobile.current
+    val iconOnly = iconOnlyOnMobile && mobile
+    // `max-md:size-[22px]` with the icon alone (padding 4 round a 14 px icon), else `max-md:h-[26px]`.
+    val sized = standardSize && mobile
     CssRow(
         Modifier
             .clip(shape)
@@ -217,18 +221,18 @@ internal fun ActionButton(
             .hoverable(source)
             .webTitle(title)
             .clickable(source, indication = null, role = Role.Button, onClick = onClick)
-            .then(if (iconOnlyOnMobile && LocalPpmMobile.current) Modifier.semantics { contentDescription = label } else Modifier)
-            .defaultMinSize(minWidth = target),
+            .then(if (iconOnly) Modifier.semantics { contentDescription = label } else Modifier)
+            .then(if (sized) Modifier.testTag(if (iconOnly) "action-icon-standard" else "action-standard") else Modifier),
         gap = 4.dp,
-        start = 6.dp,
-        end = 6.dp,
+        start = if (sized && iconOnly) 4.dp else 6.dp,
+        end = if (sized && iconOnly) 4.dp else 6.dp,
         top = 4.dp,
         bottom = 4.dp,
-        minHeight = target,
+        minHeight = if (sized && !iconOnly) 26.dp else 0.dp,
         centre = true,
     ) {
         PpmIcon(icon, 14.dp, iconTint ?: color, Modifier.cssWidth(14.dp), spinning = spinning)
-        if (!(iconOnlyOnMobile && LocalPpmMobile.current)) CssText(label, ppmText(12f, lineHeight = 16f).copy(color = color))
+        if (!iconOnly) CssText(label, ppmText(12f, lineHeight = 16f).copy(color = color))
     }
 }
 
