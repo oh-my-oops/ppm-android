@@ -262,7 +262,7 @@ class ChatController(
     }
 
     /**
-     * [options] carries the composer's mode and priority; the model, effort and thinking are added
+     * [options] carries the composer's mode; the model, effort and thinking are added
      * here. [replyTo] goes only if it quotes this chat: the server refuses any other. [images] ride
      * in the frame and [imagePaths] name their uploads; a message of pictures alone may have no text.
      * While the socket is down the message shows at once and goes out once it is back. Sent while

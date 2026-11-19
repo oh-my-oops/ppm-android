@@ -172,10 +172,10 @@ internal fun CopyTurnLinkButton() {
     }
     val tokens = LocalPpmTokens.current
     when (val s = state) {
-        CopyTurnState.Idle -> ActionButton(ProductIcon.Link, "Copy turn link", "Copy a link to this turn, to paste into another chat", touchTarget = true, iconOnlyOnMobile = true, onClick = onClick)
-        CopyTurnState.Waiting -> ActionButton(ProductIcon.Loader2, "Getting link…", "Waiting for this turn to start. Tap to stop waiting", touchTarget = true, spinning = true, iconOnlyOnMobile = true, onClick = onClick)
-        is CopyTurnState.Ready -> ActionButton(ProductIcon.Link, "Link ready", "The turn link is ready. Tap to copy it", touchTarget = true, iconTint = tokens.accent.color, iconOnlyOnMobile = true, onClick = onClick)
-        CopyTurnState.Copied -> ActionButton(ProductIcon.Check, "Copied", "Turn link copied", touchTarget = true, iconOnlyOnMobile = true, onClick = onClick)
+        CopyTurnState.Idle -> ActionButton(ProductIcon.Link, "Copy turn link", "Copy a link to this turn, to paste into another chat", standardSize = true, iconOnlyOnMobile = true, onClick = onClick)
+        CopyTurnState.Waiting -> ActionButton(ProductIcon.Loader2, "Getting link…", "Waiting for this turn to start. Tap to stop waiting", standardSize = true, spinning = true, iconOnlyOnMobile = true, onClick = onClick)
+        is CopyTurnState.Ready -> ActionButton(ProductIcon.Link, "Link ready", "The turn link is ready. Tap to copy it", standardSize = true, iconTint = tokens.accent.color, iconOnlyOnMobile = true, onClick = onClick)
+        CopyTurnState.Copied -> ActionButton(ProductIcon.Check, "Copied", "Turn link copied", standardSize = true, iconOnlyOnMobile = true, onClick = onClick)
     }
 }
 

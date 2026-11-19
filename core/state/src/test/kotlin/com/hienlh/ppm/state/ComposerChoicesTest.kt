@@ -42,15 +42,6 @@ class ComposerChoicesTest {
     }
 
     @Test
-    fun `priority cycles Queue, Later, Interrupt`() {
-        assertEquals(MessagePriority.NEXT, MessagePriority.DEFAULT)
-        assertEquals(MessagePriority.LATER, MessagePriority.NEXT.following)
-        assertEquals(MessagePriority.NOW, MessagePriority.LATER.following)
-        assertEquals(MessagePriority.NEXT, MessagePriority.NOW.following)
-        assertEquals(listOf("Queue", "Later", "Interrupt"), MessagePriority.entries.map { it.label })
-    }
-
-    @Test
     fun `model names read like the web's`() {
         assertEquals("Opus 5.5", ModelNames.displayName("claude-opus-5-5"))
         assertEquals("Sonnet 4", ModelNames.displayName("claude-sonnet-4-20250514"))
@@ -161,9 +152,9 @@ class ComposerChoicesTest {
 
     @Test
     fun `a message carries only the choices that are set, and the set frames`() {
-        val full = TurnOptions(permissionMode = "plan", priority = "now", model = "m", effort = "xhigh", thinking = false)
+        val full = TurnOptions(permissionMode = "plan", model = "m", effort = "xhigh", thinking = false)
         assertEquals(
-            json("""{"type":"message","clientMessageId":"c1","content":"hi","permissionMode":"plan","priority":"now","model":"m","effort":"xhigh","thinking":false}"""),
+            json("""{"type":"message","clientMessageId":"c1","content":"hi","permissionMode":"plan","model":"m","effort":"xhigh","thinking":false}"""),
             ChatClientMessage.Message("c1", "hi", full).json,
         )
         assertEquals(

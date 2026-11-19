@@ -94,6 +94,16 @@ class ChatMessageBlocksTest {
             WireJson.parse("""{"kind":"pair_limit","targetSessionId":"t1","targetTitle":"Other","sent":10,"limit":10,"grant":5}"""),
         )
         assertEquals(listOf(SessionCollabAnswer.ALLOW_ONCE, SessionCollabAnswer.DENY), limit!!.answers)
+        // The PPM Assistant messaging a chat: once or not at all, never for the whole session.
+        val message = SessionCollabApprovalInput.from(
+            SESSION_COLLAB_APPROVAL,
+            WireJson.parse(
+                """{"kind":"message","targetSessionId":"s1","targetTitle":"Fix login","projectName":"web","providerId":"claude",""" +
+                    """"permissionMode":"bypassPermissions","modeSource":"chat","message":"Go on\nplease"}""",
+            ),
+        )
+        assertEquals(SessionCollabApprovalInput.Message("s1", "Fix login", "web", "claude", "bypassPermissions", "Go on\nplease"), message)
+        assertEquals(listOf(SessionCollabAnswer.ALLOW_ONCE, SessionCollabAnswer.DENY), message!!.answers)
         assertNull(SessionCollabApprovalInput.from("Bash", WireJson.parse("""{"kind":"create"}""")))
         assertNull(SessionCollabApprovalInput.from(SESSION_COLLAB_APPROVAL, WireJson.parse("""{"kind":"other"}""")))
     }

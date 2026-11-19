@@ -292,4 +292,51 @@ class WindowPanelsTest {
         assertNull(saveWindowPanels(mapOf("__win__:w9" to WorkspacePanel("__win__:w9"))))
         assertNotNull(saveWindowPanels(loaded))
     }
+
+    private fun otherProjectsChat() = NewTab(
+        type = "chat",
+        title = "Other chat",
+        projectId = null,
+        metadata = WireJson.parse("""{"projectName":"web","sessionId":"s9","providerId":"claude","managerWindow":true}""") as JsonObject,
+    )
+
+    @Test
+    fun `another project's chat opens straight into a window that is its home, the grid untouched`() {
+        val storage = Storage("app" to twoPanels())
+        val store = store(storage)
+        val before = store.s.panels.getValue("p1")
+        val (tabId, windowId) = store.openTabInNewWindow(otherProjectsChat())!!
+        val panel = store.s.panels.getValue(windowPanelId(windowId))
+        assertEquals(listOf(tabId), panel.tabs.map { it.id })
+        assertEquals(tabId, panel.activeTabId)
+        assertEquals(listOf(tabId), panel.tabHistory)
+        assertEquals("s9", tabSessionId(panel.tabs.single()))
+        assertEquals(before, store.s.panels.getValue("p1"))
+        assertEquals("p1", store.s.focusedPanelId)
+        val window = openWindows.getValue(windowId)
+        assertEquals(WindowKind.TabHost, window.kind)
+        assertEquals("true", window.payload?.get("closeTabsOnClose").toString())
+        assertNotNull("kept for a restart", storage.windowPanels)
+        // Closing the window closes the tab with it: there is no grid it came from.
+        store.closeWindow(windowId)
+        assertFalse(windowPanelId(windowId) in store.s.panels)
+    }
+
+    @Test
+    fun `a session open in a grid too gets a tab id of its own in the window, and none opens on a phone or past the cap`() {
+        val baseId = deriveTabId("chat", otherProjectsChat().metadata)
+        val chatTab = """{"id":"$baseId","type":"chat","title":"c","projectId":"app","metadata":{"projectName":"web","sessionId":"s9","providerId":"claude"},"closable":true}"""
+        val store = store(Storage("app" to layout(panel("p1", chatTab), grid = """[["p1"]]""", focused = "p1")))
+        val (tabId, windowId) = store.openTabInNewWindow(otherProjectsChat())!!
+        assertEquals(baseId + "@" + windowPanelId(windowId), tabId)
+        assertEquals(baseId, store.s.panels.getValue("p1").tabs.single().id)
+
+        mobile = true
+        assertNull(store.openTabInNewWindow(otherProjectsChat()))
+        mobile = false
+        repeat(MAX_WINDOWS) { windows.open(WindowKind.Logs) }
+        val count = openWindows.size
+        assertNull(store.openTabInNewWindow(otherProjectsChat()))
+        assertEquals(count, openWindows.size)
+    }
 }

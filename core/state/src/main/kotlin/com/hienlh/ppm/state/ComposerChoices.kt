@@ -47,23 +47,6 @@ enum class Effort(val value: String, val label: String) {
     }
 }
 
-/**
- * How a message sent while a turn runs is handled (`PriorityToggle`), in the order a click
- * steps through.
- */
-enum class MessagePriority(val value: String, val label: String) {
-    NEXT("next", "Queue"),
-    LATER("later", "Later"),
-    NOW("now", "Interrupt"),
-    ;
-
-    val following: MessagePriority get() = entries[(ordinal + 1) % entries.size]
-
-    companion object {
-        val DEFAULT = NEXT
-    }
-}
-
 object ModelNames {
     private val antigravityEffortSuffix = Regex("-(low|medium|high)$", RegexOption.IGNORE_CASE)
     private val claudeId = Regex("claude-([a-z]+)((?:-\\d{1,2})+)(?:-\\d{8})?", RegexOption.IGNORE_CASE)

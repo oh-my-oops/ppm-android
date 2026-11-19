@@ -192,6 +192,8 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             },
             // A task chip on a sent message shows the task's quick view.
             com.hienlh.ppm.chat.LocalTaskRefOpener provides remember(model) { com.hienlh.ppm.app.ui.tasks.taskRefOpener(model) },
+            // A PPM tool card's task button shows the task its code names.
+            com.hienlh.ppm.chat.LocalTaskCodeOpener provides remember(model) { com.hienlh.ppm.app.ui.tasks.taskCodeOpener(model) },
         ) {
             PpmThemeProvider(theme, mobile) {
                 // Chrome's own word on a download, which the web leaves to the browser.

@@ -166,4 +166,27 @@ class ChatPaneQueueTest {
         feed(tab, ChatFrame.QueueState(emptyList()))
         assertTrue(compose.onAllNodesWithText("queued · sent when the AI is ready", substring = true).fetchSemanticsNodes().isEmpty())
     }
+
+    @Test
+    fun aStopKeepsTheQueue_held_andTheHeaderSaysItWaitsForThePerson() {
+        val tab = startedTab()
+        show(tab)
+        feed(tab, ChatFrame.PhaseChanged(SessionPhase.THINKING))
+        feed(tab, ChatFrame.QueueState(listOf(QueuedMessage("q1", "queued before stop", 0))))
+        compose.onNodeWithText("1 queued · sent when the AI is ready").assertExists()
+
+        // Stop: the server keeps the entry, paused, and the turn ends without sending it.
+        feed(tab, ChatFrame.QueueState(listOf(QueuedMessage("q1", "queued before stop", 0, paused = true))))
+        feed(tab, ChatFrame.PhaseChanged(SessionPhase.IDLE))
+        compose.onNodeWithText("1 held after Stop · sent only when you send them").assertExists()
+        compose.onNodeWithText("queued before stop").assertExists()
+        compose.onNodeWithText("Send now").assertExists()
+
+        // A message queued after the Stop goes at its turn's end as before.
+        feed(
+            tab,
+            ChatFrame.QueueState(listOf(QueuedMessage("q1", "queued before stop", 0, paused = true), QueuedMessage("q2", "after", 0))),
+        )
+        compose.onNodeWithText("2 queued · 1 held after Stop").assertExists()
+    }
 }

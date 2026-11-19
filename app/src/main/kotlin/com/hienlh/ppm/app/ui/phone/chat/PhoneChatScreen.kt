@@ -75,37 +75,6 @@ import com.hienlh.ppm.state.NeedsYouState
 import com.hienlh.ppm.state.WaitingCardKind
 import com.hienlh.ppm.state.resolveNeedsYouState
 
-/**
- * The design's Now/Next/Later priority (`phone/1-chat/index.html`, B10 & B11). The chat no longer
- * offers it: the server queues every message sent while a turn runs, whatever it carries, and the
- * queue stack ([PhoneQueuedMessagesStack]) took its place. Kept only because other phone files
- * still import it.
- */
-enum class PhoneMessagePriority(val chipLabel: String, val queueDescription: String, val snackbarTitle: String) {
-    NOW(
-        chipLabel = "Now",
-        queueDescription = "Interrupt — sends right away",
-        snackbarTitle = "Next message: Interrupt",
-    ),
-    NEXT(
-        chipLabel = "Next",
-        queueDescription = "Queue — sends when this turn ends",
-        snackbarTitle = "Next message: Queue",
-    ),
-    LATER(
-        chipLabel = "Later",
-        queueDescription = "Later — sends when the chat is idle",
-        snackbarTitle = "Next message: Later",
-    ),
-    ;
-
-    fun next(): PhoneMessagePriority = when (this) {
-        NOW -> NEXT
-        NEXT -> LATER
-        LATER -> NOW
-    }
-}
-
 /** One message of the server's queue, as the stack above the composer shows it. */
 data class PhoneQueuedMessage(
     val id: String,
@@ -116,6 +85,8 @@ data class PhoneQueuedMessage(
     val files: List<String> = emptyList(),
     /** It carries terminal output, said so when nothing was typed. */
     val terminalOutput: Boolean = false,
+    /** Kept through a Stop: it waits for the person (Send now or Edit), not for the AI. */
+    val paused: Boolean = false,
 ) {
     /** Images sent with no path in the message: nothing to draw a thumbnail from, so they are counted. */
     val unshownImages: Int get() = maxOf(0, imageCount - files.count(::isImagePath))
@@ -1048,7 +1019,8 @@ private fun CollabActionButton(
  * Messages sent while the AI was working, shown above the composer until the AI reads them
  * (`queued-messages-stack.tsx`). The list is the server's, so every device shows the same stack.
  * Send now has the AI read the queue at once; Edit puts a message back into the composer; Remove
- * drops it. Nothing at all while the queue is empty.
+ * drops it. After a Stop the messages stay, held: they go only on Send now or through Edit, and the
+ * header says so ([queueSummary]). Nothing at all while the queue is empty.
  */
 @Composable
 fun PhoneQueuedMessagesStack(
@@ -1094,7 +1066,7 @@ private fun QueuedMessagesStackBody(
         ) {
             PpmIcon(ProductIcon.Clock, 14.dp, tokens.text3.color)
             BasicText(
-                text = "${messages.size} queued · sent when the AI is ready",
+                text = queueSummary(messages),
                 modifier = Modifier.weight(1f),
                 style = ppmText(11.5f, lineHeight = 15f).copy(color = tokens.text3.color),
                 maxLines = 1,
@@ -1176,6 +1148,16 @@ private fun QueuedMessagesStackBody(
                 }
             }
         }
+    }
+}
+
+/** What the stack's header says (`queueSummary`): a Stop leaves messages that wait for the person, not for the AI. */
+internal fun queueSummary(messages: List<PhoneQueuedMessage>): String {
+    val held = messages.count { it.paused }
+    return when (held) {
+        0 -> "${messages.size} queued · sent when the AI is ready"
+        messages.size -> "$held held after Stop · sent only when you send them"
+        else -> "${messages.size} queued · $held held after Stop"
     }
 }
 

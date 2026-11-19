@@ -49,11 +49,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.CssSides
@@ -184,6 +186,15 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
     // A shell call still running shows what it has printed so far.
     val partial = if (result == null && tool.name in SHELL_TOOLS) tool.toolUseId?.let { LocalBashOutput.current[it] } else null
     val interactive = tool.name in setOf("AskUserQuestion", "ExitPlanMode") || tool.isAgent
+    // PPM's own tools (tasks, session history, schedules, reports, the Assistant's) get a readable
+    // line read from their input and output, and buttons that open the task or chat they named.
+    val rawOutput = result?.output
+    val ppmSummary = if (tool.requestId == null) remember(tool.name, tool.input, rawOutput, isError) { ppmToolSummary(tool.name, tool.input, rawOutput, isError) } else null
+    val ppmIcon = if (ppmSummary != null) ppmToolIcon(tool.name) else null
+    // A turn that ended (or was stopped) before the tool answered: never a success.
+    val ppmStopped = ppmSummary != null && completed && result == null
+    val ppmErrorLine = if (ppmSummary != null && isError && rawOutput != null) remember(rawOutput) { ppmToolErrorLine(rawOutput) } else ""
+    val dbBadge = if (!isError && dbToolOf(tool.name) == DB_QUERY_TOOL) remember(rawOutput) { dbRowsBadge(rawOutput) } else null
     val shape = RoundedCornerShape(11.dp)
     // Named for "Show in chat" (`data-tool-ref`), and lit once it is jumped to (`[data-flash="card"]`):
     // the border the accent at 55%, a 1 px ring and a glow around it, in and out over 200 ms.
@@ -209,26 +220,49 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
             .background(tokens.panel.color)
             .cssBorder(border.color, shape),
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, hoverColor = tokens.panel2.opacity(0.4).color) { setExpanded(!expanded) }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            ToolChip(ToolChipStyle.of(tool.name, tool.input, isError, tokens))
-            ToolSummaryLine(tool.name, tool.input, Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (partial != null) BasicText("${lines(partial.lineCount)} streaming…", style = tinyText.copy(color = tokens.warning.color))
-                if (!nested.isNullOrEmpty() && partial == null) BasicText(stepCount(nested.size), style = tinyMono.copy(color = tokens.text3.color))
-                if (bgRunning) BasicText("running…", style = tinyText.copy(color = tokens.accent.color))
-                // Codex's exit code for a shell call: its output can matter even when it failed.
-                result?.exitCode?.let { code ->
-                    BasicText("exit $code", style = tinyMono.copy(color = (if (code == 0) tokens.text3 else tokens.error).color))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, hoverColor = tokens.panel2.opacity(0.4).color) { setExpanded(!expanded) }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ToolChip(if (ppmIcon != null) ppmToolChipStyle(ppmIcon, tokens) else ToolChipStyle.of(tool.name, tool.input, isError, tokens))
+                if (ppmSummary != null) PpmToolSummaryLine(ppmSummary, Modifier.weight(1f)) else ToolSummaryLine(tool.name, tool.input, Modifier.weight(1f))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val badge = ppmSummary?.badge ?: dbBadge
+                    if (badge != null && !ppmStopped) BasicText(badge, Modifier.testTag("ppm-tool-badge"), style = tinyText.copy(color = tokens.text3.color))
+                    if (ppmStopped) BasicText("stopped", Modifier.testTag("ppm-tool-stopped"), style = tinyText.copy(color = tokens.warning.color))
+                    if (partial != null) BasicText("${lines(partial.lineCount)} streaming…", style = tinyText.copy(color = tokens.warning.color))
+                    if (!nested.isNullOrEmpty() && partial == null) BasicText(stepCount(nested.size), style = tinyMono.copy(color = tokens.text3.color))
+                    if (bgRunning) BasicText("running…", style = tinyText.copy(color = tokens.accent.color))
+                    // Codex's exit code for a shell call: its output can matter even when it failed.
+                    result?.exitCode?.let { code ->
+                        BasicText("exit $code", style = tinyMono.copy(color = (if (code == 0) tokens.text3 else tokens.error).color))
+                    }
+                    when {
+                        isError || bgFailed -> StatusIcon(Status.FAILED)
+                        ppmStopped -> PpmIcon(ProductIcon.AlertCircle, 14.dp, tokens.warning.color)
+                        isDone -> StatusIcon(Status.DONE)
+                        else -> StatusIcon(Status.RUNNING)
+                    }
+                    PpmIcon(if (expanded) ProductIcon.ChevronDown else ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
                 }
-                StatusIcon(if (isError || bgFailed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING)
-                PpmIcon(if (expanded) ProductIcon.ChevronDown else ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
+            }
+            if (ppmSummary != null) PpmToolLinks(ppmSummary)
+        }
+        if (ppmErrorLine.isNotEmpty()) {
+            // `line-clamp-2 select-text`: the first line of the refusal, under the header.
+            SelectionContainer {
+                BasicText(
+                    ppmErrorLine,
+                    Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 8.dp).testTag("ppm-tool-error"),
+                    style = cardText.copy(color = tokens.error.color),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
         if (expanded) {

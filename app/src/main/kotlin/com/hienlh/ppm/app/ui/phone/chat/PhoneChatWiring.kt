@@ -595,5 +595,5 @@ internal fun rememberChatImages(model: AppModel, project: String): ChatImages = 
  */
 internal fun phoneQueuedMessages(queue: List<QueuedMessage>): List<PhoneQueuedMessage> = queue.map {
     val parsed = ParsedUserMessage.parse(it.content)
-    PhoneQueuedMessage(it.id, parsed.typedText.trim(), it.imageCount, parsed.files, parsed.terminalBlocks.isNotEmpty())
+    PhoneQueuedMessage(it.id, parsed.typedText.trim(), it.imageCount, parsed.files, parsed.terminalBlocks.isNotEmpty(), it.paused)
 }

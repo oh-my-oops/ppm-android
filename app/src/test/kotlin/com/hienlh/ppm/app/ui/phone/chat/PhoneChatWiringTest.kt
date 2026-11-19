@@ -333,6 +333,18 @@ class PhoneChatWiringTest {
     }
 
     @Test
+    fun aStopKeepsTheQueue_held_andThePhoneStackSaysSo() {
+        val tab = startedTab()
+        show(tab)
+        feed(tab, ChatFrame.PhaseChanged(SessionPhase.THINKING))
+        feed(tab, ChatFrame.QueueState(listOf(QueuedMessage("q1", "queued before stop", 0, paused = true))))
+        feed(tab, ChatFrame.PhaseChanged(SessionPhase.IDLE))
+        composeRule.onNodeWithText("1 held after Stop · sent only when you send them").assertExists()
+        composeRule.onNodeWithText("queued before stop").assertExists()
+        composeRule.onNodeWithText("Send now").assertExists()
+    }
+
+    @Test
     fun theQueueStack_showsTheServersQueue_editBringsTheTextBack_andRemoveDoesNot() {
         val tab = startedTab()
         show(tab)

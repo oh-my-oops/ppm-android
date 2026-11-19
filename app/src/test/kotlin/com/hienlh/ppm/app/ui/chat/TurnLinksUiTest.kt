@@ -130,6 +130,30 @@ abstract class TurnLinksUiTest(private val mobile: Boolean) {
     }
 
     @Test
+    fun messageButtons_takeTheChipRowSizesOnAPhone() {
+        val state = ChatState(sessionId = sid, providerId = "claude", items = listOf(user("m1", "hello", tid)))
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = mobile) {
+                ChatTranscriptView(state, onRespond = { _, _, _ -> }, onLoadEarlier = {}, onReload = {}, onReply = {}, turnTools = tools())
+            }
+        }
+        composeRule.waitForIdle()
+        val copy = copyButton("Copy turn link").fetchSemanticsNode()
+        val reply = composeRule.onNodeWithText("Reply").fetchSemanticsNode()
+        val density = copy.layoutInfo.density.density
+        if (mobile) {
+            // `max-md:size-[22px]` for the icon alone, `max-md:h-[26px]` for Reply: no 44 px target any more.
+            assertEquals(22f, copy.size.width / density, 0.5f)
+            assertEquals(22f, copy.size.height / density, 0.5f)
+            assertEquals(26f, reply.size.height / density, 0.5f)
+        } else {
+            // The desktop size is the pill's own: 4 px round a 16 px line.
+            assertEquals(24f, copy.size.height / density, 0.5f)
+            assertEquals(24f, reply.size.height / density, 0.5f)
+        }
+    }
+
+    @Test
     fun copyTurnLink_waitsForAnUnknownTurnThenOffersTheLink() {
         // A message drawn here before history named its turn: asked by its record uuid.
         val item = user("local-user-1", "hello", null).copy(sdkUuid = "uuid-1")

@@ -39,7 +39,6 @@ import com.hienlh.ppm.app.ui.database.SqliteViewerTabBody
 import com.hienlh.ppm.app.ui.phone.chat.PhoneAttachSheet
 import com.hienlh.ppm.app.ui.phone.chat.PhoneChangedFileItem
 import com.hienlh.ppm.app.ui.phone.chat.PhoneChatScreen
-import com.hienlh.ppm.app.ui.phone.chat.PhoneMessagePriority
 import com.hienlh.ppm.app.ui.phone.chat.PhoneModelEffortSheet
 import com.hienlh.ppm.app.ui.phone.chat.PhoneModelOption
 import com.hienlh.ppm.app.ui.phone.chat.PhoneModesSheet
@@ -98,7 +97,6 @@ import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
-import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.Effort
 import com.hienlh.ppm.state.ModelNames
 import com.hienlh.ppm.protocol.ProviderInfo
