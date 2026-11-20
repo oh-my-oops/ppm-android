@@ -116,7 +116,7 @@ import com.hienlh.ppm.chat.LocalAsyncQuestions
 import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.LocalChatTabs
 import com.hienlh.ppm.chat.LocalMarkdownImages
-import com.hienlh.ppm.chat.LocalRunInTerminal
+import com.hienlh.ppm.chat.LocalShellCodeActions
 import com.hienlh.ppm.chat.LocalDesignShots
 import com.hienlh.ppm.chat.LocalToolImages
 import com.hienlh.ppm.chat.LocalTurnChanges
@@ -471,7 +471,7 @@ fun ChatPane(
                             LocalDesignShots provides designShotReader(model.api),
                             LocalMarkdownImages provides markdownImages,
                             LocalChatTabs provides tabs,
-                            LocalRunInTerminal provides { command -> model.runInTerminal(command, tab.project) },
+                            LocalShellCodeActions provides rememberShellCodeActions(model, tab.project),
                             LocalAgentSessionOpener provides agentOpener,
                             // A Codex question's answer goes out as the composer would send it, in its permission mode,
                             // and mid-turn as Send now: steered into the running turn, not left in the queue.

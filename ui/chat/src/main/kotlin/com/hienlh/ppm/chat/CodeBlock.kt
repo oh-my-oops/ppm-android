@@ -4,6 +4,7 @@ import android.content.ClipData
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -58,21 +59,25 @@ private val CODE_STRUT = ChromeStrut(ChromeFace.Mono, CODE_SIZE, CODE_LINE_HEIGH
 /** The markdown being drawn is still streaming in: its code stays plain until it is done (`MdContext.isStreaming`). */
 internal val LocalMarkdownStreaming = compositionLocalOf { false }
 
-/** Sends normalized shell text without Enter. Absent outside a host that can open a terminal. */
-val LocalRunInTerminal = compositionLocalOf<((String) -> Unit)?> { null }
-
 /**
  * A fenced code block (`.markdown-content pre`): 12px Monaspace on the page background inside a
  * 1px border, scrolling sideways, with the copy button a touch screen always shows
  * (`@media (hover: none)`). Once its message is done and [highlight] holds, Shiki colours it on
  * the theme's own background (`.shiki-block`), from the first frame when it was coloured before.
+ * A shell command ([isShellCodeBlock]) in a host that provides [LocalShellCodeActions] also gets
+ * Run, its output shown under the block, and Run in terminal, once its message is done.
  */
 @Composable
 fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier, highlight: Boolean = true) {
     val tokens = LocalPpmTokens.current
-    val runInTerminal = LocalRunInTerminal.current
+    val shellActions = LocalShellCodeActions.current
     val shape = RoundedCornerShape(6.dp)
-    val enabled = highlight && !LocalMarkdownStreaming.current
+    val streaming = LocalMarkdownStreaming.current
+    val enabled = highlight && !streaming
+    val canRun = shellActions != null && !streaming && isShellCodeBlock(language, code)
+    val blockRun = remember { CodeBlockRun() }
+    // Cancelled when the block leaves composition, which stops a run still going.
+    val runScope = rememberCoroutineScope()
     val theme = LocalPpmTheme.current.shikiTheme
     val highlighter = SyntaxHighlighter.get(LocalContext.current)
     val highlighted by produceState(if (enabled) highlighter.cached(code, language, theme) else null, code, language, theme, enabled) {
@@ -83,37 +88,45 @@ fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier
     // Counted exactly by the column around: 34.28 px lines at 2x and a 31.5 px padding at 2.625x,
     // where whole pixels make a one-line block 79 px against Chrome's 78.28.
     val exact = rememberCssExact()
-    Box(modifier.fillMaxWidth().cssExact(exact)) {
-        // The `pre` has the border; the copy button is placed in the box around it.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .chromeScrollbar(scroll, vertical = false, tokens.border.color, border = 1.dp)
-                .clip(shape)
-                .background(highlighted?.background ?: tokens.bgSolid.color)
-                .cssBorder(tokens.border.color, shape)
-                .horizontalScroll(scroll),
-        ) {
-            CssColumn(Modifier.padding(horizontal = 8.dp), top = 8.dp, bottom = 12.dp, exact = exact) {
-                val codeText = highlighted?.text ?: AnnotatedString(code)
-                val codeStyle = ppmText(CODE_SIZE, kind = FontKind.MONO, lineHeight = CODE_LINE_HEIGHT)
-                    .copy(color = highlighted?.foreground ?: tokens.text.color)
-                if (LocalPlainTextLayout.current) {
-                    // In SelectTextDialog: BasicText, which a SelectionContainer selects.
-                    BasicText(codeText, style = codeStyle, softWrap = false)
-                } else {
-                    ChromeText(codeText, codeStyle, CODE_STRUT, softWrap = false)
+    // The output of a Run goes under the block, in the same box the column around counts.
+    Column(modifier.fillMaxWidth().cssExact(exact)) {
+        Box(Modifier.fillMaxWidth()) {
+            // The `pre` has the border; the copy button is placed in the box around it.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .chromeScrollbar(scroll, vertical = false, tokens.border.color, border = 1.dp)
+                    .clip(shape)
+                    .background(highlighted?.background ?: tokens.bgSolid.color)
+                    .cssBorder(tokens.border.color, shape)
+                    .horizontalScroll(scroll),
+            ) {
+                CssColumn(Modifier.padding(horizontal = 8.dp), top = 8.dp, bottom = 12.dp, exact = exact) {
+                    val codeText = highlighted?.text ?: AnnotatedString(code)
+                    val codeStyle = ppmText(CODE_SIZE, kind = FontKind.MONO, lineHeight = CODE_LINE_HEIGHT)
+                        .copy(color = highlighted?.foreground ?: tokens.text.color)
+                    if (LocalPlainTextLayout.current) {
+                        // In SelectTextDialog: BasicText, which a SelectionContainer selects.
+                        BasicText(codeText, style = codeStyle, softWrap = false)
+                    } else {
+                        ChromeText(codeText, codeStyle, CODE_STRUT, softWrap = false)
+                    }
+                }
+            }
+            CssRow(Modifier.align(Alignment.TopEnd).padding(4.dp), gap = 4.dp, alignEnd = true) {
+                CopyIconButton(code)
+                if (canRun) {
+                    CodeActionButton(PLAY_ICON, "Run (output below)") {
+                        blockRun.run(runScope, normalizeCodeBlockCommand(code), shellActions.run)
+                    }
+                    CodeActionButton(TERMINAL_ICON, "Run in terminal") {
+                        // `execute: true`: typed and Enter pressed.
+                        normalizeCodeBlockCommand(code).takeIf { it.isNotEmpty() }?.let { shellActions.runInTerminal(it + "\r") }
+                    }
                 }
             }
         }
-        CssRow(Modifier.align(Alignment.TopEnd).padding(4.dp), gap = 4.dp, alignEnd = true) {
-            CopyIconButton(code)
-            if (runInTerminal != null && isTerminalCodeBlock(code, language)) {
-                CodeActionButton(TERMINAL_ICON, "Send to terminal") {
-                    normalizeCodeBlockCommand(code).takeIf { it.isNotEmpty() }?.let(runInTerminal)
-                }
-            }
-        }
+        CodeBlockRunOutput(blockRun.state, blockRun::stop, blockRun::close)
     }
 }
 
@@ -163,5 +176,8 @@ private val COPY_ICON = lucideOutline(
     listOf("M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z", "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"),
 )
 private val COPIED_ICON = lucideOutline("CodeCopied", listOf("M20 6L9 17L4 12"))
-/** The web's `PlayIcon` is a terminal prompt, not a triangular play glyph. */
+/** `PlayIcon`, Run's triangle. */
+private val PLAY_ICON = lucideOutline("CodeRun", listOf("M6 4L20 12L6 20Z"))
+
+/** `TerminalIcon`, Run in terminal's prompt. */
 private val TERMINAL_ICON = lucideOutline("CodeTerminal", listOf("M4 17L10 11L4 5", "M12 19H20"))

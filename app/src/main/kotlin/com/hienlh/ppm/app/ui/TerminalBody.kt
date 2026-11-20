@@ -232,7 +232,7 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             imeController?.finishBeforeExternalInput()
             if (session.send(command)) {
                 session.pendingCommand = null
-                // Like the web, type it without Enter; the user decides when to execute it.
+                // Like the web, no Enter of its own: only a command that carries one (Run in terminal) runs.
                 kb.terminalFocused = true
                 kb.keyboardRequested = true
                 runCatching { focus.requestFocus() }

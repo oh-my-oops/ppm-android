@@ -51,6 +51,7 @@ import com.hienlh.ppm.app.PREWARM_SETTLE_MILLIS
 import com.hienlh.ppm.app.PrewarmAsk
 import com.hienlh.ppm.app.ReviewTab
 import com.hienlh.ppm.app.TextInputFocus
+import com.hienlh.ppm.app.ui.rememberShellCodeActions
 import com.hienlh.ppm.app.ui.AntigravityUsagePanel
 import com.hienlh.ppm.app.ui.BottomSheet
 import com.hienlh.ppm.app.ui.designShotReader
@@ -67,7 +68,7 @@ import com.hienlh.ppm.chat.LocalAsyncQuestions
 import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.LocalChatTabs
 import com.hienlh.ppm.chat.LocalMarkdownImages
-import com.hienlh.ppm.chat.LocalRunInTerminal
+import com.hienlh.ppm.chat.LocalShellCodeActions
 import com.hienlh.ppm.chat.LocalDesignShots
 import com.hienlh.ppm.chat.LocalToolImages
 import com.hienlh.ppm.chat.LocalTurnChanges
@@ -364,7 +365,7 @@ internal fun PhoneTranscriptLocals(model: AppModel, tab: ChatTab, chat: ChatCont
         LocalDesignShots provides designShotReader(model.api),
         LocalMarkdownImages provides markdownImages,
         LocalChatTabs provides tabs,
-        LocalRunInTerminal provides { command -> model.runInTerminal(command, tab.project) },
+        LocalShellCodeActions provides rememberShellCodeActions(model, tab.project),
         LocalAgentSessionOpener provides agents,
         LocalAsyncQuestions provides AsyncQuestions(
             state.items,
