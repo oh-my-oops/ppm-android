@@ -60,6 +60,9 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
@@ -171,6 +174,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
         val mobile = sizeClass == SizeClass.Phone
         // The layout follows the window, not the device: a rotation, split screen or foldable unfold can cross it.
         SideEffect { model.setWindowWide(sizeClass == SizeClass.Tablet) }
+        SystemBarsHiddenOnTablet(sizeClass == SizeClass.Tablet)
         val viewer = remember(model) { ImageViewer { images, index -> model.lightbox = LightboxRequest(images, index) } }
         CompositionLocalProvider(
             LocalConnectionLost provides model.connectionLost,
@@ -516,5 +520,26 @@ internal fun TypingDots(color: Rgba, modifier: Modifier) {
             )
             Box(Modifier.graphicsLayer { translationY = lift * density }.size(2.dp).clip(CircleShape).background(color.color))
         }
+    }
+}
+
+/**
+ * A tablet gives the whole screen to PPM: the status bar and the navigation bar are hidden, and a
+ * swipe in from the top or bottom edge shows them for a moment. Their insets then read zero, so the
+ * strips the shell kept clear for them go too. A phone keeps both bars.
+ */
+@Composable
+private fun SystemBarsHiddenOnTablet(tablet: Boolean) {
+    val window = (LocalActivity.current as? ComponentActivity)?.window ?: return
+    val view = LocalView.current
+    DisposableEffect(window, view, tablet) {
+        val bars = WindowCompat.getInsetsController(window, view)
+        if (tablet) {
+            bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            bars.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            bars.show(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose { }
     }
 }
