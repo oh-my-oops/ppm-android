@@ -608,6 +608,7 @@ fun ChatPane(
                                         },
                                         onError = { title, detail -> model.toast(ErrorToastMessage(title, detail)) },
                                     )
+                                    ChatWorktreeChip(model, tab, narrow)
                                     if (model.info?.minimalMode != true && sessionChanges != null) {
                                         val changeFiles by sessionChanges.files.collectAsState()
                                         val changesLoaded by sessionChanges.loaded.collectAsState()

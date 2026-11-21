@@ -15,6 +15,7 @@ import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.Reported
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.SessionStateFrame
+import com.hienlh.ppm.protocol.SessionWorktree
 import com.hienlh.ppm.protocol.TabOpenRequest
 import com.hienlh.ppm.protocol.TeamMessage
 import com.hienlh.ppm.protocol.TurnOptions
@@ -25,6 +26,8 @@ import com.hienlh.ppm.protocol.VersionGroup
 import com.hienlh.ppm.protocol.generated.TurnReference
 import kotlinx.serialization.json.JsonElement
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /** Something the transcript needs done outside itself. */
 sealed interface ChatEffect {
@@ -116,6 +119,16 @@ class ChatTranscript(var providerId: String? = null) {
     /** What decides the effort the session runs at, as the server last said; null while nothing is known. */
     var effortStatus: EffortStatusReport? = null
         private set
+
+    /** The git worktree this chat runs in, once its CLI reported one (`session_worktree`). */
+    var worktree: SessionWorktree? = null
+        private set
+
+    /**
+     * A new Claude chat's choice to run in a worktree of its own (`worktreeWanted`): every message
+     * carries a fresh name until the worktree is reported; the server honours only the first turn's.
+     */
+    var worktreeWanted = false
 
     /**
      * Which turn each message sent in this chat opened or joined, by the id it was sent under
@@ -256,6 +269,11 @@ class ChatTranscript(var providerId: String? = null) {
             is ChatFrame.AssistantUi -> effects += ChatEffect.AssistantUi(frame.request)
             is ChatFrame.BackgroundRegistry -> backgroundShells = frame.shells
             is ChatFrame.McpStatus -> mcpNeedsAuth = frame.needsAuth
+            is ChatFrame.WorktreeChanged -> {
+                worktree = frame.worktree
+                // Made: later messages of this chat carry no request.
+                worktreeWanted = false
+            }
             is ChatFrame.TurnStarted -> frame.clientMessageId?.let { bindTurn(it, frame.turnId) }
         }
         return effects
@@ -289,16 +307,18 @@ class ChatTranscript(var providerId: String? = null) {
         unanswered.values.removeAll { now - it.sentAt >= 60_000 }
         unanswered[id] = Unanswered(content, replyTo, now, turnRefs.takeIf { it.isNotEmpty() })
         if (unanswered.size > 20) unanswered.remove(unanswered.keys.first())
+        // Asked for once, by the chat's first message; the server ignores it on any later one.
+        val worktreeName = if (worktreeWanted) SessionWorktree.newName(LocalDateTime.ofInstant(Instant.ofEpochMilli(now), ZoneId.systemDefault())) else null
         if (phase.isRunning) {
             // A refusal still finds it in [unanswered] and gives its text back.
-            return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths, queued = true, sendNow = sendNow, turnRefs = turnRefs)
+            return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths, queued = true, sendNow = sendNow, turnRefs = turnRefs, worktree = worktreeName)
         }
         // The server skips a pending approval when a message arrives.
         pendingApproval = null
         phase = SessionPhase.INITIALIZING
         turnFinalized = false
         appendUser(ChatReply.encode(ChatTurnRefs.encode(content, turnRefs, ownProject), replyTo), id, now)
-        return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths, turnRefs = turnRefs)
+        return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths, turnRefs = turnRefs, worktree = worktreeName)
     }
 
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null): ChatClientMessage.ApprovalResponse {
