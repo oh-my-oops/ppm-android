@@ -49,6 +49,8 @@ dependencies {
     api(platform(libs.androidx.compose.bom))
     api(libs.androidx.compose.foundation)
     api(libs.androidx.compose.ui)
+    // BackHandler: Back ends an in-place text selection (ChromeSelection.kt).
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.javascriptengine)
     implementation(libs.androidsvg)

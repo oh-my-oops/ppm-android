@@ -82,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.design.ChromeSelectionArea
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalImageViewer
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -203,21 +204,14 @@ fun ChatTranscriptView(
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null && !hasExtension ->
                 Welcome(welcome, welcomeActions)
-            else -> {
-                // A long press on an answer's markdown opens it selectable (SelectText.kt).
-                var selecting by remember { mutableStateOf<String?>(null) }
-                CompositionLocalProvider(LocalSelectText provides { selecting = it }) {
-                    TranscriptList(
-                        state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken,
-                        bottomFade = bottomFade,
-                        overlappedByFooter = overlappedByFooter,
-                        turnTools = turnTools,
-                        timeline = timeline,
-                        built = built,
-                    )
-                }
-                selecting?.let { text -> SelectTextDialog(text) { selecting = null } }
-            }
+            else -> TranscriptList(
+                state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken,
+                bottomFade = bottomFade,
+                overlappedByFooter = overlappedByFooter,
+                turnTools = turnTools,
+                timeline = timeline,
+                built = built,
+            )
         }
       }
         state.historyError?.let { error ->
@@ -506,10 +500,11 @@ private fun TranscriptList(
                 } else {
                     Modifier
                 }
+                // An answer's text selects in place, its handles over the list, which they scroll near its edges.
+                ChromeSelectionArea(list, Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
                     Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
+                        .fillMaxSize()
                         .nestedScroll(scroll.connection)
                         .onGloballyPositioned {
                             anchors.list = it
@@ -597,6 +592,7 @@ private fun TranscriptList(
                             }
                         }
                     }
+                }
                 }
             }
             val window = historyView as? HistoryView.Window

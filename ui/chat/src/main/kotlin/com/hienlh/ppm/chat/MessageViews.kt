@@ -55,6 +55,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.design.ChromeSelectionBlocks
 import com.hienlh.ppm.design.ClampedText
 import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssRow
@@ -70,6 +71,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.TextCursorRegion
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.chromeSelectionHost
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssExact
 import com.hienlh.ppm.design.cssLines
@@ -78,6 +80,7 @@ import com.hienlh.ppm.design.cssWidth
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberChromeSelectionHost
 import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.webTitle
@@ -287,15 +290,17 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
 
 /**
  * A text block's markdown, selectable (`select-text`, so the I-beam over its glyphs), counted by
- * the column around it at its exact height.
+ * the column around it at its exact height. Its ChromeText selects in place, as one region across
+ * its paragraphs, lists, headings and code blocks (ChromeSelection.kt).
  */
 @Composable
 private fun SelectableMarkdown(text: String, streaming: Boolean) {
     val exact = rememberCssExact()
-    // ChromeText cannot be selected in place: a long press opens the block selectable (SelectText.kt).
-    val selectText = LocalSelectText.current
-    SelectionContainer(Modifier.cssExact(exact).then(if (selectText != null) Modifier.longPressToSelect(text, selectText) else Modifier)) {
-        TextCursorRegion { MarkdownContent(text, streaming = streaming, exact = exact) }
+    val host = rememberChromeSelectionHost()
+    SelectionContainer(Modifier.cssExact(exact).chromeSelectionHost(host)) {
+        ChromeSelectionBlocks(host) {
+            TextCursorRegion { MarkdownContent(text, streaming = streaming, exact = exact) }
+        }
     }
 }
 
@@ -448,17 +453,19 @@ internal fun ThinkingBlock(text: String, streaming: Boolean) {
             LaunchedEffect(streaming) {
                 if (streaming) snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
             }
-            val selectText = LocalSelectText.current
+            val host = rememberChromeSelectionHost()
             Column(
                 Modifier
                     .heightIn(max = 240.dp)
+                    .chromeSelectionHost(host)
                     .cssScrollY(scroll)
-                    .then(if (selectText != null) Modifier.longPressToSelect(text, selectText) else Modifier)
                     .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             ) {
                 WithoutOnCopy(MARKDOWN_MARKS) {
                     SelectionContainer {
-                        MarkdownContent(text, style = thinkingStyle.copy(color = tokens.text3.opacity(0.8)), streaming = streaming)
+                        ChromeSelectionBlocks(host) {
+                            MarkdownContent(text, style = thinkingStyle.copy(color = tokens.text3.opacity(0.8)), streaming = streaming)
+                        }
                     }
                 }
             }

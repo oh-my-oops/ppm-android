@@ -73,7 +73,8 @@ object PhoneToolCardPolicy {
 
 /**
  * Long-press message action sheet on phone (Phone 1 Section 2 B12):
- * 4 top action tiles (68 dp: `Copy`, `Reply`, `Edit`, `Fork`) + 2 list rows (52 dp: `Copy turn link`, `Select text`).
+ * 4 top action tiles (68 dp: `Copy`, `Reply`, `Edit`, `Fork`) + a list row (52 dp: `Copy turn link`).
+ * An answer's text is selected in place by a long press on it (ChromeSelection.kt), not from here.
  */
 @Composable
 fun PhoneMessageActionSheet(
@@ -83,7 +84,6 @@ fun PhoneMessageActionSheet(
     onEdit: () -> Unit,
     onFork: () -> Unit,
     onCopyTurnLink: () -> Unit,
-    onSelectText: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -171,28 +171,6 @@ fun PhoneMessageActionSheet(
                     PpmIcon(ProductIcon.Link, 18.dp, tokens.text2.color)
                     BasicText(
                         text = "Copy turn link",
-                        style = ppmText(14f, FontWeight.Medium, lineHeight = 19f).copy(color = tokens.text.color),
-                    )
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
-                        .ppmClickable(
-                            onClickLabel = "Select text",
-                            onClick = {
-                                onSelectText()
-                                onDismiss()
-                            },
-                        )
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    PpmIcon(ProductIcon.FileText, 18.dp, tokens.text2.color)
-                    BasicText(
-                        text = "Select text",
                         style = ppmText(14f, FontWeight.Medium, lineHeight = 19f).copy(color = tokens.text.color),
                     )
                 }

@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
@@ -396,11 +395,6 @@ private fun HtmlLines(box: LinesBox, drawing: HtmlDrawing, modifier: Modifier) {
         remember(checkboxes, block.size, color, density) { checkboxes + disclosures(with(density) { block.size.dp.toPx() }, color, density) }
     }
     val strut = remember(block, base) { ChromeStrut(block.font.face(), block.size, block.size * base.lineHeightRatio) }
-    if (LocalPlainTextLayout.current) {
-        // In SelectTextDialog: BasicText, which a SelectionContainer selects; Chrome's exact lines and code boxes are left out.
-        BasicText(text, modifier.fillMaxWidth(), textStyle(block, base, tokens), softWrap = block.whiteSpace != WhiteSpace.NOWRAP && block.whiteSpace != WhiteSpace.PRE, inlineContent = inline)
-        return
-    }
     ChromeText(
         text,
         textStyle(block, base, tokens),

@@ -7,8 +7,11 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.referentialEqualityPolicy
@@ -17,6 +20,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
@@ -34,6 +39,7 @@ import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -58,8 +64,10 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /*
@@ -192,10 +200,51 @@ class ChromeTextLayout internal constructor(
     fun shift(line: Int): Float = shifts[line]
 
     /** The line whose band, down to where the next starts, holds [y]. */
-    fun lineAt(y: Float): Int {
-        var line = 0
-        while (line + 1 < edges.size && edges[line + 1] <= y) line++
-        return line
+    fun lineAt(y: Float): Int = ChromeSelectionModel.lineAt(edges, y)
+
+    /** Where line [line]'s band starts, px from the box's top: the pixel it is drawn from. */
+    fun bandTop(line: Int): Float = edges[line].toFloat()
+
+    /** Where line [line]'s band ends: where the next starts, or the box's bottom under the last. */
+    fun bandBottom(line: Int): Float = if (line + 1 < edges.size) edges[line + 1].toFloat() else height.toFloat()
+
+    /** The caret place nearest [position]: on the line whose band holds it, across as [result] has it. */
+    fun offsetAt(position: Offset): Int {
+        val line = lineAt(position.y)
+        val y = (result.getLineTop(line) + result.getLineBottom(line)) / 2
+        return result.getOffsetForPosition(Offset(position.x, y))
+    }
+
+    /** The line a selection ending at [end] (after [start]) ends on: the one its last character is on. */
+    internal fun endLine(start: Int, end: Int): Int = result.getLineForOffset(if (end > start) end - 1 else end)
+
+    /** Where a selection's start at [offset] stands across. */
+    internal fun startX(offset: Int): Float = result.getHorizontalPosition(offset, true)
+
+    /** Where a selection's end at [offset], on [line], stands across: the line's end when it takes the rest of the line. */
+    internal fun endX(offset: Int, line: Int): Float =
+        if (offset >= result.getLineEnd(line)) result.getLineRight(line) else result.getHorizontalPosition(offset, true)
+
+    /**
+     * [start] to [end] highlighted in [color], a box per line from its band's top to its bottom, as
+     * Chrome paints a selection over the line boxes. Nothing is allocated: it runs every frame a
+     * handle is dragged.
+     */
+    internal fun drawSelection(scope: DrawScope, start: Int, end: Int, color: Color) = with(scope) {
+        val length = result.layoutInput.text.length
+        val from = start.coerceIn(0, length)
+        val to = end.coerceIn(from, length)
+        if (to <= from) return
+        val first = result.getLineForOffset(from)
+        val last = endLine(from, to)
+        var line = first
+        while (line <= last) {
+            val left = if (line == first) startX(from) else result.getLineLeft(line)
+            val right = if (line == last) endX(to, line) else result.getLineRight(line)
+            val top = bandTop(line)
+            drawRect(color, Offset(min(left, right), top), Size(abs(right - left), bandBottom(line) - top))
+            line++
+        }
     }
 
     /** The character under [position], or -1 when there is none. */
@@ -270,6 +319,21 @@ fun ChromeText(
         AnnotatedString(text.text, text.spanStyles + hover, text.paragraphStyles)
     }
     val state = remember { ChromeTextState() }
+    // Inside a block that selects as one (an answer's markdown), this text is one of its blocks.
+    val host = LocalChromeSelectionHost.current
+    val selectable = if (host == null) null else remember(host, state) { ChromeSelectable(host, state) }
+    if (selectable != null) {
+        val highlight = LocalTextSelectionColors.current.backgroundColor
+        SideEffect {
+            selectable.text = text
+            selectable.slots = slots
+            selectable.highlight = highlight
+        }
+        DisposableEffect(selectable) {
+            host!!.add(selectable)
+            onDispose { host.remove(selectable) }
+        }
+    }
     val policy = remember(measurer, laid, style, strut, softWrap, placeholders, boxes, exact) {
         ChromeTextPolicy(measurer, laid, style, strut, softWrap, placeholders, boxes, exact, state)
     }
@@ -289,9 +353,15 @@ fun ChromeText(
             .hoverTextCursor(LocalTextCursor.current) { position -> state.layout?.overRun(position, text, strut, boxes, density) == true }
             .then(if (links.isEmpty()) Modifier else Modifier.chromeLinks(links, state, uriHandler) { hovered = it })
             .then(if (hovered != null) Modifier.pointerHoverIcon(WebCursor.Pointer) else Modifier)
+            .then(if (selectable != null) Modifier.onPlaced { selectable.placed(it) } else Modifier)
             .drawBehind {
                 val layout = state.layout ?: return@drawBehind
                 behind?.invoke(this, layout)
+                // Over the inline boxes' backgrounds and under the glyphs, as Chrome paints a selection.
+                val selected = selectable?.selected?.longValue ?: ChromeSelectionModel.NONE
+                if (selected != ChromeSelectionModel.NONE) {
+                    layout.drawSelection(this, ChromeSelectionModel.packedStart(selected), ChromeSelectionModel.packedEnd(selected), selectable!!.highlight)
+                }
                 layout.draw(this, justify)
             },
         measurePolicy = policy,
@@ -299,7 +369,7 @@ fun ChromeText(
 }
 
 /** The layout a [ChromeText] last measured, which it draws and hit-tests. */
-private class ChromeTextState {
+internal class ChromeTextState {
     var layout by mutableStateOf<ChromeTextLayout?>(null, referentialEqualityPolicy())
 }
 

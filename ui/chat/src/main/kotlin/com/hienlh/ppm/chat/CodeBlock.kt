@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -105,12 +104,7 @@ fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier
                     val codeText = highlighted?.text ?: AnnotatedString(code)
                     val codeStyle = ppmText(CODE_SIZE, kind = FontKind.MONO, lineHeight = CODE_LINE_HEIGHT)
                         .copy(color = highlighted?.foreground ?: tokens.text.color)
-                    if (LocalPlainTextLayout.current) {
-                        // In SelectTextDialog: BasicText, which a SelectionContainer selects.
-                        BasicText(codeText, style = codeStyle, softWrap = false)
-                    } else {
-                        ChromeText(codeText, codeStyle, CODE_STRUT, softWrap = false)
-                    }
+                    ChromeText(codeText, codeStyle, CODE_STRUT, softWrap = false)
                 }
             }
             CssRow(Modifier.align(Alignment.TopEnd).padding(4.dp), gap = 4.dp, alignEnd = true) {

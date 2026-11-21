@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.design.ChromeSelectionArea
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -102,6 +103,8 @@ internal fun HistoryWindowOverlay(
         }
     }
     Box(modifier.fillMaxSize().background(tokens.bgSolid.color).testTag("history-window")) {
+        // Its answers select in place, as the live chat's do.
+        ChromeSelectionArea(list, Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize().semantics { contentDescription = "Earlier turns" },
             state = list,
@@ -121,6 +124,7 @@ internal fun HistoryWindowOverlay(
             if (view.loadingNewer) {
                 item(key = "history-window-newer") { WindowSpinner("Loading later turns", floating = false) }
             }
+        }
         }
         if (view.loadingOlder) {
             Box(Modifier.align(Alignment.TopCenter).padding(top = 8.dp)) { WindowSpinner("Loading earlier turns", floating = true) }
