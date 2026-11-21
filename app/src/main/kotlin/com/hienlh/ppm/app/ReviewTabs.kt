@@ -14,6 +14,7 @@ import com.hienlh.ppm.state.SessionReview
 import com.hienlh.ppm.state.SessionReviewBackend
 import com.hienlh.ppm.state.SessionTurns
 import com.hienlh.ppm.state.SessionTurnsStore
+import com.hienlh.ppm.state.workspace.NewTab
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +28,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * What a session-review tab holds while it is open (`SessionReviewTab`): the session's review,
@@ -106,3 +109,19 @@ class ReviewTab(val tabId: String, val project: String, val sessionId: String) {
         review = null
     }
 }
+
+/**
+ * The review's chat tab (`openChat`), carrying [text] as a context chip named [label] for its
+ * composer when the tab is opened for it (`pendingContexts`, as `sendToChat` hands text over).
+ */
+internal fun reviewChatTab(review: ReviewTab, text: String, label: String) = NewTab(
+    type = "chat",
+    title = review.chatTitle ?: "Chat",
+    projectId = review.project,
+    metadata = buildJsonObject {
+        put("projectName", review.project)
+        put("sessionId", review.sessionId)
+        review.providerId?.let { put("providerId", it) }
+        put("pendingContexts", JsonArray(listOf(buildJsonObject { put("text", text); put("label", label) })))
+    },
+)

@@ -30,6 +30,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -61,6 +62,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -124,9 +126,11 @@ import com.hienlh.ppm.protocol.SessionFileChange
 import com.hienlh.ppm.state.BlockState
 import com.hienlh.ppm.state.FileOutcome
 import com.hienlh.ppm.state.FileReview
+import com.hienlh.ppm.state.LineComments
 import com.hienlh.ppm.state.PaneItem
 import com.hienlh.ppm.state.PaneModel
 import com.hienlh.ppm.state.ReviewBlocks
+import com.hienlh.ppm.state.ReviewLineComment
 import com.hienlh.ppm.state.ReviewPane
 import com.hienlh.ppm.state.SessionReviewModel
 import com.hienlh.ppm.state.SessionReviewState
@@ -1068,11 +1072,48 @@ private fun ReviewRows(rows: List<ReviewBlocks.Row>, state: BlockState, m: CodeM
     val delTint = tokens.error.opacity(0.16).color
     val addWord = tokens.success.opacity(0.4).color
     val delWord = tokens.error.opacity(0.4).color
+    // A line comment opens from an open block's line numbers, under the line (`commentable`).
+    val scope = LocalReviewCommentScope.current
+    val commentable = scope != null && state == BlockState.OPEN && !plain
+    val saved = rememberSessionComments(if (commentable) scope.comments else null)
+    /** The line whose comment box is open for writing. */
+    var editing by remember { mutableStateOf<String?>(null) }
+    val ids = if (commentable) drawn.map { LineComments.reviewCommentId(scope.path, it.row.side, it.row.line) } else emptyList()
+    val opened = if (commentable) drawn.indices.filter { i -> editing == ids[i] || saved.any { it.id == ids[i] } } else emptyList()
+    val bottoms = remember(drawn) { IntArray(drawn.size) }
+    val boxTops = IntArray(opened.size)
     WithoutOnCopy("$BREAK$JOIN") {
         Layout(
             content = {
                 drawn.forEachIndexed { i, row ->
                     BasicText(row.code, if (decided) Modifier.alpha(0.78f) else Modifier, codeStyle, onTextLayout = { layouts[i] = it })
+                }
+                if (commentable) {
+                    drawn.forEachIndexed { i, row -> ReviewCommentGutter(row.row.line) { editing = ids[i] } }
+                    for (i in opened) {
+                        val id = ids[i]
+                        val row = drawn[i].row
+                        val comment = saved.firstOrNull { it.id == id }
+                        key(id) {
+                            LineCommentBox(
+                                body = comment?.body.orEmpty(),
+                                editing = editing == id,
+                                onEdit = { editing = id },
+                                onSave = { body ->
+                                    scope.comments.store.save(
+                                        scope.comments.sessionId,
+                                        ReviewLineComment(id, scope.path, row.line, row.side, row.text, body),
+                                    )
+                                    editing = null
+                                },
+                                onCancel = { editing = null },
+                                onDelete = {
+                                    scope.comments.store.remove(scope.comments.sessionId, id)
+                                    editing = null
+                                },
+                            )
+                        }
+                    }
                 }
             },
             modifier = modifier
@@ -1087,7 +1128,7 @@ private fun ReviewRows(rows: List<ReviewBlocks.Row>, state: BlockState, m: CodeM
                     val codeX = m.codeX.dp.toPx().roundToInt().toFloat()
                     drawn.forEachIndexed { i, row ->
                         val top = tops[i].toFloat()
-                        val bottom = tops[i + 1].toFloat()
+                        val bottom = bottoms[i].toFloat()
                         if (row.add || row.del) drawRect(if (row.add) addTint else delTint, Offset(0f, top), Size(size.width, bottom - top))
                         if (row.old.isNotEmpty()) glyph(row.old, numberStyle, 'n').let { drawText(it, topLeft = Offset((oldEnd - it.size.width).roundToInt().toFloat(), top)) }
                         if (row.new.isNotEmpty()) glyph(row.new, numberStyle, 'n').let { drawText(it, topLeft = Offset((newEnd - it.size.width).roundToInt().toFloat(), top)) }
@@ -1109,7 +1150,15 @@ private fun ReviewRows(rows: List<ReviewBlocks.Row>, state: BlockState, m: CodeM
             val line = m.line.sp.toPx()
             val numberLine = m.numberLine.sp.toPx()
             var at = phase
-            val placeables = measurables.mapIndexed { i, child ->
+            // The code, then (with comments) each row's number button and each open comment box.
+            val n = drawn.size
+            val boxOf = HashMap<Int, Int>(opened.size).also { map -> opened.forEachIndexed { k, i -> map[i] = k } }
+            // `my-1.5 mr-3.5 ml-[98px]`, a phone's `mx-2 my-1.5`.
+            val boxGap = 6.dp.toPx()
+            val boxStart = (if (m.compact) 8 else 98).dp.roundToPx()
+            val boxWidth = max(0, width - boxStart - (if (m.compact) 8 else 14).dp.roundToPx())
+            val boxPlaceables = arrayOfNulls<Placeable>(opened.size)
+            val placeables = measurables.take(n).mapIndexed { i, child ->
                 tops[i] = at.roundToInt()
                 val placeable = child.measure(Constraints(maxWidth = codeWidth))
                 val row = drawn[i]
@@ -1119,13 +1168,26 @@ private fun ReviewRows(rows: List<ReviewBlocks.Row>, state: BlockState, m: CodeM
                 } else {
                     max(1, layouts[i]?.lineCount ?: (placeable.height / ceil(line)).roundToInt()) * line
                 }
+                bottoms[i] = at.roundToInt()
+                boxOf[i]?.let { k ->
+                    val box = measurables[2 * n + k].measure(Constraints(maxWidth = boxWidth))
+                    boxPlaceables[k] = box
+                    boxTops[k] = (at + boxGap).roundToInt()
+                    at += boxGap + box.height + boxGap
+                }
                 placeable
             }
-            tops[drawn.size] = at.roundToInt()
+            tops[n] = at.roundToInt()
+            val gutterWidth = (2 * m.gutter).dp.roundToPx()
+            val gutters = if (commentable) measurables.subList(n, 2 * n).mapIndexed { i, child ->
+                child.measure(Constraints.fixed(gutterWidth, max(0, bottoms[i] - tops[i])))
+            } else emptyList()
             val height = at.roundToInt()
             exact.cssReport(at - phase, height)
             layout(width, height) {
                 placeables.forEachIndexed { i, p -> p.place(codeX.roundToInt(), tops[i]) }
+                gutters.forEachIndexed { i, p -> p.place(0, tops[i]) }
+                boxPlaceables.forEachIndexed { k, p -> p?.place(boxStart, boxTops[k]) }
             }
         }
     }
@@ -1459,17 +1521,19 @@ fun ReviewPaneBody(
 ) {
     val tokens = LocalPpmTokens.current
     when (val pane = state.pane) {
-        is ReviewPane.Blocks -> ReviewCode(
-            file = pane.review.file,
-            model = pane.model,
-            focusKey = state.focus?.takeIf { it.path == pane.review.path }?.key,
-            compact = compact,
-            turns = turns,
-            actions = actions,
-            state = code,
-            sheet = sheet,
-            modifier = modifier,
-        )
+        is ReviewPane.Blocks -> ProvideReviewCommentScope(pane.review.path) {
+            ReviewCode(
+                file = pane.review.file,
+                model = pane.model,
+                focusKey = state.focus?.takeIf { it.path == pane.review.path }?.key,
+                compact = compact,
+                turns = turns,
+                actions = actions,
+                state = code,
+                sheet = sheet,
+                modifier = modifier,
+            )
+        }
         is ReviewPane.Whole -> WholeFile(pane.review, compact, onRevertFile, onKeepFile, onChange, modifier)
         // `flex flex-1 items-center justify-center px-4 text-center text-sm text-text-subtle`.
         is ReviewPane.Error -> Box(modifier.fillMaxSize().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {

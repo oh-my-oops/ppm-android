@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -155,6 +156,8 @@ class ReviewTabContext(
     val sheet: ReviewSheet,
     /** A phone's sheet for the files and the file's actions, `max-h-[85%]`. */
     val listSheet: ReviewSheet,
+    /** The chat's line comments and sending them to it; none, and no comments offered, without a chat. */
+    val comments: ReviewTabComments? = null,
 )
 
 /** The code pane's answers, on the review (`reviewView`'s `codeActions`). */
@@ -299,18 +302,20 @@ fun ReviewDesktop(review: SessionReview, ctx: ReviewTabContext, modifier: Modifi
                         if (focused != null) {
                             FileHeader(focused, ctx)
                             Box(Modifier.weight(1f).fillMaxWidth()) {
-                                ReviewPaneBody(
-                                    state = state,
-                                    compact = false,
-                                    turns = ctx.turns,
-                                    actions = actions,
-                                    code = code,
-                                    sheet = ctx.sheet,
-                                    onRevertFile = { confirm = true },
-                                    onKeepFile = review::keepFile,
-                                    onChange = if (state.canChange) review::changeFocused else null,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
+                                CompositionLocalProvider(LocalReviewComments provides ctx.comments) {
+                                    ReviewPaneBody(
+                                        state = state,
+                                        compact = false,
+                                        turns = ctx.turns,
+                                        actions = actions,
+                                        code = code,
+                                        sheet = ctx.sheet,
+                                        onRevertFile = { confirm = true },
+                                        onKeepFile = review::keepFile,
+                                        onChange = if (state.canChange) review::changeFocused else null,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
                                 state.toast?.let { toast -> ReviewToastSlot(toast, mobile = false) { toast.undoId?.let { review.undo(it, toast.focus) } } }
                             }
                             BottomBar(
@@ -440,6 +445,7 @@ private fun ReviewHeader(
                     onClick = onFiles,
                 )
             }
+            SendReviewCommentsButton(ctx.comments)
             if (state.progress.open > 0) {
                 ReviewButton("Keep all remaining", WebVariant.GHOST, WebSize.SM, icon = ProductIcon.ListChecks, content = tokens.text2, onClick = onKeepAll)
             }
