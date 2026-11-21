@@ -308,28 +308,3 @@ fun groupFeedRowsByProject(rows: List<FeedRow>): List<NotificationProjectGroup> 
  */
 fun formatUnreadSummary(unreadCount: Int): String =
     if (unreadCount > 0) "$unreadCount unread session${if (unreadCount == 1) "" else "s"}" else "No unread"
-
-/**
- * Human-readable label for a [FeedKind] matching the Phone/Tablet specs.
- */
-fun FeedKind.displayLabel(): String = when (this) {
-    FeedKind.APPROVAL -> "Approval waiting"
-    FeedKind.QUESTION -> "Question waiting"
-    FeedKind.DONE -> "Turn complete"
-    FeedKind.SCHEDULE -> "Schedule"
-    FeedKind.OTHER -> "Notification"
-}
-
-/**
- * Compact relative time string (`"now"`, `"2m"`, `"1h"`, `"3d"`) for a notification row.
- */
-fun formatNotificationTime(createdAtMs: Long, nowMs: Long = System.currentTimeMillis()): String {
-    if (createdAtMs <= 0L) return ""
-    val diffSec = maxOf(0L, (nowMs - createdAtMs) / 1_000L)
-    return when {
-        diffSec < 60L -> "now"
-        diffSec < 3_600L -> "${diffSec / 60L}m"
-        diffSec < 86_400L -> "${diffSec / 3_600L}h"
-        else -> "${diffSec / 86_400L}d"
-    }
-}
