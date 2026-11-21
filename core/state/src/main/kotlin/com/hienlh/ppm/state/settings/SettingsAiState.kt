@@ -248,6 +248,11 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
                 label = "Check the suite",
                 note = "Thorough checks: runs the whole test suite again after fixing failures it reported.",
             ),
+            PpmToolDef(
+                id = "spec_run_sessions",
+                label = "Run the tasks in new chats",
+                note = "Only when you ask for it: PPM opens a chat per task, up to three at a time. Run all otherwise hands the tasks to the spec's own chat.",
+            ),
         ),
     ),
     PpmToolGroup(

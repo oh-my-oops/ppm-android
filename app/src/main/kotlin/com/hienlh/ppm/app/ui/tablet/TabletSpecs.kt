@@ -166,22 +166,31 @@ internal fun ChatSpecBindingEffect(model: AppModel, tab: ChatTab, sessionId: Str
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val eligible = sessionId != null && project.isNotEmpty() && !tabId.startsWith("design:")
     DisposableEffect(tabId) {
-        onDispose { specs.bound.remove(tabId) }
+        onDispose {
+            specs.bound.remove(tabId)
+            specs.unbound.remove(tabId)
+        }
     }
     LaunchedEffect(api, project, sessionId, eligible, specs.bindings, lifecycle) {
+        // Not known again until the server answers for this session.
+        specs.unbound.remove(tabId)
         if (!eligible || api == null || sessionId == null) {
             specs.bound.remove(tabId)
             return@LaunchedEffect
         }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
+                var failed = false
                 val binding = try {
                     api.specBySession(project, sessionId)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
+                    failed = true
                     null
                 }
+                // Only an answer of none may offer to start a spec here; a failed lookup is not known.
+                if (binding == null && !failed) specs.unbound[tabId] = true else specs.unbound.remove(tabId)
                 if (binding != null) {
                     val known = specs.bound[tabId]?.takeIf { it.slug == binding.slug }
                     specs.bound[tabId] = known ?: ChatSpecBinding(binding.slug)
@@ -369,6 +378,8 @@ internal fun SpecWorkflowMenuSection(model: AppModel, tab: ChatTab, onDone: () -
     val tokens = LocalPpmTokens.current
     val binding = model.specs.bound[tab.tabId]
     val locked = tab.session != null
+    // A chat with a session starts a spec bound to itself only once the server said it drives none.
+    if (locked && binding == null && model.specs.unbound[tab.tabId] != true) return
     val pending = pendingWorkflow(model, tab)
     var checks by remember(tab.tabId) { mutableStateOf(pending?.checks ?: "standard") }
     Column(Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top).testTag("modes-workflow")) {

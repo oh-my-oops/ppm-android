@@ -88,6 +88,9 @@ class TabletSpecsTest {
     /** Whether `s-1` is bound to the spec `login`; a POST to `/specs` binds it. */
     @Volatile private var bound = true
 
+    /** `by-session` fails, so whether `s-1` drives a spec is not known. */
+    @Volatile private var lookupFails = false
+
     private val loginView = """{"slug":"login","title":"Login flow","kind":"feature","workflow":"requirements-first","checks":"thorough",
         "current":"requirements","order":["requirements","design","tasks"],
         "phases":{"requirements":{"status":"draft","file":"specs/login/requirements.md","issues":[],"text":"# Login needs","submitted":true,"approveBlocked":null},
@@ -110,6 +113,8 @@ class TabletSpecsTest {
                 seen += Seen("$method $path", request.body?.utf8().orEmpty())
                 val data = when {
                     path.startsWith("/ws/") -> return MockResponse.Builder().code(503).build()
+                    lookupFails && path == "/api/project/p/specs/by-session/s-1" ->
+                        return MockResponse.Builder().code(500).addHeader("Content-Type", "application/json").body("""{"ok":false,"error":"Lookup failed"}""").build()
                     path.endsWith("/messages") -> """{"messages":[],"total":0,"hasMore":false}"""
                     path == "/api/project/p/specs/by-session/s-1" -> if (bound) """{"slug":"login","taskId":null,"providerId":"claude"}""" else "null"
                     method == "GET" && path == "/api/project/p/specs" -> specList
@@ -248,6 +253,8 @@ class TabletSpecsTest {
             }
         }
         waitFor { seen.any { it.line == "GET /api/project/p/specs/by-session/s-1" } }
+        // Offered once the server said the chat drives none.
+        waitFor { model.specs.unbound["tab-1"] == true }
         assertEquals(0, count("composer-spec-chip"))
         assertEquals(0, count("spec-pane-beside"))
         waitForTag("modes-workflow")
@@ -263,6 +270,30 @@ class TabletSpecsTest {
         compose.onNodeWithTag("composer-spec-chip").assertExists()
         // The request to show it is taken by the chat bound to it.
         waitFor { !model.specs.paneRequested("login") }
+    }
+
+    @Test
+    fun `a chat whose spec lookup failed is offered no spec to start, so a bound one is never taken off its spec`() {
+        bound = false
+        lookupFails = true
+        val tab = startedTab()
+        compose.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                Row(Modifier.size(width = 1280.dp, height = 800.dp)) {
+                    Box(Modifier.width(940.dp).fillMaxHeight()) { ChatPane(model = model, tab = tab) }
+                    ModePanel(PermissionMode.DEFAULT, pick = {}, footer = { SpecWorkflowMenuSection(model, tab, onDone = {}) })
+                }
+            }
+        }
+        waitFor { seen.any { it.line == "GET /api/project/p/specs/by-session/s-1" } }
+        // Past the answer: still nothing offered, and nothing created.
+        repeat(10) {
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(50))
+            compose.waitForIdle()
+        }
+        assertEquals(0, count("modes-workflow"))
+        assertTrue(model.specs.unbound["tab-1"] != true)
+        assertTrue(seen.none { it.line == "POST /api/project/p/specs" })
     }
 
     @Test

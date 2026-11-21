@@ -43,6 +43,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,6 +75,7 @@ import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.SpecActionResult
 import com.hienlh.ppm.client.SpecPhases
 import com.hienlh.ppm.client.SpecSummary
+import com.hienlh.ppm.client.SpecTaskTesting
 import com.hienlh.ppm.client.SpecTaskView
 import com.hienlh.ppm.client.SpecView
 import com.hienlh.ppm.client.approveSpec
@@ -101,6 +103,7 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.SpecDocument
 import com.hienlh.ppm.state.SpecStartChoice
+import com.hienlh.ppm.state.SpecTaskCopy
 import com.hienlh.ppm.state.SpecWorkflowCopy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -884,8 +887,10 @@ private fun TaskRow(
             }
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val testing = t.testing
             when {
-                t.done -> Pill(run?.green?.let { "Green · ${it.passed ?: 0} pass" } ?: "Done", Tone.GREEN)
+                testing != null -> TestingPill(testing, t.id)
+                t.done -> Pill(run?.green?.let { SpecTaskCopy.green(it.passed) } ?: "Done", Tone.GREEN)
                 t.status == "red" -> Pill("Red · writing code", Tone.RED)
                 t.status == "running" -> Pill(if (view.thorough && t.noTest == null) "Writing tests" else "Running", Tone.ACCENT)
                 t.status == "failed" -> Pill("Failed", Tone.RED)
@@ -929,6 +934,26 @@ private fun StateDot(t: SpecTaskView) {
         t.status == "failed" -> Box(base.background(tokens.error.opacity(0.15).color), contentAlignment = Alignment.Center) { PpmIcon(ProductIcon.CircleX, 12.dp, tokens.error.color) }
         t.next == "blocked" -> Box(base.background(tokens.panel2.color), contentAlignment = Alignment.Center) { PpmIcon(ProductIcon.Clock, 12.dp, tokens.text3.color) }
         else -> Box(base.cssBorder(tokens.border.color, CircleShape))
+    }
+}
+
+/**
+ * `TestingPill`: PPM is running this task's tests now, or the whole suite its `task_green` call
+ * still waits on — which check, and for how long, ticking every second.
+ */
+@Composable
+private fun TestingPill(testing: SpecTaskTesting, taskId: String) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(testing) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    val since = testing.startedAt?.toEpochMilli() ?: now
+    val label = SpecTaskCopy.testing(testing.kind, (now - since) / 1_000)
+    Box(Modifier.testTag("${LocalSpecTag.current}-task-testing:$taskId")) {
+        Pill(label, Tone.ACCENT, icon = ProductIcon.Loader2, spinning = true, description = "$label. ${SpecTaskCopy.testingTitle(testing.kind)}")
     }
 }
 

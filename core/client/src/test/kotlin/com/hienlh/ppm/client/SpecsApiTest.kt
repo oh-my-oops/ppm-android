@@ -37,9 +37,10 @@ class SpecsApiTest {
          "tasks":[
            {"id":"1","title":"Model","line":4,"optional":false,"status":"done","done":true,"next":"finished","blockedReason":null,"wave":0,
             "requirements":["1.1"],"deps":[],"files":["src/a.ts"],"tests":[],"noTest":null,"screen":null,"children":[],
-            "run":{"status":"done","sessionId":"task-1","green":{"at":"x","command":"bun test","outcome":"pass","failing":[],"passed":4,"failed":0,"weak":false,"output":"","durationMs":1}}},
+            "run":{"status":"done","sessionId":"task-1","green":{"at":"x","command":"bun test","outcome":"pass","failing":[],"passed":4,"failed":0,"weak":false,"output":"","durationMs":1}},
+            "testing":{"kind":"suite","startedAt":"2026-11-21T09:00:00.000Z"}},
            {"id":"3","title":"UI","line":9,"optional":true,"status":"todo","done":false,"next":"start","blockedReason":null,"wave":null,
-            "requirements":[],"deps":["1"],"files":[],"tests":[],"noTest":null,"screen":null,"children":[],"run":null}],
+            "requirements":[],"deps":["1"],"files":[],"tests":[],"noTest":null,"screen":null,"children":[],"run":null,"testing":{"kind":"bogus","startedAt":"x"}}],
          "approvals":{},"baseline":null,"baselineRunning":false,"suite":{"newFailures":["a.test.ts > b"]},"suiteRunning":false,
          "run":{"active":true,"startedAt":"x","wave":1},"runLive":true,"sessionId":"chat-1","changeRequests":[],"updatedAt":"2026-11-11T08:00:00.000Z"}
     """.trimIndent()
@@ -91,6 +92,9 @@ class SpecsApiTest {
         assertEquals("task-1", spec.tasks[0].run?.sessionId)
         assertEquals(4, spec.tasks[0].run?.green?.passed)
         assertTrue(spec.tasks[1].optional)
+        // The whole-suite run a green task's task_green call still waits on; an unknown kind is none.
+        assertEquals(SpecTaskTesting("suite", java.time.Instant.parse("2026-11-21T09:00:00Z")), spec.tasks[0].testing)
+        assertNull(spec.tasks[1].testing)
         assertEquals(listOf("1"), spec.tasks[1].deps)
         assertEquals(listOf("a.test.ts > b"), spec.suiteNewFailures)
         assertTrue(spec.running)
@@ -126,10 +130,10 @@ class SpecsApiTest {
 
     @Test
     fun `run all and stop post to the spec's run routes`() = withServer(
-        ok("""{"message":"Run all started: 2 waves.","spec":$view}"""),
+        ok("""{"message":"The tasks were handed to the spec's chat.","spec":$view}"""),
         ok("""{"message":"Stopped.","spec":$view}"""),
     ) { server, api ->
-        assertEquals("Run all started: 2 waves.", api.runAllSpec("ppm", "login").message)
+        assertEquals("The tasks were handed to the spec's chat.", api.runAllSpec("ppm", "login").message)
         val run = server.takeRequest()
         assertEquals("POST", run.method)
         assertEquals("/api/project/ppm/specs/login/run", run.target)

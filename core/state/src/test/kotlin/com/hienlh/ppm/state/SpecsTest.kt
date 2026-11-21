@@ -148,4 +148,18 @@ class SpecsTest {
         assertFalse(phase(submitted = true, approveBlocked = "Approve the UI drawing first (UI: yes).").canAct)
         assertFalse(phase("approved").canAct)
     }
+
+    @Test
+    fun `a run in flight shows which check and for how long, and green names its pass count only when reported`() {
+        assertEquals("Testing red · 0s", SpecTaskCopy.testing("red", 0))
+        assertEquals("Testing green · 59s", SpecTaskCopy.testing("green", 59))
+        assertEquals("Testing green · 1m 00s", SpecTaskCopy.testing("green", 60))
+        assertEquals("Green · checking whole suite · 3m 07s", SpecTaskCopy.testing("suite", 187))
+        assertEquals("0s", SpecTaskCopy.elapsed(-4))
+        assertEquals("PPM is running this task's tests", SpecTaskCopy.testingTitle("red"))
+        assertTrue(SpecTaskCopy.testingTitle("suite").startsWith("This task is green"))
+        assertEquals("Green · 4 pass", SpecTaskCopy.green(4))
+        assertEquals("Green · 0 pass", SpecTaskCopy.green(0))
+        assertEquals("Green", SpecTaskCopy.green(null))
+    }
 }

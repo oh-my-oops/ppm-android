@@ -153,6 +153,20 @@ data class SpecTaskRun(
     }
 }
 
+/**
+ * A run PPM has in flight for a task now (`SpecTaskView.testing`): its `red` or `green` tests, or
+ * (`suite`) the whole suite its `task_green` call runs after the task went green, before that call answers.
+ */
+data class SpecTaskTesting(val kind: String, val startedAt: Instant?) {
+    companion object {
+        fun from(json: JsonElement?): SpecTaskTesting? {
+            if (json.obj == null) return null
+            val kind = json["kind"].string?.takeIf { it == "red" || it == "green" || it == "suite" } ?: return null
+            return SpecTaskTesting(kind, WireDate.parse(json["startedAt"]))
+        }
+    }
+}
+
 /** One task (`SpecTaskView`). */
 data class SpecTaskView(
     val id: String,
@@ -171,6 +185,8 @@ data class SpecTaskView(
     val tests: List<String>,
     val noTest: String?,
     val run: SpecTaskRun?,
+    /** A run PPM has in flight for this task now; null from a server older than it, or when none runs. */
+    val testing: SpecTaskTesting? = null,
 ) {
     /** Running, or red and writing its code. */
     val active: Boolean get() = status == "running" || status == "red"
@@ -284,6 +300,7 @@ data class SpecView(
                 tests = strings("tests"),
                 noTest = t["noTest"].string,
                 run = SpecTaskRun.from(t["run"]),
+                testing = SpecTaskTesting.from(t["testing"]),
             )
         }
     }
@@ -376,7 +393,10 @@ suspend fun ApiClient.resetSpecTask(project: String, slug: String, taskId: Strin
 suspend fun ApiClient.checkSpecSuite(project: String, slug: String): SpecActionResult =
     result(call("POST", "${specPath(project, slug)}/suite/check", body = buildJsonObject {}))
 
-/** Run all: each wave's tasks side by side, each in a chat of its own. */
+/**
+ * Run all: the spec's own chat is handed every open task and gives each one a subagent; a run in
+ * new chats per task happens only when the user asks the chat for it (`spec_run_sessions`).
+ */
 suspend fun ApiClient.runAllSpec(project: String, slug: String): SpecActionResult =
     result(call("POST", "${specPath(project, slug)}/run", body = buildJsonObject {}))
 
