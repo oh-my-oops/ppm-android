@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -32,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -92,6 +94,8 @@ import com.hienlh.ppm.protocol.Question
 import com.hienlh.ppm.protocol.SessionCollabApprovalInput
 import com.hienlh.ppm.protocol.VaultCardInput
 import com.hienlh.ppm.protocol.prettyString
+import com.hienlh.ppm.state.ApprovalChoice
+import com.hienlh.ppm.state.LineComments
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -120,6 +124,8 @@ fun PendingApprovalCard(request: ApprovalRequest, respond: (approved: Boolean, d
     if (collab != null) return CollabApprovalCard(request.requestId, collab, modifier)
     val vault = remember(request.tool, request.input) { VaultCardInput.from(request.tool, request.input) }
     if (vault != null) return VaultCard(request.requestId, vault, modifier)
+    val plan = remember(request.tool, request.input) { LineComments.planOf(request.tool, request.input) }
+    if (plan != null) return PlanApprovalCard(request.requestId, plan, respond, modifier)
     ToolApprovalCard(request, respond, modifier)
 }
 
@@ -177,11 +183,85 @@ private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonEl
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SolidButton("Allow", tokens.success) { respond(true, null) }
-            SolidButton("Deny", tokens.error) { respond(false, null) }
+        ToolApprovalAnswers(request, respond)
+    }
+}
+
+/**
+ * A provider card's answers: Allow and Deny, and on a Claude card that offers a rule, "Allow <rule>
+ * for this chat", "Always in this project" (when the chat has a project folder) and "Deny…", which
+ * opens a box whose text reaches Claude as the denial's reason.
+ */
+@Composable
+private fun ToolApprovalAnswers(request: ApprovalRequest, respond: (Boolean, JsonElement?) -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val rule = request.rule
+    // `min-h-11 md:min-h-0`.
+    val tall = if (LocalPpmMobile.current) Modifier.heightIn(min = 44.dp) else Modifier
+    var denying by remember(request.requestId) { mutableStateOf(false) }
+    var instead by remember(request.requestId) { mutableStateOf("") }
+    val deny = { respond(false, ApprovalChoice.message(instead)) }
+    if (denying) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CardTextArea(
+                value = instead,
+                onValueChange = { instead = it },
+                placeholder = "Tell Claude what to do instead (optional)",
+                label = "Tell Claude what to do instead",
+                onEnter = deny,
+                onEscape = { denying = false },
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SolidButton(if (instead.isNotBlank()) "Deny and send" else "Deny", tokens.error, tall, horizontalPadding = 12) { deny() }
+                EdgeButton("Back", tokens.border, tokens.text2, tokens.text, null, tall) { denying = false }
+            }
+        }
+        return
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SolidButton("Allow", tokens.success, tall) { respond(true, null) }
+        if (rule != null) {
+            val edge = tokens.success.opacity(0.6)
+            EdgeButton("Allow ${rule.label} for this chat", edge, tokens.success, tokens.success, tokens.success.opacity(0.1), tall) {
+                respond(true, ApprovalChoice.scope("chat"))
+            }
+            if (rule.project) {
+                EdgeButton("Always in this project", edge, tokens.success, tokens.success, tokens.success.opacity(0.1), tall) {
+                    respond(true, ApprovalChoice.scope("project"))
+                }
+            }
+        }
+        SolidButton(if (rule != null) "Deny…" else "Deny", tokens.error, tall) {
+            if (rule != null) denying = true else respond(false, null)
         }
     }
+}
+
+/**
+ * `px-3 py-1.5 rounded text-xs font-medium border`: [edge] around it, [ink] its label ([hoverInk]
+ * under a pointer) and [hoverFill] behind it under a pointer.
+ */
+@Composable
+internal fun EdgeButton(
+    title: String,
+    edge: Rgba,
+    ink: Rgba,
+    hoverInk: Rgba,
+    hoverFill: Rgba?,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(4.dp)
+    val hover = rememberHover()
+    Box(
+        modifier
+            .clip(shape)
+            .background(hoverFill?.opacity(hover.lit.toDouble())?.color ?: Color.Transparent)
+            .ppmClickable(pressedColor = Color.Transparent, onClickLabel = title, source = hover.source, onClick = onClick)
+            .cssBorder(edge.color, shape)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) { BasicText(title, style = xsMedium.copy(color = ink.mix(hoverInk, hover.lit.toDouble()).color)) }
 }
 
 /**
@@ -189,12 +269,13 @@ private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonEl
  * pressed. Its label stays centred when a row stretches it ([modifier]), as a `<button>`'s does.
  */
 @Composable
-private fun SolidButton(
+internal fun SolidButton(
     title: String,
     color: Rgba,
     modifier: Modifier = Modifier,
     foreground: Color = Color.White,
     enabled: Boolean = true,
+    horizontalPadding: Int = 16,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(4.dp)
@@ -208,7 +289,7 @@ private fun SolidButton(
             // Submit's `disabled:cursor-not-allowed`.
             .pointerHoverIcon(if (enabled) WebCursor.Default else WebCursor.NotAllowed)
             .ppmClickable(enabled = enabled, pressedColor = Color.White.copy(alpha = 0.2f), source = hover.source, hoverWhileDisabled = true, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(horizontal = horizontalPadding.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) { BasicText(title, style = xsMedium.copy(color = foreground)) }
 }

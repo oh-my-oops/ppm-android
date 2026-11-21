@@ -33,6 +33,8 @@ data class ApprovalRequest(
     val input: JsonElement,
     val approved: Boolean? = null,
     val summary: ApprovalSummary? = null,
+    /** A Claude tool card: what "Allow for this chat / Always in this project" would allow. */
+    val rule: ApprovalRule? = null,
 ) {
     /** The questions of an `AskUserQuestion` request. */
     val questions: List<Question>
@@ -41,7 +43,24 @@ data class ApprovalRequest(
     companion object {
         fun from(json: JsonElement): ApprovalRequest? {
             val requestId = json["requestId"].string ?: return null
-            return ApprovalRequest(requestId, json["tool"].string ?: "unknown", json["input"] ?: JsonNull, json["approved"].bool, ApprovalSummary.from(json["summary"]))
+            return ApprovalRequest(
+                requestId, json["tool"].string ?: "unknown", json["input"] ?: JsonNull, json["approved"].bool,
+                ApprovalSummary.from(json["summary"]), ApprovalRule.from(json["rule"]),
+            )
+        }
+    }
+}
+
+/**
+ * What a Claude tool card's "Allow <label> for this chat" covers (`approval-rules.ts`), and whether
+ * the chat has a project folder, which "Always in this project" needs. A server older than these
+ * cards sends none, and the card keeps plain Allow and Deny.
+ */
+data class ApprovalRule(val label: String, val project: Boolean) {
+    companion object {
+        fun from(json: JsonElement?): ApprovalRule? {
+            val label = json["label"].string ?: return null
+            return ApprovalRule(label, json["project"].bool == true)
         }
     }
 }

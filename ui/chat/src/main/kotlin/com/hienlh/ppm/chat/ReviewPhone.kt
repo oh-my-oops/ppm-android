@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -98,24 +99,26 @@ fun ReviewPhone(review: SessionReview, ctx: ReviewTabContext, modifier: Modifier
 
     // `flex h-full flex-col overflow-hidden bg-bg`, its rows stacked at their fractional heights.
     CssColumn(modifier.fillMaxSize().background(tokens.bgSolid.color).clipToBounds()) {
-        PhoneHeader(decided, progress.total) { sheet = PhoneSheet.FILES }
+        PhoneHeader(decided, progress.total, ctx.comments) { sheet = PhoneSheet.FILES }
         ProgressLine(decided, progress.total)
         state.error?.let { ReviewErrorStrip(it) }
         if (focused != null) {
             PhoneFileHeader(state, focused, ctx) { sheet = PhoneSheet.ACTIONS }
             Box(Modifier.cssFlex().fillMaxWidth().fillMaxHeight()) {
-                ReviewPaneBody(
-                    state = state,
-                    compact = true,
-                    turns = ctx.turns,
-                    actions = actions,
-                    code = code,
-                    sheet = ctx.sheet,
-                    onRevertFile = { sheet = PhoneSheet.CONFIRM },
-                    onKeepFile = review::keepFile,
-                    onChange = if (state.canChange) review::changeFocused else null,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                CompositionLocalProvider(LocalReviewComments provides ctx.comments) {
+                    ReviewPaneBody(
+                        state = state,
+                        compact = true,
+                        turns = ctx.turns,
+                        actions = actions,
+                        code = code,
+                        sheet = ctx.sheet,
+                        onRevertFile = { sheet = PhoneSheet.CONFIRM },
+                        onKeepFile = review::keepFile,
+                        onChange = if (state.canChange) review::changeFocused else null,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
                 state.toast?.let { ReviewToastSlot(it, mobile = true, onUndo = undoToast) }
             }
             PhoneBottomBar(state, review) { sheet = PhoneSheet.CONFIRM }
@@ -172,7 +175,7 @@ fun ReviewPhone(review: SessionReview, ctx: ReviewTabContext, modifier: Modifier
  * title, how many blocks are decided, and the files.
  */
 @Composable
-private fun PhoneHeader(decided: Int, total: Int, onFiles: () -> Unit) {
+private fun PhoneHeader(decided: Int, total: Int, comments: ReviewTabComments?, onFiles: () -> Unit) {
     val tokens = LocalPpmTokens.current
     Row(
         Modifier
@@ -195,6 +198,7 @@ private fun PhoneHeader(decided: Int, total: Int, onFiles: () -> Unit) {
             }
             BasicText(count, Modifier.padding(end = 2.dp), style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color), maxLines = 1, softWrap = false)
         }
+        PhoneSendReviewCommentsButton(comments)
         PhoneIconButton(ProductIcon.FolderTree, "All files", onFiles)
     }
 }

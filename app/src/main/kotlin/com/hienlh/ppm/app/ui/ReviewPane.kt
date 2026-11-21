@@ -21,6 +21,7 @@ import com.hienlh.ppm.app.TextInputFocus
 import com.hienlh.ppm.chat.ReviewDesktop
 import com.hienlh.ppm.chat.ReviewPhone
 import com.hienlh.ppm.chat.ReviewSheet
+import com.hienlh.ppm.chat.ReviewTabComments
 import com.hienlh.ppm.chat.ReviewTabContext
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.ppmText
@@ -73,6 +74,7 @@ private fun ReviewPane(model: AppModel, tab: ReviewTab) {
         ownsKeys = { model.activeTabId == tab.tabId },
         sheet = sheet,
         listSheet = listSheet,
+        comments = remember(tab) { ReviewTabComments(tab.sessionId, model.reviewComments) { model.sendReviewComments(tab) } },
     )
     // `useIsMobile`: the phone's layout below the desktop's breakpoint.
     if (model.wide) ReviewDesktop(review, ctx) else ReviewPhone(review, ctx)

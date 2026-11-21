@@ -519,6 +519,7 @@ private fun ProviderSettings(
                 config?.agentTeams ?: false,
             ) { state.saveField(provider, "agent_teams", it) }
             if (config?.agentTeams == true) TeamList(model)
+            SavedApprovals(model.api)
             SwitchRow(
                 "1M Context Window",
                 "Requires an entitled account (Max/Team/Enterprise) and an Opus 4 / Sonnet 4 model. Other accounts will error.",

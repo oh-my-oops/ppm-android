@@ -116,6 +116,7 @@ import com.hienlh.ppm.state.HealthCheck
 import com.hienlh.ppm.state.HealthWatch
 import com.hienlh.ppm.state.HistoryList
 import com.hienlh.ppm.state.KeyBindings
+import com.hienlh.ppm.state.LineComments
 import com.hienlh.ppm.state.McpSignInBackend
 import com.hienlh.ppm.state.McpSignInFlow
 import com.hienlh.ppm.state.ModelCatalog
@@ -127,6 +128,7 @@ import com.hienlh.ppm.state.agentSessionOpening
 import com.hienlh.ppm.state.workspace.NewChatDefaults
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.RejectedSend
+import com.hienlh.ppm.state.ReviewComments
 import com.hienlh.ppm.state.SessionChanges
 import com.hienlh.ppm.state.SessionChangesBackend
 import com.hienlh.ppm.state.SessionChangesList
@@ -3563,6 +3565,32 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 ),
             )
         }
+    }
+
+    /** Line comments left in review tabs, kept on this device until they are sent (`review-comments-store.ts`). */
+    val reviewComments: ReviewComments by lazy { ReviewComments(prefs) }
+
+    /**
+     * The Review tab's "Send N comments to chat": the chat opened, its comments as one message put in
+     * its composer as a chip the person can add to before sending (`sendToChat`), then cleared.
+     */
+    fun sendReviewComments(review: ReviewTab) {
+        val list = reviewComments.of(review.sessionId)
+        val text = LineComments.formatReviewComments(list)
+        if (text.isEmpty()) return
+        val label = "${list.size} review comment" + if (list.size == 1) "" else "s"
+        withWorkspace { store ->
+            val held = chats.keys.toSet()
+            // A chat opened for it takes the chip from its metadata; one already open is given it here.
+            val id = store.openTab(reviewChatTab(review, text, label))
+            val chat = chats[id]?.takeIf { id in held } ?: return@withWorkspace
+            chat.attachments += ComposerAttachment(
+                id = java.util.UUID.randomUUID().toString(), name = label, isImage = false,
+                status = ComposerAttachment.Status.READY, textContent = text,
+            )
+            chat.requestFocus()
+        }
+        reviewComments.clear(review.sessionId)
     }
 
     /** A turn chip's "Show in chat": its call's card, or the turn's prompt, once the chat shows it. */
