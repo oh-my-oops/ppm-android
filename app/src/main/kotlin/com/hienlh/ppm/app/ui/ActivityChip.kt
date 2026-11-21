@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -46,14 +47,18 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.AgentRunningEntry
+import com.hienlh.ppm.protocol.LiveBackgroundTask
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionUnread
 import com.hienlh.ppm.protocol.TeamMemberActivity
+import com.hienlh.ppm.state.ActivityPopoverTab
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.LinkedSessionStatus
 import com.hienlh.ppm.state.LinkedSessionView
 import com.hienlh.ppm.state.RunningAgentView
 import com.hienlh.ppm.state.SessionCollabState
+import com.hienlh.ppm.state.activityOpeningTab
+import com.hienlh.ppm.state.activityShownTab
 import com.hienlh.ppm.state.buildRunningRows
 import com.hienlh.ppm.state.collectLinkedSessions
 import com.hienlh.ppm.state.findCardLabel
@@ -65,14 +70,11 @@ import com.hienlh.ppm.state.view
 import java.time.Instant
 import kotlinx.coroutines.delay
 
-enum class ActivityTab {
-    Agents,
-    Sessions,
-}
-
 /**
  * First chip of the chat footer's context row (`ActivityChip` in `activity-chip.tsx`): merges
- * running agents and linked sessions into one chip with a two-tab popover/sheet.
+ * running agents, the CLI's background tasks and linked sessions into one chip with a tabbed
+ * popover/sheet. The Agents tab exists only while an agent runs, the Tasks tab only while a
+ * background task does — each task with its own Stop, sent straight to the CLI ([onStopTask]).
  */
 @Composable
 fun ActivityChip(
@@ -92,6 +94,9 @@ fun ActivityChip(
     onStopChildSessions: suspend () -> Unit,
     onError: (title: String, detail: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
+    /** The CLI's background tasks right now (`background_tasks`), and how to stop one. */
+    liveTasks: List<LiveBackgroundTask> = emptyList(),
+    onStopTask: ((taskId: String) -> Unit)? = null,
 ) {
     val runningRows = remember(running, teamMembers) { buildRunningRows(running, teamMembers) }
     val doneRows = remember(items, runningRows) { finishedSiblingRows(items, runningRows) }
@@ -146,14 +151,15 @@ fun ActivityChip(
     }
 
     var open by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableStateOf(ActivityTab.Sessions) }
+    var selectedTab by remember { mutableStateOf(ActivityPopoverTab.SESSIONS) }
 
     val visibleSessions = split.visible
     val needsYou = visibleSessions.any { it.status == LinkedSessionStatus.NEEDS_APPROVAL }
     val sessionsRunning = visibleSessions.any { it.status == LinkedSessionStatus.RUNNING }
     val hasAgents = agentsActive
+    val hasTasks = liveTasks.isNotEmpty()
     val hasSessions = visibleSessions.isNotEmpty() || split.hidden.isNotEmpty()
-    val visible = !sessionId.isNullOrEmpty() && (hasAgents || hasSessions)
+    val visible = !sessionId.isNullOrEmpty() && (hasAgents || hasTasks || hasSessions)
 
     LaunchedEffect(visible) {
         if (!visible) open = false
@@ -167,14 +173,15 @@ fun ActivityChip(
     val unread = visibleSessions.any { it.status == LinkedSessionStatus.NEW_MESSAGE }
     val dot = when {
         needsYou -> LinkedSessionStatus.NEEDS_APPROVAL
-        hasAgents || sessionsRunning -> LinkedSessionStatus.RUNNING
+        hasAgents || hasTasks || sessionsRunning -> LinkedSessionStatus.RUNNING
         unread -> LinkedSessionStatus.NEW_MESSAGE
         else -> LinkedSessionStatus.IDLE
     }
-    val shownTab = if (hasAgents) selectedTab else ActivityTab.Sessions
+    val shownTab = activityShownTab(selectedTab, hasAgents, hasTasks)
 
     val title = listOfNotNull(
         if (hasAgents) "${runningRows.size} ${if (runningRows.size == 1) "agent" else "agents"} running" else null,
+        if (hasTasks) "${liveTasks.size} ${if (liveTasks.size == 1) "background task" else "background tasks"}" else null,
         if (hasSessions) "${visibleSessions.size} linked" else null,
         if (needsYou) "one needs you" else null,
     ).joinToString(" · ")
@@ -199,11 +206,7 @@ fun ActivityChip(
             if (open) {
                 open = false
             } else {
-                selectedTab = when {
-                    needsYou -> ActivityTab.Sessions
-                    hasAgents -> ActivityTab.Agents
-                    else -> ActivityTab.Sessions
-                }
+                selectedTab = activityOpeningTab(needsYou, hasAgents, hasTasks)
                 open = true
             }
         },
@@ -236,7 +239,37 @@ fun ActivityChip(
                 }
             }
         }
-        if (hasAgents && hasSessions) {
+        if (hasAgents && hasTasks) {
+            Box(Modifier.width(1.dp).height(12.dp).background(tokens.border.color))
+        }
+        if (hasTasks) {
+            Row(
+                Modifier.testTag("activity-part:tasks"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                PpmIcon(ProductIcon.Layers, 14.dp, tokens.text3.color)
+                BasicText(
+                    "${liveTasks.size}",
+                    style = LocalFooterTextStyle.current.copy(
+                        color = tokens.text.color,
+                        fontWeight = FontWeight.Medium,
+                        fontFeatureSettings = "tnum",
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                if (!hideWords) {
+                    BasicText(
+                        if (liveTasks.size == 1) "task" else "tasks",
+                        style = LocalFooterTextStyle.current,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+        }
+        if ((hasAgents || hasTasks) && hasSessions) {
             Box(Modifier.width(1.dp).height(12.dp).background(tokens.border.color))
         }
         if (hasSessions) {
@@ -279,7 +312,7 @@ fun ActivityChip(
     FooterPopover(
         open = open,
         onClose = { open = false },
-        label = "Agents and linked sessions",
+        label = "Agents, background tasks and linked sessions",
         align = FooterPopoverAlign.Left,
     ) {
         Row(
@@ -295,26 +328,38 @@ fun ActivityChip(
                     label = "Agents",
                     icon = ProductIcon.Bot,
                     count = runningRows.size,
-                    active = shownTab == ActivityTab.Agents,
+                    active = shownTab == ActivityPopoverTab.AGENTS,
                     alert = false,
                     modifier = Modifier.weight(1f),
                     testTag = "activity-tab:agents",
-                    onClick = { selectedTab = ActivityTab.Agents },
+                    onClick = { selectedTab = ActivityPopoverTab.AGENTS },
+                )
+            }
+            if (hasTasks) {
+                ActivityTabButton(
+                    label = "Tasks",
+                    icon = ProductIcon.Layers,
+                    count = liveTasks.size,
+                    active = shownTab == ActivityPopoverTab.TASKS,
+                    alert = false,
+                    modifier = Modifier.weight(1f),
+                    testTag = "activity-tab:tasks",
+                    onClick = { selectedTab = ActivityPopoverTab.TASKS },
                 )
             }
             ActivityTabButton(
                 label = "Sessions",
                 icon = ProductIcon.Link,
                 count = visibleSessions.size,
-                active = shownTab == ActivityTab.Sessions,
+                active = shownTab == ActivityPopoverTab.SESSIONS,
                 alert = needsYou,
                 modifier = Modifier.weight(1f),
                 testTag = "activity-tab:sessions",
-                onClick = { selectedTab = ActivityTab.Sessions },
+                onClick = { selectedTab = ActivityPopoverTab.SESSIONS },
             )
         }
 
-        if (shownTab == ActivityTab.Agents) {
+        if (shownTab == ActivityPopoverTab.AGENTS) {
             ActivityAgentList(
                 agents = agentViews,
                 onOpen = { view ->
@@ -322,6 +367,8 @@ fun ActivityChip(
                     onOpenAgent(view)
                 },
             )
+        } else if (shownTab == ActivityPopoverTab.TASKS) {
+            ActivityTaskList(tasks = liveTasks, onStop = onStopTask)
         } else {
             LinkedSessionsPanel(
                 groups = groups,
@@ -469,6 +516,83 @@ private fun ActivityAgentList(
                     )
                 }
                 PpmIcon(ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
+            }
+        }
+    }
+}
+
+/** The CLI's background tasks (`TaskList`); Stop asks the CLI to end one, and the row goes once it has. */
+@Composable
+private fun ActivityTaskList(
+    tasks: List<LiveBackgroundTask>,
+    onStop: ((String) -> Unit)?,
+) {
+    val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val scroll = rememberScrollState()
+    var stopping by remember { mutableStateOf(emptySet<String>()) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(if (mobile) Modifier else Modifier.heightIn(max = 220.dp))
+            .verticalScroll(scroll)
+            .padding(4.dp),
+    ) {
+        for (task in tasks) {
+            val busy = task.taskId in stopping
+            val name = task.description.ifEmpty { "task" }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 44.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .testTag("background-task:" + task.taskId),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                LinkedStatusDot(LinkedSessionStatus.RUNNING)
+                Column(
+                    Modifier.weight(1f).webTitle(task.description),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    TruncatedText(
+                        AnnotatedString(task.description.ifEmpty { task.taskId }),
+                        ppmText(13f, FontWeight.Medium, lineHeight = 19.5f).copy(color = tokens.text.color),
+                    )
+                    TruncatedText(
+                        AnnotatedString(if (busy) "Stopping…" else task.kindLabel),
+                        ppmText(11f, kind = FontKind.MONO, lineHeight = 16.5f).copy(color = tokens.text3.color),
+                    )
+                }
+                if (onStop != null) {
+                    val shape = RoundedCornerShape(6.dp)
+                    Box(
+                        Modifier
+                            .size(if (mobile) 26.dp else 28.dp)
+                            .clip(shape)
+                            .webTitle("Stop")
+                            .ppmClickable(
+                                enabled = !busy,
+                                pressedColor = tokens.surfaceHover.color,
+                                hoverColor = tokens.surfaceHover.color,
+                                shape = shape,
+                                onClick = {
+                                    stopping = stopping + task.taskId
+                                    onStop(task.taskId)
+                                },
+                            )
+                            .semantics { contentDescription = "Stop " + name }
+                            .testTag("stop-task:" + task.taskId),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PpmIcon(
+                            if (busy) ProductIcon.Loader2 else ProductIcon.Square,
+                            14.dp,
+                            if (busy) tokens.text2.color.copy(alpha = 0.5f) else tokens.text2.color,
+                            spinning = busy,
+                        )
+                    }
+                }
             }
         }
     }

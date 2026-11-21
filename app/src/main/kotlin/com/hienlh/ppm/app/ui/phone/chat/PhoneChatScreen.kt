@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -223,6 +224,12 @@ fun PhoneChatScreen(
     turnChips: (@Composable () -> Unit)? = null,
     /** Turn chips alone are a message that can be sent. */
     hasTurnChips: Boolean = false,
+    /** Claude's suggested next prompt, when the composer offers it: its placeholder, and a chip to tap. */
+    promptSuggestion: String? = null,
+    /** The suggestion went into the box ([composerState]), for the draft to be saved. */
+    onPromptSuggestionTaken: (String) -> Unit = {},
+    /** Right above the queued messages and the composer: the `/btw` side question's answer. */
+    aboveComposerContent: @Composable () -> Unit = {},
     transcriptContent: @Composable () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
@@ -364,6 +371,8 @@ fun PhoneChatScreen(
                     onOpenSessionInfoSheet = onOpenSessionInfoSheet,
                 )
 
+                aboveComposerContent()
+
                 // The server's queue, right above the box it was typed in (`QueuedMessagesStack`).
                 PhoneQueuedMessagesStack(
                     messages = queuedMessages,
@@ -377,10 +386,20 @@ fun PhoneChatScreen(
                 val draftText = composerState.text.toString()
                 val canSend = sendEnabled && (draftText.isNotBlank() || attachments.isNotEmpty() || hasTurnChips)
                 val bypass = permissionModeId == "bypassPermissions"
-                val placeholder = if (specModeEnabled) "Describe the feature or bug for Spec mode…" else "Message ${modelLabel}…"
+                val placeholder = promptSuggestion?.takeIf { draftText.isEmpty() }
+                    ?: if (specModeEnabled) "Describe the feature or bug for Spec mode…" else "Message ${modelLabel}…"
                 val composerFocus = remember { FocusRequester() }
                 var composerFocused by remember { mutableStateOf(false) }
                 var openingComposer by remember { mutableStateOf(false) }
+                // A phone has no Tab: Claude's suggestion is a tap above the box, which takes it and opens the box.
+                if (promptSuggestion != null && draftText.isEmpty()) {
+                    PhonePromptSuggestionChip(promptSuggestion) {
+                        composerState.setTextAndPlaceCursorAtEnd(promptSuggestion)
+                        onPromptSuggestionTaken(promptSuggestion)
+                        TextInputFocus.asked()
+                        openingComposer = true
+                    }
+                }
                 // Claude's app: one row (+, the placeholder, the mic) until the box is used; a tap opens it
                 // with the keyboard, and an empty box folds back when it loses focus or the keyboard closes.
                 val collapsed = !composerFocused && !openingComposer && draftText.isEmpty() &&
@@ -498,7 +517,8 @@ fun PhoneChatScreen(
                         onFocusChanged = { composerFocused = it },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 28.dp, max = 140.dp)
+                            // Two lines to start (`min-h-12`), room to grow.
+                            .heightIn(min = 50.dp, max = 140.dp)
                             .padding(horizontal = 4.dp, vertical = 4.dp),
                         style = ppmText(15f, lineHeight = 21f),
                         // A textarea, as the old composer and the web's: long text wraps and the box grows to 140 dp.

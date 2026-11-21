@@ -152,6 +152,7 @@ import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.chromeTextArea
 import com.hienlh.ppm.design.colorsFade
@@ -179,6 +180,7 @@ import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.PromptCacheStatus
 import com.hienlh.ppm.state.ReconnectStage
 import com.hienlh.ppm.state.composerPlaceholder as stateComposerPlaceholder
+import com.hienlh.ppm.state.offeredPromptSuggestion
 import com.hienlh.ppm.state.stepHistory
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -324,6 +326,17 @@ fun ChatComposer(
         return true
     }
 
+    // Claude's guess at the next prompt, on an empty, idle box: its placeholder, and Tab (a tap on a phone) takes it.
+    val offeredSuggestion = offeredPromptSuggestion(
+        state.promptSuggestion, chat.providerId, running, offline, tab.firstSendPending, tab.draft.text, tab.agent != null,
+    )
+    fun acceptSuggestion() {
+        val suggestion = offeredSuggestion ?: return
+        tab.draft.setTextAndPlaceCursorAtEnd(suggestion)
+        tab.edited()
+        tab.requestFocus()
+    }
+
     val onKey: (KeyEvent) -> Boolean = { event ->
         if (event.type != KeyEventType.KeyDown) {
             false
@@ -340,6 +353,11 @@ fun ChatComposer(
                 (event.key == Key.DirectionUp || event.key == Key.DirectionDown) &&
                     !event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed && !event.isShiftPressed ->
                     recall(event.key == Key.DirectionUp)
+                event.key == Key.Tab && !event.isShiftPressed && !event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed &&
+                    offeredSuggestion != null && tab.draft.text.isEmpty() -> {
+                    acceptSuggestion()
+                    true
+                }
                 event.key == Key.Tab && event.isShiftPressed -> {
                     tab.pickMode((tab.permissionMode ?: PermissionMode.FALLBACK).next)
                     true
@@ -403,19 +421,22 @@ fun ChatComposer(
         AttachmentChips(tab.attachments, inset, onRemove = { id -> model.removeAttachment(tab, id) }, onTextTap = { tab.requestFocus() })
         ComposerTurnChipRow(tab, Modifier.padding(start = inset, end = inset, top = 8.dp))
 
-        val placeholder = composerPlaceholder(running, offline)
+        val placeholder = offeredSuggestion ?: composerPlaceholder(running, offline)
         if (mobile) {
-            // `px-3 pb-0 pt-2 text-sm leading-relaxed max-h-20`: 16 px phone input, 80 dp total cap.
+            // A phone has no Tab: the suggestion is a tap above the textarea there.
+            if (offeredSuggestion != null) PromptSuggestionChip(offeredSuggestion, ::acceptSuggestion)
+            // `px-3 pb-0 pt-2 text-sm leading-relaxed min-h-12 max-h-32`: 16 px phone input, two lines
+            // to start (48 dp with the padding) and room to grow to 128 dp.
             ComposerField(
                 tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
                 style = ppmText(16f, lineHeight = 16f * 1.625f),
                 padding = 0.dp,
                 cssStart = 12.dp,
-                maxHeight = 72.dp,
+                maxHeight = 120.dp,
                 placeholder = placeholder,
                 enabled = !locked,
                 onFocusChange = { fieldFocused = it },
-                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp).defaultMinSize(minHeight = 40.dp),
             )
         } else {
             // `px-3.5 pb-1 pt-3 text-sm leading-relaxed max-h-[160px] min-h-12`: 12 dp top (`8 + 4`), 4 dp bottom, 48 dp min, 160 dp max.
@@ -425,7 +446,7 @@ fun ChatComposer(
                 padding = 4.dp,
                 cssStart = 14.dp,
                 maxHeight = 152.dp,
-                placeholder = placeholder,
+                placeholder = if (offeredSuggestion != null) placeholder + "  (Tab)" else placeholder,
                 enabled = !locked,
                 onFocusChange = { fieldFocused = it },
                 modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 8.dp).defaultMinSize(minHeight = 40.dp),
@@ -501,6 +522,33 @@ fun ChatComposer(
     }
     if (mobile && modelOpen && !running) {
         ModelSheet(model, tab, chat, state, onDismiss = { modelOpen = false })
+    }
+}
+
+/**
+ * Claude's suggested next prompt as a tap on a phone (`prompt-suggestion-chip`): `mx-2 mt-2 h-[26px]
+ * rounded-full border bg-surface px-2.5 text-xs`, a sparkle and the suggestion on one line.
+ */
+@Composable
+private fun PromptSuggestionChip(suggestion: String, onAccept: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        Modifier
+            .padding(start = 8.dp, end = 8.dp, top = 8.dp)
+            .height(26.dp)
+            .clip(shape)
+            .background(tokens.panel2.color)
+            .cssBorder(tokens.border.color, shape)
+            .webTitle("Use this suggestion")
+            .ppmClickable(pressedColor = tokens.surfaceHover.color, shape = shape, onClickLabel = "Use this suggestion", onClick = onAccept)
+            .padding(horizontal = 10.dp)
+            .testTag("prompt-suggestion-chip"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        PpmIcon(ProductIcon.Sparkles, 14.dp, tokens.text2.color)
+        TruncatedText(AnnotatedString(suggestion), ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
     }
 }
 

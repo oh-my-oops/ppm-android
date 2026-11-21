@@ -962,6 +962,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** Fork, Edit and the version switcher on the chats' messages. */
     internal val edits = MessageEdits(this)
 
+    /** Each chat tab's `/btw` side question and its answer (AppModelSideQuestions.kt). */
+    val sideQuestions = com.hienlh.ppm.state.SideQuestions(scope)
+
     /** This device's copy of what a new chat is resolved from, for the open server. */
     internal val newChatCache: NewChatCache get() = NewChatCache(prefs, serverKey)
 
@@ -4751,6 +4754,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** What [ChatTab.clientCommand] answers: `/clear` opens a new chat beside [tab], one written while replying is refused. */
     private fun runClientCommand(tab: ChatTab, text: String): Boolean? {
+        sideQuestionCommand(tab, text)?.let { return it }
         val items = slashItems?.payload(tab.project, tab.providerId)?.items.orEmpty()
         return when (val command = ClientCommand.of(text, items, replying = tab.replyTo != null)) {
             null -> null

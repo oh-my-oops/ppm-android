@@ -95,6 +95,12 @@ data class ChatState(
     val team: TeamActivity = TeamActivity(),
     /** The commands the AI left running in the background, stopped ones included. */
     val backgroundShells: List<BackgroundShell> = emptyList(),
+    /** The CLI's background tasks right now, each stoppable from the activity chip's Tasks tab. */
+    val liveTasks: List<com.hienlh.ppm.protocol.LiveBackgroundTask> = emptyList(),
+    /** How full the context window was at the last turn's end (Claude); null before one ran here. */
+    val contextWindowPct: Int? = null,
+    /** Claude's guess at the next prompt, offered by an empty composer until a turn starts. */
+    val promptSuggestion: String? = null,
     /** The MCP servers this chat's Claude cannot use until someone signs in. */
     val mcpNeedsAuth: List<String> = emptyList(),
     /** Messages sent while a turn ran, not yet read by the AI, in the order it will read them: the server's list. */
@@ -313,6 +319,12 @@ class ChatController(
     fun killBackgroundShell(shellId: String) {
         if (shellId.isEmpty()) return
         transmit(ChatClientMessage.KillBackgroundShell(shellId))
+    }
+
+    /** Stops one of the CLI's background tasks with no model turn; the next `background_tasks` drops its row. */
+    fun stopBackgroundTask(taskId: String) {
+        if (taskId.isEmpty()) return
+        transmit(ChatClientMessage.StopBackgroundTask(taskId))
     }
 
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null) {
@@ -736,6 +748,9 @@ class ChatController(
             team = team,
             backgroundShells = transcript.backgroundShells,
             mcpNeedsAuth = transcript.mcpNeedsAuth,
+            liveTasks = transcript.liveTasks,
+            contextWindowPct = transcript.contextWindowPct,
+            promptSuggestion = transcript.promptSuggestion,
             queue = transcript.queue.messages,
             queueAnswer = transcript.queue.answer,
             effortStatus = transcript.effortStatus,

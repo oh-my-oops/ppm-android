@@ -265,6 +265,12 @@ sealed interface ChatFrame {
      */
     data class McpStatus(val needsAuth: List<String>) : ChatFrame
 
+    /** The CLI's background tasks right now, the whole list each time (`background_tasks`). */
+    data class BackgroundTasks(val tasks: List<LiveBackgroundTask>) : ChatFrame
+
+    /** Claude's guess at the person's next prompt, sent after a turn (`prompt_suggestion`). */
+    data class PromptSuggestion(val suggestion: String) : ChatFrame
+
     companion object {
         /** A list of server names; anything but an array is none (`Array.isArray(list) ? list : []`). */
         private fun names(json: JsonElement?): List<String> = json.array.orEmpty().mapNotNull { it.string }
@@ -330,6 +336,8 @@ sealed interface ChatFrame {
                 "assistant_ui" -> AssistantUiRequest.from(json)?.let(::AssistantUi) ?: Event(ChatEvent.from(json), seq)
                 "background_registry" -> BackgroundRegistry(json["shells"].array.orEmpty().mapNotNull(BackgroundShell::from))
                 "mcp_status" -> McpStatus(names(json["needsAuth"]))
+                "background_tasks" -> BackgroundTasks(LiveBackgroundTask.list(json["tasks"]))
+                "prompt_suggestion" -> json["suggestion"].string?.let(::PromptSuggestion) ?: Event(ChatEvent.from(json), seq)
                 else -> Event(ChatEvent.from(json), seq)
             }
         }
@@ -476,6 +484,15 @@ sealed interface ChatClientMessage {
             get() = buildJsonObject {
                 put("type", "kill_background_shell")
                 put("shellId", shellId)
+            }
+    }
+
+    /** Stops one of the CLI's background tasks directly, with no model turn; the next `background_tasks` drops it. */
+    data class StopBackgroundTask(val taskId: String) : ChatClientMessage {
+        override val json
+            get() = buildJsonObject {
+                put("type", "stop_background_task")
+                put("taskId", taskId)
             }
     }
 

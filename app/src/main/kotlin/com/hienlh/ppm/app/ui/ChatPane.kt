@@ -607,6 +607,8 @@ fun ChatPane(
                                             }
                                         },
                                         onError = { title, detail -> model.toast(ErrorToastMessage(title, detail)) },
+                                        liveTasks = state.liveTasks,
+                                        onStopTask = chat::stopBackgroundTask,
                                     )
                                     if (model.info?.minimalMode != true && sessionChanges != null) {
                                         val changeFiles by sessionChanges.files.collectAsState()
@@ -670,6 +672,8 @@ fun ChatPane(
                                         syncOverlayBounds()
                                     },
                             ) {
+                                // `/btw`'s answer, above the queue and the box (`SideQuestionPanel`).
+                                ChatSideQuestion(model, tab, currentSessionId)
                                 // `QueuedMessagesStack`: what was sent while the AI worked, until it reads it.
                                 PhoneQueuedMessagesStack(
                                     messages = phoneQueuedMessages(state.queue),

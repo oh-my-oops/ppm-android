@@ -23,7 +23,8 @@ import com.hienlh.ppm.state.payload
 import com.hienlh.ppm.state.pollTeamActivity
 
 /**
- * The context row's first chip on a phone (`activity-chip.tsx`): the agents this chat is running and
+ * The context row's first chip on a phone (`activity-chip.tsx`): the agents this chat is running, the
+ * background tasks its Claude CLI runs (each with a Stop), and
  * the sessions it is linked with, each a tab of the sheet the chip opens. The sessions tab is the
  * tablet's `LinkedSessionsPanel`, with Unlink, the Unlinked group and Stop all child sessions. Fed
  * as ChatPane feeds it: the agent activity subscription, the team's members, `/ws/global`'s links.
@@ -87,5 +88,7 @@ internal fun PhoneActivityChip(model: AppModel, tab: ChatTab, state: ChatState, 
             if (!sessionId.isNullOrEmpty() && tab.project.isNotEmpty()) model.stopChildSessions(tab.project, sessionId)
         },
         onError = { title, detail -> model.toast(ErrorToastMessage(title, detail)) },
+        liveTasks = state.liveTasks,
+        onStopTask = { id -> tab.controller?.stopBackgroundTask(id) },
     )
 }
