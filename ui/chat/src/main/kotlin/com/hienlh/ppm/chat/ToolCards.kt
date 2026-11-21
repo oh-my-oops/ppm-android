@@ -174,8 +174,10 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
     // the picture, which is the point of the card. Opened or closed by hand, it stays so.
     val openCards = LocalOpenCards.current
     val id = tool.toolUseId?.takeIf { openCards != null }
-    var ownOpen by remember { mutableStateOf<Boolean?>(null) }
-    val expanded = (if (id != null) openCards?.get(id) else ownOpen) ?: ((isEdit && !isError) || imagePath != null)
+    // The Verbose view mode opens every card; a change of mode puts each back the way it starts.
+    val verbose = LocalChatViewMode.current == com.hienlh.ppm.state.ChatViewMode.VERBOSE
+    var ownOpen by remember(verbose) { mutableStateOf<Boolean?>(null) }
+    val expanded = (if (id != null) openCards?.get(id) else ownOpen) ?: (verbose || (isEdit && !isError) || imagePath != null)
     val setExpanded: (Boolean) -> Unit = { open -> if (id != null) openCards?.put(id, open) else ownOpen = open }
     // An edit that fails shows nothing worth opening on: it closes as the failure comes in.
     var sawError by remember { mutableStateOf(isError) }

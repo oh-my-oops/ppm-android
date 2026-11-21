@@ -154,6 +154,8 @@ internal fun PhoneChatContent(
         key(chatTab) { PhoneChatTabEffects(model, chatTab, chatController, chatState) }
     }
     val usage = if (chatTab != null && chatState != null) key(chatTab) { rememberPhoneChatUsage(model, chatTab, chatState) } else null
+    // The ··· menu's View, Bookmarks and Export, in Session info; kept here so an export outlives the sheet.
+    val moreExtras = if (chatTab != null) key(chatTab) { com.hienlh.ppm.app.ui.rememberChatMoreExtras(model, chatTab) } else null
     val usageInfo = usage?.shown?.usage
 
     val fallbackDraft = remember { TextFieldState("") }
@@ -573,6 +575,7 @@ internal fun PhoneChatContent(
                     createdByLabel = session?.parentTitle?.takeIf { session.spawnedBy != null && it.isNotBlank() },
                 ),
                 hasUnread = hasUnread,
+                extras = moreExtras,
                 onRename = session?.let { { renaming = true } },
                 onOpenModelSheet = {
                     showSessionInfoSheet = false

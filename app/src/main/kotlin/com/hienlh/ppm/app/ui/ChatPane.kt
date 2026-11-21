@@ -1241,6 +1241,8 @@ internal fun rememberTurnChangesHost(model: AppModel, tab: ChatTab, state: ChatS
             },
             sheet = { dismiss, content -> BottomSheet(dismiss, sheetMax, radius = 14.dp) { content(LocalSheetContentTop.current) } },
             ownsKeys = { model.activeTabId == tab.tabId },
+            // Rewind code's confirmation off a phone (`sm:max-w-[460px]`).
+            dialog = { title, description, dismiss, content -> WebDialog(title, dismiss, widest = 460.dp, description = description, content = content) },
         )
     }
 }

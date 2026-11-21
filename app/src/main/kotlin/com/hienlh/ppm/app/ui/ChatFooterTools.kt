@@ -78,6 +78,7 @@ enum class FooterToolsPanel {
 private enum class MoreView {
     Main,
     Accounts,
+    Bookmarks,
 }
 
 private enum class MoreTrigger {
@@ -221,6 +222,8 @@ fun ChatFooterTools(
     contextUsage: ContextUsageLoader? = null,
     /** Sends `/compact` from the context meter; null while a turn runs or the chat is offline. */
     onCompact: (() -> Unit)? = null,
+    /** The ··· menu's View, Bookmarks and Export as Markdown. */
+    moreExtras: ChatMoreExtras? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -399,7 +402,10 @@ fun ChatFooterTools(
         label = "Chat menu",
         align = FooterPopoverAlign.Right,
     ) {
-        if (moreView == MoreView.Accounts) {
+        val bookmarks = moreExtras?.bookmarks
+        if (moreView == MoreView.Bookmarks && bookmarks != null) {
+            bookmarks.content({ moreView = MoreView.Main }, ::close, true)
+        } else if (moreView == MoreView.Accounts) {
             SwitchAccountView(
                 accounts = switcher.accounts,
                 loading = switcher.loading,
@@ -481,6 +487,17 @@ fun ChatFooterTools(
                         r.onClick()
                     }
                 },
+                extras = moreExtras?.let { e ->
+                    e.copy(
+                        onExport = e.onExport?.let { export ->
+                            {
+                                close()
+                                export()
+                            }
+                        },
+                    )
+                },
+                onOpenBookmarks = { moreView = MoreView.Bookmarks },
             )
         }
     }
@@ -616,6 +633,7 @@ fun ChatPaneFooterTools(
     val managerRole = com.hienlh.ppm.app.ui.assistant.managerRoleMenu(model, tab)
 
     ChatFooterTools(
+        moreExtras = rememberChatMoreExtras(model, tab),
         managerRole = managerRole,
         usageInfo = usageInfo,
         providerId = tab.providerId,

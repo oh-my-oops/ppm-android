@@ -130,6 +130,8 @@ class TurnChangesHost(
     val sheet: @Composable (onDismiss: () -> Unit, content: @Composable ColumnScope.(top: Dp) -> Unit) -> Unit,
     /** The chat's tab is the one in front (`ownsGlobalShortcut`): its tray hears Escape. */
     val ownsKeys: () -> Boolean = { true },
+    /** A centred dialog (`Dialog` at `sm:max-w-[460px]`) for Rewind code off a phone; null leaves Rewind code to phones. */
+    val dialog: (@Composable (title: String, description: String, onDismiss: () -> Unit, content: @Composable () -> Unit) -> Unit)? = null,
 )
 
 /**
@@ -302,7 +304,7 @@ private fun TurnChangePill(count: Int, added: Int, removed: Int, status: TurnRev
 
 // Buttons
 
-private enum class ButtonKind { GHOST, PRIMARY, DESTRUCTIVE }
+internal enum class ButtonKind { GHOST, PRIMARY, DESTRUCTIVE, OUTLINE }
 
 /**
  * The web's `Button` at `size="sm"` (`h-8 gap-1.5 rounded-md px-3`, `px-2.5` around an icon) or
@@ -311,7 +313,7 @@ private enum class ButtonKind { GHOST, PRIMARY, DESTRUCTIVE }
  * [keepColor]; the primary is the accent; the destructive the error colour, at 60% in the dark.
  */
 @Composable
-private fun WebButton(
+internal fun WebButton(
     label: String,
     kind: ButtonKind,
     modifier: Modifier = Modifier,
@@ -337,6 +339,8 @@ private fun WebButton(
         }
         ButtonKind.PRIMARY -> tokens.accent.opacity(1 - 0.1 * lit).color to tokens.accentFg.color
         ButtonKind.DESTRUCTIVE -> tokens.error.opacity(if (dark) 0.6 + 0.3 * lit else 1 - 0.1 * lit).color to Color.White
+        // `outline`: `border bg-background shadow-xs`, lit like a ghost.
+        ButtonKind.OUTLINE -> tokens.panel2.opacity(0.5 * lit).color to tokens.text.color
     }
     val hoverFill = if (kind == ButtonKind.GHOST) tokens.panel2.opacity(if (dark) 0.5 else 1.0).color else Color.Transparent
     Row(
@@ -345,6 +349,7 @@ private fun WebButton(
             .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
             .background(fill)
+            .then(if (kind == ButtonKind.OUTLINE) Modifier.cssBorder(tokens.border.color, shape) else Modifier)
             .ppmClickable(enabled = enabled, pressedColor = hoverFill, hoverColor = hoverFill, shape = shape, onClickLabel = label, source = hover.source, onClick = onClick)
             .padding(horizontal = if (icon != null) (if (xs) 6.dp else 10.dp) else (if (xs) 8.dp else 12.dp)),
         verticalAlignment = Alignment.CenterVertically,
@@ -356,7 +361,7 @@ private fun WebButton(
 }
 
 /** An icon of [size] in the colour a button hands it. */
-private fun icon(icon: ProductIcon, size: Dp): @Composable (Color) -> Unit = { PpmIcon(icon, size, it) }
+internal fun icon(icon: ProductIcon, size: Dp): @Composable (Color) -> Unit = { PpmIcon(icon, size, it) }
 
 /** A square icon button (`inline-grid place-items-center text-text-subtle hover:bg-surface hover:text-text-primary`). */
 @Composable
@@ -709,7 +714,7 @@ private fun laterLabel(by: List<String>, byCall: Map<String, SessionTurn>): Stri
 
 /** The confirmation's list (`RevertTurnSummary`): what goes back, and what stays because something changed it since. */
 @Composable
-private fun RevertTurnSummary(preview: TurnRevertResult, mobile: Boolean, byCall: Map<String, SessionTurn>) {
+internal fun RevertTurnSummary(preview: TurnRevertResult, mobile: Boolean, byCall: Map<String, SessionTurn>) {
     val tokens = LocalPpmTokens.current
     val files = preview.files.filter { it.action != TurnRevertFile.Action.NONE }
     val skipped = preview.files.flatMap { f -> f.skipped.map { f to it } }

@@ -306,6 +306,8 @@ fun ChatComposer(
     // Mod+Shift+V and the palette reach the chat in front, which answers only with a mic to show.
     val shortcutMic by rememberUpdatedState(if (micShown) toggleMic else null)
     LaunchedEffect(tab) { model.voiceToggles.filter { it == tab.tabId }.collect { shortcutMic?.invoke() } }
+    // Alt+P (`chat-model-picker`): the model chip of the chat in front, as a click on it.
+    LaunchedEffect(tab) { model.chatKeys.modelPicker.filter { it == tab.tabId }.collect { if (!tab.providerPending && !tab.firstSendPending && !running) modelOpen = true } }
 
     /**
      * ↑/↓ through this chat's past messages, as a shell does: only from an empty box (so ↑ still

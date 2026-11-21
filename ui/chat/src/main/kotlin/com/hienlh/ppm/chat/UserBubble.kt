@@ -279,8 +279,10 @@ internal fun UserBubble(
         if (!system) {
             MessageActionBar(timestamp, remember(content) { ChatMessageBlocks.decode(content).content }, onReply = onReply, alignEnd = true) {
                 CopyTurnLinkButton()
+                BookmarkTurnButton(parsed.typedText)
                 edits?.onEdit?.let { ActionButton(ProductIcon.Pencil, "Edit", "Edit this message (continue in the same tab)", onClick = it) }
                 edits?.onFork?.let { ActionButton(ProductIcon.RotateCcw, "Fork", "Retry from this message (fork into a new tab)", onClick = it) }
+                LocalTurnLinkItem.current?.id?.let { RewindCodeButton(it, edits?.onFork) }
             }
         }
     }

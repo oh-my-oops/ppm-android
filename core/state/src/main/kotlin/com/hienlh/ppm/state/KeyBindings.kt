@@ -42,6 +42,10 @@ val KEY_ACTIONS: List<KeyAction> = listOf(
     KeyAction("voice-input", "Voice Input", "general", "Mod+Shift+V", note = "Toggle speech-to-text in chat"),
     KeyAction("chat-nav-prev", "Previous Chat Message", "general", "Alt+ArrowUp", note = "Jump to your previous message in the visible chat transcript"),
     KeyAction("chat-nav-next", "Next Chat Message", "general", "Alt+ArrowDown", note = "Jump to your next message in the visible chat transcript"),
+    KeyAction("chat-view-mode", "Chat View Mode", "general", "Ctrl+O", note = "Cycles Normal → Thinking (thinking stays open) → Verbose (every tool card open too); Claude Code's shortcut. Fires in the composer too"),
+    KeyAction("chat-toggle-thinking", "Toggle Thinking", "general", "Alt+T", note = "Extended thinking on or off for the focused chat's next message; Claude Code's Option+T"),
+    KeyAction("chat-model-picker", "Choose Model", "general", "Alt+P", note = "Opens the focused chat's model and effort picker; Claude Code's Option+P"),
+    KeyAction("reopen-closed-chat", "Reopen Closed Chat", "tabs", "Alt+Shift+T", note = "Brings back the chat tab closed last (browsers keep Ctrl+Shift+T for themselves)"),
     KeyAction("compare-files", "Compare Files...", "general", "Mod+Alt+D", note = "Open file-compare picker (seeds active file as A)"),
 ) + (1..9).map { KeyAction("switch-project-$it", "Switch to Project $it", "projects", "Mod+$it") }
 
