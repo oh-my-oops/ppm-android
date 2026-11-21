@@ -266,3 +266,29 @@ private fun parseAuthorityAndPath(raw: String): ParsedUrlParts? {
 
 private fun encodeUriComponent(value: String): String =
     URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
+
+/** What a system notification shows: [title] on top, [text] collapsed, [bigText] expanded, [subText] in the header. */
+data class PushNotificationText(val title: String, val text: String, val bigText: String, val subText: String?)
+
+/**
+ * Lead with the chat's own title, so a "Chat completed" says which chat. PPM writes a chat
+ * notification's first body line as `<project> — <session title>` (`src/server/ws/chat.ts`);
+ * that title becomes the notification's title and PPM's own title ("Chat completed · <device>")
+ * moves under it. Any other body — an approval's "<project> — Bash needs permission" included —
+ * is shown as PPM sent it.
+ */
+fun pushNotificationText(payload: WebPushPayload): PushNotificationText {
+    val asSent = PushNotificationText(payload.title, payload.body, payload.body, null)
+    if (payload.kind != FeedKind.DONE && payload.kind != FeedKind.QUESTION) return asSent
+    val project = payload.project ?: "Project"
+    val lines = payload.body.lines()
+    val session = lines.first().removePrefix("$project — ").takeIf { it != lines.first() }?.trim()
+    if (session.isNullOrEmpty()) return asSent
+    val rest = lines.drop(1).joinToString("\n").trim()
+    return PushNotificationText(
+        title = session,
+        text = if (rest.isEmpty()) payload.title else "${payload.title}: ${rest.lineSequence().first()}",
+        bigText = if (rest.isEmpty()) payload.title else "${payload.title}\n$rest",
+        subText = payload.project,
+    )
+}

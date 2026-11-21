@@ -146,11 +146,13 @@ object NotificationChannels {
             NotificationCompat.CATEGORY_STATUS
         }
 
+        val text = pushNotificationText(payload)
         val notification = NotificationCompat.Builder(context, channel.id)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(payload.title)
-            .setContentText(payload.body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(payload.body))
+            .setContentTitle(text.title)
+            .setContentText(text.text)
+            .setSubText(text.subText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text.bigText))
             .setPriority(priority)
             .setCategory(category)
             .setAutoCancel(true)
