@@ -1279,11 +1279,19 @@ fun PhoneSessionInfoSheet(
     modifier: Modifier = Modifier,
     /** The session is unread already: the row marks it read, as the ··· menu's does. */
     hasUnread: Boolean = false,
+    /** The ··· menu's View, Bookmarks and Export as Markdown (`PhoneChatExtraRows`). */
+    extras: com.hienlh.ppm.app.ui.ChatMoreExtras? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var copiedId by remember { mutableStateOf(false) }
+    var bookmarksOpen by remember { mutableStateOf(false) }
+    val bookmarks = extras?.bookmarks
+    if (bookmarksOpen && bookmarks != null) {
+        PhoneBookmarksSheet(bookmarks, onBack = { bookmarksOpen = false }, onDismiss = onDismiss)
+        return
+    }
 
     Sheet(
         title = "Session info",
@@ -1439,6 +1447,7 @@ fun PhoneSessionInfoSheet(
                     )
                 }
             }
+            if (extras != null) PhoneChatExtraRows(extras, onOpenBookmarks = { bookmarksOpen = true }, onDismiss = onDismiss)
         }
     }
 }
@@ -1491,10 +1500,13 @@ private fun SessionInfoKvRow(
 }
 
 @Composable
-private fun SessionInfoActionRow(
+internal fun SessionInfoActionRow(
     icon: ProductIcon,
     label: String,
     showTopBorder: Boolean = false,
+    /** A short value before the chevron ("Normal · Ctrl+O", a count). */
+    hint: String? = null,
+    testTag: String? = null,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -1507,7 +1519,8 @@ private fun SessionInfoActionRow(
                 onClickLabel = label,
                 onClick = onClick,
             )
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 14.dp)
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1517,6 +1530,7 @@ private fun SessionInfoActionRow(
             modifier = Modifier.weight(1f),
             style = ppmText(14f, FontWeight.Medium, lineHeight = 19f).copy(color = tokens.text.color),
         )
+        if (hint != null) BasicText(hint, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color), maxLines = 1)
         PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text3.color)
     }
 }

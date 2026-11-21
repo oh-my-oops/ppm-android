@@ -187,6 +187,8 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             LocalPpmApprovals provides model.api?.let(::ServerPpmApprovals),
             // An endpoint approval card is headed with the Assistant's own name.
             com.hienlh.ppm.chat.LocalAssistantName provides assistantDisplayName(model),
+            // Normal, Thinking or Verbose (Ctrl+O, and View in the chat's ··· menu).
+            com.hienlh.ppm.chat.LocalChatViewMode provides model.chatPrefs.viewMode,
             LocalChatSessionOpener provides remember(model) {
                 ChatSessionOpener { target ->
                     val turnId = target.turnId

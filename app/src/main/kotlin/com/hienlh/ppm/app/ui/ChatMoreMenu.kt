@@ -84,6 +84,9 @@ fun ChatMoreMenu(
     modifier: Modifier = Modifier,
     /** "Set as manager chat" / "Unset manager chat" (the PPM Assistant). */
     managerRole: com.hienlh.ppm.app.ui.assistant.MoreMenuManagerRole? = null,
+    /** View, Bookmarks and Export as Markdown ([ChatMoreExtras]); [onOpenBookmarks] opens the drill-in. */
+    extras: ChatMoreExtras? = null,
+    onOpenBookmarks: () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -171,6 +174,8 @@ fun ChatMoreMenu(
                     null
                 },
             )
+
+            if (extras != null) ChatMoreExtraRows(extras, onOpenBookmarks)
 
             if (team != null) {
                 MoreMenuRow(
@@ -280,6 +285,40 @@ fun ChatMoreMenu(
                 }
             }
         }
+    }
+}
+
+/** View (`<Mode> · Ctrl+O`), Bookmarks (its count) and Export as Markdown, after AI settings. */
+@Composable
+private fun ChatMoreExtraRows(extras: ChatMoreExtras, onOpenBookmarks: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val hintStyle = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color)
+    MoreMenuRow(
+        icon = { PpmIcon(ProductIcon.Eye, 16.dp, tokens.text3.color) },
+        label = "View",
+        testTag = "more-view-mode",
+        onClick = extras.onCycleView,
+        hint = { BasicText(extras.viewMode.label + " · Ctrl+O", style = hintStyle, maxLines = 1, softWrap = false) },
+    )
+    extras.bookmarks?.let { bookmarks ->
+        MoreMenuRow(
+            icon = { PpmIcon(ProductIcon.Bookmark, 16.dp, tokens.text3.color) },
+            label = "Bookmarks",
+            testTag = "more-bookmarks",
+            onClick = onOpenBookmarks,
+            hint = {
+                if (bookmarks.count > 0) BasicText(bookmarks.count.toString(), style = hintStyle.copy(fontFeatureSettings = "tnum"), maxLines = 1, softWrap = false)
+                PpmIcon(ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
+            },
+        )
+    }
+    extras.onExport?.let { export ->
+        MoreMenuRow(
+            icon = { PpmIcon(ProductIcon.Download, 16.dp, tokens.text3.color) },
+            label = "Export as Markdown",
+            testTag = "more-export-markdown",
+            onClick = export,
+        )
     }
 }
 

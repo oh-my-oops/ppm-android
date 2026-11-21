@@ -39,7 +39,7 @@ class ChatTabTurnLinks(private val tab: ChatTab) {
     /** Why the send waits on the chips (one still loading, one gone); null when it need not. */
     val blockedReason: String? get() = chips?.blockedReason
 
-    fun start(api: ApiClient, scope: CoroutineScope, isProject: (String) -> Boolean, toast: (title: String, detail: String?) -> Unit) {
+    fun start(api: ApiClient, scope: CoroutineScope, isProject: (String) -> Boolean, bookmarks: com.hienlh.ppm.state.SessionBookmarks? = null, toast: (title: String, detail: String?) -> Unit) {
         if (chips != null) return
         this.isProject = isProject
         chips = ComposerTurnChips(scope) { target -> api.turnReference(target) }.also {
@@ -56,6 +56,7 @@ class ChatTabTurnLinks(private val tab: ChatTab) {
             resolveTurnId = { sessionId, providerId, uuid -> api.resolveTurnId(tab.project, sessionId, providerId, uuid) },
             history = history,
             toast = { toast(it, null) },
+            bookmarks = bookmarks,
         )
     }
 

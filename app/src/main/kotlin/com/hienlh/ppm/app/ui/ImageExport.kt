@@ -87,7 +87,7 @@ internal fun downloadSize(bytes: Long): String {
 private fun typeOf(file: ViewerImage): String = file.type?.substringBefore(';')?.trim()?.takeIf { it.isNotEmpty() } ?: sniffImageType(file.bytes) ?: "application/octet-stream"
 
 /** Into Downloads, where Chrome puts a download: no permission needed from Android 10. */
-private fun saveToDownloads(context: Context, name: String, type: String, bytes: ByteArray): Uri? {
+internal fun saveToDownloads(context: Context, name: String, type: String, bytes: ByteArray): Uri? {
     if (Build.VERSION.SDK_INT < 29) return null
     val resolver = context.contentResolver
     val values = ContentValues().apply {
@@ -112,7 +112,7 @@ private fun saveToDownloads(context: Context, name: String, type: String, bytes:
 internal class SavedImage(val name: String, val size: Long, val open: () -> Unit)
 
 /** The system's "Save to" sheet, for Android 9 and older, where Downloads needs a permission. */
-private class CreateFile : ActivityResultContract<Pair<String, String>, Uri?>() {
+internal class CreateFile : ActivityResultContract<Pair<String, String>, Uri?>() {
     override fun createIntent(context: Context, input: Pair<String, String>): Intent =
         Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(input.second).putExtra(Intent.EXTRA_TITLE, input.first)
 

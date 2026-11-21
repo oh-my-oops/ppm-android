@@ -50,6 +50,7 @@ import com.hienlh.ppm.client.settingsListThemes
 import com.hienlh.ppm.client.reorderProjects
 import com.hienlh.ppm.client.resetTags
 import com.hienlh.ppm.client.setDefaultTag
+import com.hienlh.ppm.client.setSessionArchive
 import com.hienlh.ppm.client.setTag
 import com.hienlh.ppm.client.uiPrefs
 import com.hienlh.ppm.client.updateTag
@@ -1392,6 +1393,18 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** Mod+Shift+V and the palette's Voice Input (`toggle-voice-input`), by the tab whose box should answer. */
     val voiceToggles = MutableSharedFlow<String>(extraBufferCapacity = 8)
 
+    /** The chat view mode and the history list's status filter, kept on this device. */
+    val chatPrefs = ChatDevicePrefs(prefs)
+
+    /** The chat tabs closed on this device, for Reopen Closed Chat (Alt+Shift+T). */
+    val closedChats = com.hienlh.ppm.state.ClosedChats()
+
+    /** Each open chat's bookmarked turns. */
+    val bookmarks = com.hienlh.ppm.state.SessionBookmarks({ api?.let(com.hienlh.ppm.state.SessionBookmarksBackend::api) }, scope, ::actionError)
+
+    /** Ctrl+O, Alt+T, Alt+P and Alt+Shift+T, from the composer too. */
+    val chatKeys = ChatKeyActions(this)
+
     /** The tag whose Delete was chosen in Manage tags, until the user confirms. */
     var confirmDeleteTag by mutableStateOf<SessionTag?>(null)
 
@@ -1505,6 +1518,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         extensions?.stop()
         extensions = null
         api = null
+        bookmarks.clear()
         slashItems = null
         fileIndex = null
         fileTree?.close()
@@ -3126,6 +3140,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         if (list.state.value.searchPage == null) refreshSessions()
     }
 
+    /** Archives a chat (`archived`) or un-archives it (`kept`) in every list now; a refused change reads the list again. */
+    suspend fun setArchive(session: SessionInfo, state: String?) {
+        val api = api ?: return
+        val project = selectedProject ?: return
+        patchSession(session.id) { it.copy(archive = state) }
+        if (!report { api.setSessionArchive(project, session.id, state) }) refreshSessions(quiet = true)
+    }
+
     suspend fun togglePin(session: SessionInfo) {
         val api = api ?: return
         val project = selectedProject ?: return
@@ -3440,7 +3462,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 // Prepared first, so its draft and its gate join that one request.
                 newChats.prepare(chat)
                 chat.start(api, scope, DraftLocalStore(draftPrefs, serverKey), newChats.preparedDraft(chat), sessionTurns)
-                chat.turnLinks.start(api, scope, { name -> projects.any { it.name == name } }) { title, detail -> toast(ErrorToastMessage(title, detail)) }
+                chat.turnLinks.start(api, scope, { name -> projects.any { it.name == name } }, bookmarks) { title, detail -> toast(ErrorToastMessage(title, detail)) }
                 newChats.started(chat)
             }
         }
@@ -3574,6 +3596,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** The chat took [request] up, or gave up on it; a newer request stays. */
     fun chatJumpDone(request: ChatJumpRequest) {
         if (chatJump === request) chatJump = null
+    }
+
+    /** A bookmark (`useChatJumpStore.jump({ sessionId, turnId })`): the open chat brings the turn on screen. */
+    fun jumpToTurn(sessionId: String, turnId: String) {
+        chatJump = ChatJumpRequest(sessionId, null, null, monotonicMillis(), turnId)
     }
 
     /** A turn chip or turn link (`openTurnRef`): its session's chat shown, then asked to bring the turn on screen. */
@@ -4282,6 +4309,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     private fun onTabClosing(tabId: String) {
         com.hienlh.ppm.state.database.clearUnsavedGridRows(tabId)
         val tab = tabOf(tabId) ?: return
+        // A chat with a session can come back with Reopen Closed Chat.
+        closedChats.remember(tab.type, tab.metaString("projectName") ?: tab.projectId, tab.metaString("sessionId"), tab.metaString("providerId"), tab.title)
         if (tab.type == "extension") {
             val viewType = tab.metaString("viewType")
             val projName = tab.metaString("projectName") ?: tab.projectId

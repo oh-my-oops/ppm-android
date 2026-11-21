@@ -132,7 +132,7 @@ class KeyboardShortcuts(private val model: AppModel) {
     private fun matches(press: KeyPress, actionId: String) = model.keyBindings.matches(press, actionId)
 
     /** The keys a text field has no use for. */
-    private fun inTextField(press: KeyPress): Boolean = toggleDock(press) || jumpInChat(press)
+    private fun inTextField(press: KeyPress): Boolean = toggleDock(press) || jumpInChat(press) || model.chatKeys.dispatch(press, inField = true)
 
     /** In the web's order, so that a key set for two actions runs the same one. */
     private fun anywhere(press: KeyPress): Boolean {
@@ -176,6 +176,7 @@ class KeyboardShortcuts(private val model: AppModel) {
             }
             matches(press, "voice-input") -> model.toggleVoiceInput()
             jumpInChat(press) -> Unit
+            model.chatKeys.dispatch(press, inField = false) -> Unit
             else -> {
                 val projIdx = (1..9).firstOrNull { matches(press, "switch-project-$it") }
                 if (projIdx != null) {
@@ -283,6 +284,10 @@ internal fun shortcutActionIds(wide: Boolean, projectCount: Int): List<String> =
             "voice-input",
             "chat-nav-prev",
             "chat-nav-next",
+            "chat-view-mode",
+            "chat-toggle-thinking",
+            "chat-model-picker",
+            "reopen-closed-chat",
             "compare-files",
         ),
     )

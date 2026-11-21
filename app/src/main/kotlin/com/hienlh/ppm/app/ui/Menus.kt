@@ -461,6 +461,8 @@ fun SessionContextMenu(
     onDismiss: () -> Unit,
     onRename: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
+    /** Whether the history list shows it archived; null leaves Archive out (the list's menu only). */
+    archived: Boolean? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val unread = model.unreadSessions()[session.id] != null
@@ -474,6 +476,13 @@ fun SessionContextMenu(
             onClick = { run { model.togglePin(session) } },
             icon = { MenuIcon(if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin) },
         )
+        if (archived != null && !session.manager) {
+            MenuItem(
+                if (archived) "Unarchive" else "Archive",
+                onClick = { run { model.setArchive(session, if (archived) "kept" else "archived") } },
+                icon = { MenuIcon(ProductIcon.Archive) },
+            )
+        }
         if (!unread) {
             MenuItem("Mark as unread", onClick = {
                 onDismiss()

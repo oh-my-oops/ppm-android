@@ -85,6 +85,7 @@ import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
 import com.hienlh.ppm.client.SpecSummary
 import com.hienlh.ppm.state.ChatSearch
+import com.hienlh.ppm.state.SessionArchive
 import com.hienlh.ppm.state.HistoryList
 import com.hienlh.ppm.state.SessionTree
 import com.hienlh.ppm.state.SessionTreeNode
@@ -228,6 +229,8 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                 }
             }
         }
+        // Status filter (Active hides archived chats) and the device's auto-archive rule.
+        HistoryStatusFilterRow(model.chatPrefs)
         val all = state.sessions(model.sessions)
         if (model.tags.tags.isNotEmpty()) {
             Row(
@@ -247,7 +250,15 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
             SearchResults(model, found.page, found.loading, onNavigate, Modifier.weight(1f))
             return@Column
         }
-        val sessions = state.shown(all)
+        val runningIds = model.events?.running?.collectAsState()?.value.orEmpty()
+        val sessions = SessionArchive.filter(
+            state.shown(all),
+            model.chatPrefs.statusFilter,
+            model.chatPrefs.autoArchiveDays,
+            searching = query.text.isNotBlank(),
+            running = { it in runningIds },
+            unread = { it in unread },
+        )
         val sessionList = rememberLazyListState()
         when {
             state.loading && all.isEmpty() || (state.searchPage == null && model.sessionsLoad == AppModel.Load.Loading && all.isEmpty()) ->
@@ -255,7 +266,7 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                     PpmIcon(ProductIcon.Loader2, 14.dp, tokens.text3.color, spinning = true)
                 }
             sessions.isEmpty() -> BasicText(
-                "No sessions yet",
+                SessionArchive.emptyText(model.chatPrefs.statusFilter, query.text.isNotBlank()),
                 Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
             )
@@ -301,6 +312,10 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                     },
                     onDeleteSession = { session ->
                         model.confirmDeleteSession = session
+                    },
+                    isArchived = { session -> SessionArchive.isArchived(session, model.chatPrefs.autoArchiveDays) },
+                    onSetArchive = { session, archive ->
+                        model.scope.launch { model.setArchive(session, archive) }
                     },
                     onLoadMore = {
                         scope.launch { list.loadMore(model.sessions, model.hasMoreSessions) }
@@ -443,7 +458,7 @@ private fun SquareIconButton(icon: ProductIcon, hoverTint: Rgba, spinning: Boole
  * hex alpha; one not picked lit under a mouse (`hover:bg-surface-elevated`).
  */
 @Composable
-private fun PillChip(label: String, selected: Boolean, color: Rgba?, onClick: () -> Unit) {
+internal fun PillChip(label: String, selected: Boolean, color: Rgba?, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val text = when {
         selected && color == null -> tokens.accent
@@ -507,6 +522,7 @@ internal fun SidebarSessionRow(
     val bot = session.title.startsWith("[PPM]")
     val title = if (bot) session.title.drop(7) else session.title
     val color = if (isUnread) tokens.text else tokens.text2
+    val archived = SessionArchive.isArchived(session, model.chatPrefs.autoArchiveDays)
     Box(Modifier.fillMaxWidth().background(if (isUnread) tokens.notification(unreadType).opacity(0.1).color else Color.Transparent)) {
         Row(
             Modifier
@@ -531,7 +547,9 @@ internal fun SidebarSessionRow(
                             style = ppmText(13f, if (isUnread) FontWeight.SemiBold else FontWeight.Medium, lineHeight = 19.5f).copy(color = color.color),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
+                        if (archived) PpmIcon(ProductIcon.Archive, 12.dp, tokens.text3.color, Modifier.semantics { contentDescription = "Archived" })
                     }
                     if (meta != null) meta() else session.updatedAt?.let { RelativeTime(it, ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color)) }
                 }
@@ -540,8 +558,13 @@ internal fun SidebarSessionRow(
                 } else {
                     HistoryIcon(ProductIcon.Pin, tokens.text3, tokens.text2) { model.scope.launch { model.togglePin(session) } }
                 }
-                // Rename and delete share one span, so no gap between them.
+                // Archive, rename and delete share one span, so no gap between them.
                 Row {
+                    if (!session.manager) {
+                        HistoryIcon(ProductIcon.Archive, tokens.text3, tokens.text2, label = if (archived) "Unarchive session" else "Archive session") {
+                            model.scope.launch { model.setArchive(session, if (archived) "kept" else "archived") }
+                        }
+                    }
                     HistoryIcon(ProductIcon.Pencil, tokens.text3, tokens.text2) { renaming = true }
                     HistoryIcon(ProductIcon.Trash2, tokens.text3, tokens.error, tokens.error.opacity(0.2).color) { model.confirmDeleteSession = session }
                 }
@@ -549,19 +572,20 @@ internal fun SidebarSessionRow(
             }
         }
         menuAt?.let { at ->
-            SessionContextMenu(model, session, at, onDismiss = { menuAt = null }, onRename = { renaming = true }, onDelete = { model.confirmDeleteSession = session })
+            SessionContextMenu(model, session, at, onDismiss = { menuAt = null }, onRename = { renaming = true }, onDelete = { model.confirmDeleteSession = session }, archived = archived)
         }
     }
 }
 
 /** `p-0.5 rounded` with a 12 px icon, in [hoverTint] under a mouse, on [hoverFill] where the web lights one. */
 @Composable
-private fun HistoryIcon(icon: ProductIcon, tint: Rgba, hoverTint: Rgba, hoverFill: Color = Color.Transparent, onClick: () -> Unit) {
+private fun HistoryIcon(icon: ProductIcon, tint: Rgba, hoverTint: Rgba, hoverFill: Color = Color.Transparent, label: String? = null, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val hover = rememberHover()
     Box(
         Modifier
             .clip(RoundedCornerShape(4.dp))
+            .then(if (label != null) Modifier.webTitle(label).semantics { contentDescription = label } else Modifier)
             .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = hoverFill, source = hover.source, onClick = onClick)
             .padding(2.dp),
     ) {
@@ -1004,6 +1028,10 @@ fun PhoneSessionHistoryList(
     onOpenStandIn: (SessionTreeRoot) -> Unit = {},
     /** The "Created by" mark of a chat an AI created, on a top-level row. */
     spawnedBadge: (@Composable (SessionInfo) -> Unit)? = null,
+    /** Whether the list shows a chat archived; with [onSetArchive], the sheet offers Archive / Unarchive. */
+    isArchived: (SessionInfo) -> Boolean = { false },
+    /** Archive (`archived`) or un-archive (`kept`); null leaves the action out. */
+    onSetArchive: ((SessionInfo, String) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val listState = rememberLazyListState()
@@ -1115,6 +1143,7 @@ fun PhoneSessionHistoryList(
                                     renderInlineRename = renderInlineRename,
                                     indent = (line.depth * 16).dp,
                                     spec = line.spec,
+                                    archived = isArchived(session),
                                     badge = if (line.depth == 0 && spawnedBadge != null) {
                                         { spawnedBadge(session) }
                                     } else {
@@ -1187,6 +1216,12 @@ fun PhoneSessionHistoryList(
                     sheetSession = null
                     onDeleteSession(target)
                 },
+                archived = if (onSetArchive != null && !activeSheetSession.manager) isArchived(activeSheetSession) else null,
+                onArchive = {
+                    val target = activeSheetSession
+                    sheetSession = null
+                    onSetArchive?.invoke(target, if (isArchived(target)) "kept" else "archived")
+                },
             )
         }
     }
@@ -1219,6 +1254,8 @@ fun PhoneSessionHistoryRow(
     spec: SpecSummary? = null,
     /** The "Created by" mark, after the provider. */
     badge: (@Composable () -> Unit)? = null,
+    /** Archived (by hand or by age): an Archive mark after the title. */
+    archived: Boolean = false,
 ) {
     val tokens = LocalPpmTokens.current
     val density = LocalDensity.current
@@ -1380,6 +1417,7 @@ fun PhoneSessionHistoryRow(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        if (archived) PpmIcon(ProductIcon.Archive, 12.dp, tokens.text3.color, Modifier.semantics { contentDescription = "Archived" })
                         session.tag?.let { tag ->
                             val tagColor = Rgba.hex(tag.color) ?: tokens.accent
                             Row(
@@ -1479,6 +1517,9 @@ fun PhoneSessionActionSheet(
     isUnread: Boolean = false,
     tags: List<SessionTag> = emptyList(),
     onSetTag: (SessionTag?) -> Unit = {},
+    /** Whether the list shows it archived; null leaves Archive / Unarchive out. */
+    archived: Boolean? = null,
+    onArchive: () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     var pickingTag by remember { mutableStateOf(false) }
@@ -1627,6 +1668,27 @@ fun PhoneSessionActionSheet(
                                 )
                             }
                             PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text3.color)
+                        }
+                    }
+                    // Archive sits after Pin, as in the web's context menu.
+                    if (archived != null && (action.kind == SessionRowActionKind.PIN || action.kind == SessionRowActionKind.UNPIN)) {
+                        val label = if (archived) "Unarchive" else "Archive"
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .ppmClickable(hoverColor = tokens.surfaceHover.color, onClickLabel = label, onClick = onArchive)
+                                .padding(horizontal = 20.dp)
+                                .testTag("session-sheet-archive"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            PpmIcon(ProductIcon.Archive, 18.dp, tokens.text2.color)
+                            BasicText(
+                                text = label,
+                                modifier = Modifier.weight(1f),
+                                style = ppmText(14f, FontWeight.Medium, lineHeight = 19f).copy(color = tokens.text.color),
+                            )
                         }
                     }
                 }
