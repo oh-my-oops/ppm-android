@@ -83,6 +83,12 @@ class RecentPhotos(
     /** The access dialog was answered: the picture to attach, if there is one now. */
     suspend fun accessAnswered(): Uri? = withContext(Dispatchers.IO) { detector.accessAnswered()?.let(uriOf) }
 
+    /** Photo access may have changed (the launch-time request was answered): look again with it. */
+    fun accessMayHaveChanged() {
+        detector.accessChecked()
+        check()
+    }
+
     /** An activity came to the foreground: watch the media store, and look once for what was taken meanwhile. */
     fun start(activity: Activity) {
         if (started++ == 0) {
@@ -159,6 +165,10 @@ class RecentPhotos(
                 else -> PhotoAccess.NONE
             }
         }
+
+        /** What to ask for when PPM opens: the photo permissions until access is full, then nothing. */
+        fun permissionsToAskAtLaunch(context: Context): Array<String>? =
+            photoPermissions().takeIf { photoAccess(context) != PhotoAccess.FULL }
 
         fun photoPermissions(): Array<String> = when {
             Build.VERSION.SDK_INT >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)

@@ -8,14 +8,19 @@ import android.view.Menu
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
+import com.hienlh.ppm.app.recentphoto.RecentPhotos
 import com.hienlh.ppm.app.ui.LocalRecentPhotos
 import com.hienlh.ppm.app.ui.PpmRoot
 
 open class MainActivity : ComponentActivity() {
     protected lateinit var model: AppModel
     private lateinit var shortcuts: KeyboardShortcuts
+    private val askPhotoAccess = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        (application as PpmApplication).recentPhotos.accessMayHaveChanged()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +33,10 @@ open class MainActivity : ComponentActivity() {
         }
         // Recreated after the process went: its link was opened then.
         if (savedInstanceState == null) openLink(intent)
+        // A photo just taken is offered in the chat ("Add to chat"), which needs to read it: ask at
+        // each launch until the access is full. Android itself stops showing the dialog once the
+        // user has refused it twice.
+        if (savedInstanceState == null) RecentPhotos.permissionsToAskAtLaunch(this)?.let(askPhotoAccess::launch)
     }
 
     protected open fun createModel(app: PpmApplication): AppModel = app.model(DebugLaunch.from(this, intent))
