@@ -11,6 +11,7 @@ import com.hienlh.ppm.protocol.EffortStatusReport
 import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.HistoryPage
 import com.hienlh.ppm.protocol.InlineImage
+import com.hienlh.ppm.protocol.LiveBackgroundTask
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.Reported
 import com.hienlh.ppm.protocol.SessionPhase
@@ -107,6 +108,18 @@ class ChatTranscript(var providerId: String? = null) {
 
     /** The commands the AI left running in the background, stopped ones included, as the server's last `background_registry` listed them. */
     var backgroundShells: List<BackgroundShell> = emptyList()
+        private set
+
+    /** The CLI's background tasks right now (`background_tasks`), each with its own Stop in the activity chip. */
+    var liveTasks: List<LiveBackgroundTask> = emptyList()
+        private set
+
+    /** How full the context window was at the last turn's end (`done.contextWindowPct`); null before one ran. */
+    var contextWindowPct: Int? = null
+        private set
+
+    /** Claude's guess at the next prompt (`prompt_suggestion`), until a turn starts or a message is sent. */
+    var promptSuggestion: String? = null
         private set
 
     /** The MCP servers the session's Claude cannot use until someone signs in, as the server last listed them. */
@@ -256,6 +269,9 @@ class ChatTranscript(var providerId: String? = null) {
             is ChatFrame.AssistantUi -> effects += ChatEffect.AssistantUi(frame.request)
             is ChatFrame.BackgroundRegistry -> backgroundShells = frame.shells
             is ChatFrame.McpStatus -> mcpNeedsAuth = frame.needsAuth
+            is ChatFrame.BackgroundTasks -> liveTasks = frame.tasks
+            // It arrives after the turn's `done`: shown only while nothing runs, never a turn.
+            is ChatFrame.PromptSuggestion -> if (!phase.isRunning) promptSuggestion = frame.suggestion
             is ChatFrame.TurnStarted -> frame.clientMessageId?.let { bindTurn(it, frame.turnId) }
         }
         return effects
@@ -286,6 +302,7 @@ class ChatTranscript(var providerId: String? = null) {
         val id = "local-user-$localCounter-$now"
         activity++
         turnStop = null
+        promptSuggestion = null
         unanswered.values.removeAll { now - it.sentAt >= 60_000 }
         unanswered[id] = Unanswered(content, replyTo, now, turnRefs.takeIf { it.isNotEmpty() })
         if (unanswered.size > 20) unanswered.remove(unanswered.keys.first())
@@ -444,6 +461,7 @@ class ChatTranscript(var providerId: String? = null) {
             activity++
             if (!wasRunning) turnFinalized = false
             turnStop = null
+            promptSuggestion = null
         } else if (stop is Reported.Value) {
             turnStop = stop.value
         }
@@ -512,6 +530,7 @@ class ChatTranscript(var providerId: String? = null) {
         if (next.isRunning) {
             activity++
             turnStop = null
+            promptSuggestion = null
             if (!wasRunning) turnFinalized = false
             return
         }
@@ -571,7 +590,10 @@ class ChatTranscript(var providerId: String? = null) {
             // A subagent's own end finishes nothing of the turn.
             is ChatEvent.Done -> if (event.parent == null) {
                 // A second `done` for the same turn (provider, then the stream loop) finds the phase idle.
-                if (phase != SessionPhase.IDLE) effects += ChatEffect.Attention(ChatAttention.Done)
+                if (phase != SessionPhase.IDLE) {
+                    effects += ChatEffect.Attention(ChatAttention.Done)
+                    event.contextWindowPct?.let { contextWindowPct = it }
+                }
                 finalizeLive(event.lastMessageUuid, event.usage)
                 turnFinalized = true
                 statusMessage = null

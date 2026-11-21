@@ -39,10 +39,12 @@ import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.pendingSpecStart
 import com.hienlh.ppm.app.startSpec
 import com.hienlh.ppm.app.removeAttachment
+import com.hienlh.ppm.app.ui.ChatSideQuestion
 import com.hienlh.ppm.app.ui.ComposerPickerList
 import com.hienlh.ppm.app.ui.ChatSessionSchedulesChip
 import com.hienlh.ppm.app.ui.ConnectionChip
 import com.hienlh.ppm.app.ui.PickerVariant
+import com.hienlh.ppm.app.ui.phone.chat.PhoneContextMeterChip
 import com.hienlh.ppm.app.ui.rememberComposerPickers
 import com.hienlh.ppm.app.ui.PromptDialog
 import com.hienlh.ppm.app.ui.SessionDebugDialog
@@ -105,6 +107,8 @@ import com.hienlh.ppm.app.ui.rememberTurnChips
 import com.hienlh.ppm.state.Effort
 import com.hienlh.ppm.state.ModelNames
 import com.hienlh.ppm.state.PermissionMode
+import com.hienlh.ppm.state.ReconnectStage
+import com.hienlh.ppm.state.offeredPromptSuggestion
 import com.hienlh.ppm.state.resolveFooterUsage
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import java.time.Instant
@@ -305,7 +309,22 @@ internal fun PhoneChatContent(
                 onSendQueuedNow = { chatController?.sendQueuedNow() },
                 onEditQueued = { id -> chatController?.takeBackQueued(id) },
                 activityChip = {
-                    if (chatTab != null && chatState != null) PhoneActivityChip(model, chatTab, chatState) { visitActive() }
+                    if (chatTab != null && chatState != null) {
+                        PhoneActivityChip(model, chatTab, chatState) { visitActive() }
+                        PhoneContextMeterChip(model, chatTab, chatController, chatState)
+                    }
+                },
+                promptSuggestion = chatTab?.let { tab ->
+                    offeredPromptSuggestion(
+                        chatState?.promptSuggestion, tab.providerId, isStreaming, reconnect.stage != ReconnectStage.HIDDEN,
+                        startingConversation, tab.draft.text, tab.agent != null,
+                    )
+                },
+                onPromptSuggestionTaken = { chatTab?.edited() },
+                aboveComposerContent = {
+                    if (chatTab != null) {
+                        ChatSideQuestion(model, chatTab, chatTab.session?.id ?: chatState?.sessionId, Modifier.padding(horizontal = 12.dp))
+                    }
                 },
                 schedulesChip = {
                     if (chatTab != null && model.info?.minimalMode != true) {

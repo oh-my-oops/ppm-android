@@ -108,7 +108,13 @@ sealed interface ChatEvent {
      * The turn ended; [lastMessageUuid] is the SDK's id for its last message, [usage] its token
      * split. A subagent's own end names the call that started it in [parent].
      */
-    data class Done(val lastMessageUuid: String? = null, val usage: TurnUsage? = null, val parent: String? = null) : ChatEvent
+    data class Done(
+        val lastMessageUuid: String? = null,
+        val usage: TurnUsage? = null,
+        val parent: String? = null,
+        /** How full the context window was at the turn's last API call (Claude), 0–100; the footer's context meter. */
+        val contextWindowPct: Int? = null,
+    ) : ChatEvent
 
     /** The provider moved the turn to another account: a rate limit, a usage cap or a failed sign-in. */
     data class AccountRetry(val reason: String?, val accountLabel: String?, val accountId: String? = null) : ChatEvent
@@ -158,7 +164,7 @@ sealed interface ChatEvent {
                 "tool_result" -> ToolResult(ToolOutcome.from(json), json["toolUseId"].string, parent)
                 "approval_request" -> ApprovalRequest.from(json)?.let(::Approval) ?: Other(type)
                 "error" -> Error(json["message"].string ?: "Unknown error", parent)
-                "done" -> Done(json["lastMessageUuid"].string, TurnUsage.from(json["usage"]), parent)
+                "done" -> Done(json["lastMessageUuid"].string, TurnUsage.from(json["usage"]), parent, json["contextWindowPct"].double?.let { Math.round(it).toInt() })
                 "account_retry" -> AccountRetry(json["reason"].string, json["accountLabel"].string, json["accountId"].string)
                 "status_update" -> StatusUpdate(json["message"].string ?: "", json["accountLabel"].string)
                 "account_info" -> AccountInfo(json["accountId"].string, json["accountLabel"].string)

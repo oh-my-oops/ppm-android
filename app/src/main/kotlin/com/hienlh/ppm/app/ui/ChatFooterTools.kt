@@ -40,6 +40,7 @@ import com.hienlh.ppm.client.accounts
 import com.hienlh.ppm.client.activeAccount
 import com.hienlh.ppm.client.codexAccounts
 import com.hienlh.ppm.client.codexUsages
+import com.hienlh.ppm.client.contextUsage
 import com.hienlh.ppm.client.setAccountStatus
 import com.hienlh.ppm.client.teamActivity
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -71,6 +72,7 @@ enum class FooterToolsPanel {
     Config,
     Team,
     Usage,
+    Context,
 }
 
 private enum class MoreView {
@@ -211,12 +213,22 @@ fun ChatFooterTools(
     antigravityUsageContent: @Composable (onClose: () -> Unit) -> Unit = {},
     modifier: Modifier = Modifier,
     managerRole: com.hienlh.ppm.app.ui.assistant.MoreMenuManagerRole? = null,
+    /** The chat's session, for the context meter's breakdown. */
+    sessionId: String? = null,
+    /** How full the context window was at the last turn's end (Claude); null before one has run. */
+    contextPct: Int? = null,
+    /** Asks the live CLI what fills the context; null leaves the meter out. */
+    contextUsage: ContextUsageLoader? = null,
+    /** Sends `/compact` from the context meter; null while a turn runs or the chat is offline. */
+    onCompact: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     var panel by remember { mutableStateOf<FooterToolsPanel?>(null) }
     var moreView by remember { mutableStateOf(MoreView.Main) }
     var moreFrom by remember { mutableStateOf(MoreTrigger.Dots) }
+    /** A figure the context popover read since the last turn ended; the turn's own figure replaces it. */
+    var freshContextPct by remember(contextPct, sessionId) { mutableStateOf<Int?>(null) }
 
     val isClaude = providerId.isNullOrEmpty() || providerId == "claude"
     val isCodex = providerId == "codex"
@@ -259,10 +271,34 @@ fun ChatFooterTools(
     val usageHiddenForConnection = connectionTrouble && (narrow || mobile)
     val showUsageCluster = (hasAccounts || isAntigravity) && resolved.hasUsage && !usageHiddenForConnection
 
+    val shownContextPct = freshContextPct ?: contextPct
+    val showContext = isClaude && !sessionId.isNullOrEmpty() && shownContextPct != null && contextUsage != null &&
+        !usageHiddenForConnection
+
     FooterCluster(
         narrow = narrow,
         modifier = modifier,
     ) {
+        if (showContext && shownContextPct != null) {
+            FooterGhostButton(
+                narrow = narrow,
+                expanded = panel == FooterToolsPanel.Context,
+                title = "Context $shownContextPct% used: see what fills it, or compact",
+                contentDescription = "Context $shownContextPct% used",
+                testTag = "context-meter",
+                onClick = { toggle(FooterToolsPanel.Context) },
+            ) {
+                ContextMeterFace(shownContextPct, narrow)
+            }
+            Box(
+                Modifier
+                    .padding(horizontal = 2.dp)
+                    .width(1.dp)
+                    .height(14.dp)
+                    .background(tokens.border.color)
+                    .testTag("context-divider"),
+            )
+        }
         if (showUsageCluster) {
             val ringExpanded = if (isAntigravity) {
                 panel == FooterToolsPanel.Usage
@@ -450,6 +486,29 @@ fun ChatFooterTools(
     }
 
     FooterPopover(
+        open = panel == FooterToolsPanel.Context && showContext,
+        onClose = ::close,
+        label = "Context",
+        align = FooterPopoverAlign.Right,
+    ) {
+        if (sessionId != null && contextUsage != null) {
+            ContextMeterPanel(
+                sessionId = sessionId,
+                open = panel == FooterToolsPanel.Context,
+                lastPct = contextPct,
+                load = contextUsage,
+                onCompact = onCompact?.let { compact ->
+                    {
+                        close()
+                        compact()
+                    }
+                },
+                onFresh = { freshContextPct = it },
+            )
+        }
+    }
+
+    FooterPopover(
         open = panel == FooterToolsPanel.Usage && isAntigravity,
         onClose = ::close,
         label = "Antigravity usage",
@@ -626,6 +685,14 @@ fun ChatPaneFooterTools(
                     )
                 },
             )
+        },
+        sessionId = session?.id ?: state.sessionId,
+        contextPct = state.contextWindowPct,
+        contextUsage = { id -> model.api?.contextUsage(tab.project, id) ?: error("Not connected") },
+        onCompact = if (state.connected && !state.isRunning) {
+            { chat.send("/compact", com.hienlh.ppm.protocol.TurnOptions(permissionMode = tab.permissionMode?.value)) }
+        } else {
+            null
         },
         antigravityUsageContent = { close ->
             AntigravityUsagePanel(
