@@ -269,6 +269,10 @@ data class SessionInfo(
     val tag: SessionTag? = null,
     val spawnedBy: String? = null,
     val parentTitle: String? = null,
+    /** `archived` by hand, or `kept` once un-archived (`session-archive.ts`); null for neither. */
+    val archive: String? = null,
+    /** The project's manager chat: never archived. */
+    val manager: Boolean = false,
 ) {
     /** When the session was last active, for sorting and display. */
     val lastActive: Instant? get() = updatedAt ?: createdAt
@@ -286,6 +290,8 @@ data class SessionInfo(
                 tag = json["tag"]?.let(SessionTag::from),
                 spawnedBy = json["spawnedBy"].string,
                 parentTitle = json["parentTitle"].string,
+                archive = json["archive"].string?.takeIf { it == "archived" || it == "kept" },
+                manager = json["manager"].bool ?: false,
             )
         }
     }

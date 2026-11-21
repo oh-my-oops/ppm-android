@@ -54,6 +54,21 @@ object SessionTurns {
     /** Each call's turn. */
     fun byCall(turns: List<SessionTurn>): Map<String, SessionTurn> = buildMap { for (turn in turns) for (call in turn.calls) put(call, turn) }
 
+    /**
+     * What "Rewind code" puts back (`rewindFrom`): every call of the turn [messageId] asked for and
+     * of each turn after it, with how many of those turns made a call; null when no loaded turn
+     * was asked by that message.
+     */
+    fun rewindFrom(turns: List<SessionTurn>, messageId: String): Rewind? {
+        val at = turns.indexOfFirst { it.messageId == messageId }
+        if (at < 0) return null
+        val from = turns.subList(at, turns.size)
+        return Rewind(from.flatMap { it.calls }, from.count { it.calls.isNotEmpty() })
+    }
+
+    /** The calls a rewind reverts, and how many turns made them. */
+    data class Rewind(val calls: List<String>, val turns: Int)
+
     /** What the user typed, or null for a user message that is not a prompt. */
     internal fun promptOf(item: ChatItem): String? {
         if (item.role != ChatItem.Role.USER || item.compaction != null || item.text.jsTrim().isEmpty()) return null
