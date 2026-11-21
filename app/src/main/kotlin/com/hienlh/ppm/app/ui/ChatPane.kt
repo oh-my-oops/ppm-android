@@ -610,6 +610,7 @@ fun ChatPane(
                                         liveTasks = state.liveTasks,
                                         onStopTask = chat::stopBackgroundTask,
                                     )
+                                    ChatWorktreeChip(model, tab, narrow)
                                     if (model.info?.minimalMode != true && sessionChanges != null) {
                                         val changeFiles by sessionChanges.files.collectAsState()
                                         val changesLoaded by sessionChanges.loaded.collectAsState()

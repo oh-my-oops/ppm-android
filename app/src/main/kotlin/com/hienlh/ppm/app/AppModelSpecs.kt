@@ -60,6 +60,13 @@ class AppSpecs internal constructor(private val model: AppModel) {
      */
     val bound = mutableStateMapOf<String, ChatSpecBinding>()
 
+    /**
+     * The tablet's chat tabs the server said drive no spec (`useSessionSpec` answering `null`). A tab
+     * whose lookup is still running or failed is in neither map: only one listed here may start a
+     * spec bound to itself, since starting one in a chat that is in fact bound would take it off its spec.
+     */
+    val unbound = mutableStateMapOf<String, Boolean>()
+
     /** Tablet chat tabs whose spec pane was hidden; a pane is open unless listed (`specPaneOpen`, open on desktop). */
     private val paneHidden = mutableStateMapOf<String, Boolean>()
 
@@ -201,8 +208,10 @@ fun AppModel.startSpec(chatTabId: String) {
             api.specBySession(project, sessionId)
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Exception) {
-            null
+        } catch (error: Exception) {
+            // Not known whether the chat drives a spec: starting one could take it off the one it drives.
+            toast(ErrorToastMessage("Could not check this chat's spec", error.message))
+            return@launch
         }
         if (bound != null) openSpec(bound.slug) else specs.choosingFor = chatTabId
     }

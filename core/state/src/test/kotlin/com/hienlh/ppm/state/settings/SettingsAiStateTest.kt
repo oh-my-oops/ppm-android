@@ -38,7 +38,7 @@ class SettingsAiStateTest {
                 "ppm_task_list", "ppm_task_get", "ppm_task_project", "ppm_task_create", "ppm_task_update", "ppm_task_close",
                 "ppm_task_reorder", "ppm_task_undo", "ppm_task_project_update", "ppm_task_notify_manager",
                 "vault_list", "vault_read", "vault_propose",
-                "spec_status", "spec_create", "spec_submit", "spec_open_design", "task_start", "task_done", "task_red", "task_green", "suite_check",
+                "spec_status", "spec_create", "spec_submit", "spec_open_design", "task_start", "task_done", "task_red", "task_green", "suite_check", "spec_run_sessions",
                 "memory_search", "memory_read", "memory_write", "memory_forget",
             ),
             PPM_TOOL_GROUPS.flatMap { group -> group.tools.map { it.id } },

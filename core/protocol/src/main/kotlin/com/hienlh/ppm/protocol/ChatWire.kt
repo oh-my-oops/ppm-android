@@ -270,6 +270,8 @@ sealed interface ChatFrame {
 
     /** Claude's guess at the person's next prompt, sent after a turn (`prompt_suggestion`). */
     data class PromptSuggestion(val suggestion: String) : ChatFrame
+    /** The git worktree the chat's CLI works in (`session_worktree`): once it made one, and to every client that connects after. */
+    data class WorktreeChanged(val worktree: SessionWorktree) : ChatFrame
 
     companion object {
         /** A list of server names; anything but an array is none (`Array.isArray(list) ? list : []`). */
@@ -338,6 +340,7 @@ sealed interface ChatFrame {
                 "mcp_status" -> McpStatus(names(json["needsAuth"]))
                 "background_tasks" -> BackgroundTasks(LiveBackgroundTask.list(json["tasks"]))
                 "prompt_suggestion" -> json["suggestion"].string?.let(::PromptSuggestion) ?: Event(ChatEvent.from(json), seq)
+                "session_worktree" -> SessionWorktree.from(json["worktree"])?.let(::WorktreeChanged) ?: Event(ChatEvent.from(json), seq)
                 else -> Event(ChatEvent.from(json), seq)
             }
         }
@@ -396,6 +399,8 @@ sealed interface ChatClientMessage {
         val turnRefs: List<com.hienlh.ppm.protocol.generated.TurnReference> = emptyList(),
         /** An Assistant session's picture of this device's screen, sent with every message (`uiSummary`). */
         val uiSummary: JsonObject? = null,
+        /** A new Claude chat's first message: run the chat in a git worktree of its own with this name ([SessionWorktree.newName]). */
+        val worktree: String? = null,
     ) : ChatClientMessage {
         override val json
             get() = buildJsonObject {
@@ -425,6 +430,7 @@ sealed interface ChatClientMessage {
                 options.effort?.let { put("effort", it) }
                 options.thinking?.let { put("thinking", it) }
                 uiSummary?.let { put("uiSummary", it) }
+                worktree?.let { put("worktree", it) }
             }
     }
 

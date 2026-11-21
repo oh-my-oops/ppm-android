@@ -109,6 +109,26 @@ object SpecWorkflowCopy {
     }
 }
 
+/** A task's state pill as the task list words it (`TaskRow` and `TestingPill` in spec-tasks.tsx). */
+object SpecTaskCopy {
+    /** How long a run has gone: `42s`, then `3m 07s` (a VM test can take minutes). */
+    fun elapsed(seconds: Long): String {
+        val s = seconds.coerceAtLeast(0)
+        return if (s < 60) "${s}s" else "${s / 60}m ${(s % 60).toString().padStart(2, '0')}s"
+    }
+
+    /** The pill of a run PPM has in flight for the task: its red or green tests, or the whole suite after green. */
+    fun testing(kind: String, elapsedSeconds: Long): String =
+        (if (kind == "suite") "Green · checking whole suite" else "Testing $kind") + " · " + elapsed(elapsedSeconds)
+
+    /** What that pill means, for a reader (the web's `title`). */
+    fun testingTitle(kind: String): String =
+        if (kind == "suite") "This task is green; PPM is running the whole suite before its task_green call answers" else "PPM is running this task's tests"
+
+    /** A green task's pill: with its pass count when the runner reported one. */
+    fun green(passed: Int?): String = if (passed != null) "Green · $passed pass" else "Green"
+}
+
 /** What a spec document shows (`withoutHtmlComments` and `emphasizeEars` in spec-pane.tsx). */
 object SpecDocument {
     private val FENCE = Regex("(?m)(^```[\\s\\S]*?^```)")

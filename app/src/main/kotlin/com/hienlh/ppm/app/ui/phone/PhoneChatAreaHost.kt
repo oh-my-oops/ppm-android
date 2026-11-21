@@ -327,6 +327,7 @@ internal fun PhoneChatContent(
                     }
                 },
                 schedulesChip = {
+                    if (chatTab != null) com.hienlh.ppm.app.ui.ChatWorktreeChip(model, chatTab, narrow = true)
                     if (chatTab != null && model.info?.minimalMode != true) {
                         com.hienlh.ppm.app.ui.tasks.ManagerTasksChip(model, chatTab.session?.id ?: chatState?.sessionId, narrow = true)
                         ChatSessionSchedulesChip(model, chatTab.session?.id ?: chatState?.sessionId, narrow = true)

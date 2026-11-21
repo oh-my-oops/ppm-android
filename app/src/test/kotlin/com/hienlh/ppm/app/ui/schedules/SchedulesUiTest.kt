@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -25,6 +26,7 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -166,6 +168,21 @@ class SchedulesUiTest {
         // The server's answer goes into the list at once: no red dot, and the row leaves Needs attention.
         waitForNoTag("schedule-problem")
         waitForNoTag("schedules-group-attention")
+    }
+
+    @Test
+    fun `a long last-run error stays in its column instead of running under Mode`() {
+        // Cut at 60 characters by the label, still far wider than the 160 dp column.
+        val error = "Token expired while the run was refreshing its account, and every retry after that failed the same way"
+        val longRun = """{"id":9,"status":"error","started_at":"${stamp(-7_200_000)}","ended_at":"${stamp(-7_100_000)}","error":"$error","session_id":"run-chat"}"""
+        schedules.rows[2] = overview(2, "Broken sync", next = iso(48 * 3_600_000), lastRun = longRun)
+        val model = model()
+        show(mobile = false) { SchedulesApp(model, phone = false) }
+        waitForTag("schedule-row-2")
+        val inRow = hasAnyAncestor(hasTestTag("schedule-row-2"))
+        val text = composeRule.onNode(hasText(error.take(40), substring = true) and inRow, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val mode = composeRule.onNode(hasTestTag("schedule-permission-default") and inRow, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("the error ends at ${text.right}, Mode starts at ${mode.left}", text.right <= mode.left)
     }
 
     @Test

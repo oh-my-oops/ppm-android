@@ -19,6 +19,7 @@ import com.hienlh.ppm.protocol.QueuedMessage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.SessionWorktree
 import com.hienlh.ppm.protocol.AssistantUiRequest
 import com.hienlh.ppm.protocol.AssistantUiResult
 import com.hienlh.ppm.protocol.TabOpenAnswer
@@ -111,6 +112,10 @@ data class ChatState(
     val queueAnswer: QueueTakeBackAnswer? = null,
     /** What [ChatTranscript.turnBindings] holds: the turn each message sent here opened, by the id it went under. */
     val turnBindings: Map<String, String> = emptyMap(),
+    /** The git worktree this chat runs in, once its CLI reported one. */
+    val worktree: SessionWorktree? = null,
+    /** A new Claude chat's choice to run in a worktree of its own, sent with its first message ([ChatController.setWorktreeWanted]). */
+    val worktreeWanted: Boolean = false,
 ) {
     val isRunning: Boolean get() = phase.isRunning
     /** The socket is open. A message sent while it is not shows at once and goes out once it is. */
@@ -312,6 +317,13 @@ class ChatController(
         transmit(ChatClientMessage.Cancel)
         transcript.cancelled()
         onAttention?.invoke(ChatAttention.Answered)
+        publish()
+    }
+
+    /** The worktree chip's switch (`setWorktreeWanted`): the chat's first message asks for a worktree of its own. */
+    fun setWorktreeWanted(wanted: Boolean) {
+        if (transcript.worktreeWanted == wanted) return
+        transcript.worktreeWanted = wanted
         publish()
     }
 
@@ -755,6 +767,8 @@ class ChatController(
             queueAnswer = transcript.queue.answer,
             effortStatus = transcript.effortStatus,
             turnBindings = transcript.turnBindings,
+            worktree = transcript.worktree,
+            worktreeWanted = transcript.worktreeWanted,
         )
     }
 
