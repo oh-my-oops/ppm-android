@@ -14,6 +14,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -322,6 +323,16 @@ private fun Viewer(
             },
     ) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(safe)) {
+            // The close button's row. The web lays its stage under the button, so a screenshot the
+            // screen's shape opens up to the top with the white ✕ over it, unseen on a light picture;
+            // here the picture fits below the row and stays clear of it at any zoom. A tap on the
+            // row is a tap on the dark around the picture, which closes, as it does on the web.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(CLOSE_ROW_HEIGHT)
+                    .pointerInput(Unit) { detectTapGestures { onClose() } },
+            )
             Stage(
                 shown,
                 transform,
@@ -380,7 +391,7 @@ private fun Viewer(
                 }
             }
         }
-        // `absolute top-3 right-3 z-20`, over the stage.
+        // `absolute top-3 right-3 z-20`, in its own row above the stage.
         CloseButton(onClose, Modifier.align(Alignment.TopEnd).windowInsetsPadding(safe).padding(12.dp))
         if (many) {
             BasicText(
@@ -399,6 +410,9 @@ private fun Viewer(
         }
     }
 }
+
+/** The close button's row: its `top-3` (12), its `size-11` (44), and the toolbar's `pt-2` (8) as the gap to the picture. */
+private val CLOSE_ROW_HEIGHT = 64.dp
 
 /** Hit, so whatever is drawn under it is not. */
 private fun Modifier.takesTouches(): Modifier = pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }
