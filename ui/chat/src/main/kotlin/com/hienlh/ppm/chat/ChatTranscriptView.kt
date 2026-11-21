@@ -421,6 +421,13 @@ private fun TranscriptList(
     // Which cards are open, and the pictures a tap opens the lightbox among: the whole chat's, as
     // the web's transcript has every message mounted, the lazy list only those on screen.
     val openCards = remember { mutableStateMapOf<String, Boolean>() }
+    // A change of view mode puts every card back the way the new mode starts it.
+    val viewMode = LocalChatViewMode.current
+    var cardsMode by remember { mutableStateOf(viewMode) }
+    if (cardsMode != viewMode) {
+        cardsMode = viewMode
+        openCards.clear()
+    }
     val viewer = LocalImageViewer.current
     val uploads = LocalChatImages.current
     val toolImages = LocalToolImages.current
@@ -464,6 +471,7 @@ private fun TranscriptList(
         LocalBashOutput provides state.bashOutput,
         LocalEditAnchors provides anchors,
         LocalTurnsByCall provides rollups.byCall,
+        LocalSessionTurnList provides rollups.all,
     ) {
         val mobile = LocalPpmMobile.current
         var paneWidthPx by remember { mutableIntStateOf(0) }
@@ -992,8 +1000,13 @@ internal class TurnRollups {
     var byCall: Map<String, SessionTurn> = emptyMap()
         private set
 
+    /** Every turn of the loaded chat, in order: what Rewind code reads from. */
+    var all: List<SessionTurn> = emptyList()
+        private set
+
     fun start(items: List<ChatItem>) {
         val found = memo.of(items)
+        all = found
         turns = found.associateBy { it.messageId }
         byCall = SessionTurns.byCall(found)
         if (changes.size > items.size + 64) changes.keys.retainAll(items.mapTo(HashSet()) { it.id })

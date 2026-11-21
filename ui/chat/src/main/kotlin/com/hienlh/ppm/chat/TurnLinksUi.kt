@@ -89,6 +89,8 @@ class ChatTurnTools(
     val history: HistoryWindowController,
     /** Says something went wrong, as the web's `toast.error`. */
     val toast: (String) -> Unit,
+    /** The chat's bookmarked turns (`session-bookmarks-store.ts`); null leaves Bookmark out. */
+    val bookmarks: com.hienlh.ppm.state.SessionBookmarks? = null,
 )
 
 /** The chat Copy turn link works in: its tools, and the session as the transcript last had it. */

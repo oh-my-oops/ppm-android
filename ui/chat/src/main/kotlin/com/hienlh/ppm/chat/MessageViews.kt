@@ -402,9 +402,17 @@ private val thinkingStyle = MarkdownStyle(size = 11f, lineHeightRatio = 1.625f)
 @Composable
 internal fun ThinkingBlock(text: String, streaming: Boolean) {
     val tokens = LocalPpmTokens.current
-    var expanded by remember { mutableStateOf(streaming) }
+    // Thinking and Verbose view modes keep every block open; Normal folds a block once it is done.
+    val keepOpen = LocalChatViewMode.current != com.hienlh.ppm.state.ChatViewMode.NORMAL
+    var expanded by remember { mutableStateOf(streaming || keepOpen) }
     LaunchedEffect(streaming) {
-        if (!streaming && text.isNotEmpty()) expanded = false
+        if (!streaming && text.isNotEmpty() && !keepOpen) expanded = false
+    }
+    // A change of view mode opens or folds every block, whatever was clicked before.
+    var shownMode by remember { mutableStateOf(keepOpen) }
+    if (shownMode != keepOpen) {
+        shownMode = keepOpen
+        expanded = keepOpen || streaming
     }
     val shape = RoundedCornerShape(4.dp)
     Column(
