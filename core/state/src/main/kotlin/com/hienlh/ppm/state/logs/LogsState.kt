@@ -38,7 +38,7 @@ val LOG_SOURCES = listOf(
 )
 
 fun logSourceLabel(id: String): String =
-    if (id == "all") "All sources" else LOG_SOURCES.firstOrNull { it.id == id }?.label ?: id
+    if (id == "all") "All sources" else (LOG_SOURCES + APP_LOG_SOURCES).firstOrNull { it.id == id }?.label ?: id
 
 val LOG_RANGES = listOf("15m", "1h", "restart", "today", "all")
 

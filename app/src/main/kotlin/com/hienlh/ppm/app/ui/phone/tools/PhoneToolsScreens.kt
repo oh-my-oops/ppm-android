@@ -563,7 +563,7 @@ private fun PhoneMetricGaugeCard(
  * Requirement 14.1).
  *
  * - Opens directly on the live log tail (no `Issues` or `Report` tabs, no line selection or `Ask AI`).
- * - Source filter chips (`All`, `AI & chat`, `Shell & tools`, `Server`, `Tunnel`, `Browser`) + `Pause`/`Follow`.
+ * - Source filter chips (`All`, `AI & chat`, `Shell & tools`, `Server`, `Tunnel`, `This device`) + `Pause`/`Follow`.
  * - Bottom action card with search input, `Aa` case toggle, `.*` regex toggle, and `Filters` chip.
  * - `Filters` bottom sheet with Levels, Chat filter, Time ranges (`15m`, `1h`, `restart`, `today`, `all`),
  *   `Show times in UTC`, `Reset`, `Download as .log`, and `Show N lines`.

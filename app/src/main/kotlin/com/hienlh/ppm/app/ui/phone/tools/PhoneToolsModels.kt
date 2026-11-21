@@ -195,7 +195,8 @@ enum class PhoneLogSourceChip(val id: String, val label: String) {
     SHELL("shell", "Shell & tools"),
     SERVER("server", "Server"),
     TUNNEL("tunnel", "Tunnel"),
-    BROWSER("browser", "Browser"),
+    /** This app's own lines, kept on the device, in place of the web's "Browser". */
+    DEVICE(com.hienlh.ppm.state.logs.DEVICE_LOG_SOURCE, com.hienlh.ppm.state.logs.DEVICE_LOG_LABEL),
 }
 
 /**

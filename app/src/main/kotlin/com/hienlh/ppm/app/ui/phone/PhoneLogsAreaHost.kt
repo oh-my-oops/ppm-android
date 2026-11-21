@@ -14,6 +14,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.AppTrace
+import androidx.compose.runtime.collectAsState
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.ui.phone.tools.PhoneLogsScreen
 import com.hienlh.ppm.app.ui.phone.tools.PhoneLogsState
@@ -23,6 +25,8 @@ import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.obj
 import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.logs.DEDUPE_TAIL
+import com.hienlh.ppm.state.logs.DEVICE_LOG_SOURCE
+import com.hienlh.ppm.state.logs.DeviceLogBuffer
 import com.hienlh.ppm.state.logs.LogEntry
 import com.hienlh.ppm.state.logs.LogQueryResult
 import com.hienlh.ppm.state.logs.LogRow
@@ -54,6 +58,8 @@ internal fun phoneLogsDownloadText(rows: List<LogRow>): String =
 internal fun PhoneLogsAreaHost(
     model: AppModel,
     tab: WorkspaceTab? = null,
+    /** "This device"'s lines: the app's own, kept on the device. */
+    deviceLog: DeviceLogBuffer = AppTrace.deviceLog,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -72,6 +78,12 @@ internal fun PhoneLogsAreaHost(
     val filter = logsState.toLogFilter()
 
     suspend fun loadPage(before: String? = null) {
+        // "This device" is read on the device: no page to ask the server for.
+        if (logsState.source == DEVICE_LOG_SOURCE) {
+            loading = false
+            loadError = null
+            return
+        }
         val api = model.api ?: run {
             loading = false
             return
@@ -155,15 +167,22 @@ internal fun PhoneLogsAreaHost(
         )
     }
 
+    val deviceVersion by deviceLog.version.collectAsState()
+    val onDevice = logsState.source == DEVICE_LOG_SOURCE
+    val deviceEntries = remember(deviceLog, deviceVersion, logsState.timeRange, onDevice) {
+        if (!onDevice) emptyList()
+        else rangeStart(logsState.timeRange, System.currentTimeMillis()).let { from -> deviceLog.entries().filter { it.ts >= from } }
+    }
+
     PhoneLogsScreen(
         state = logsState,
-        entries = result.entries,
-        restarts = result.restarts,
+        entries = if (onDevice) deviceEntries else result.entries,
+        restarts = if (onDevice) emptyList() else result.restarts,
         titles = result.titles,
         chats = result.chats,
-        hasMore = result.hasMore,
-        loading = loading,
-        error = loadError,
+        hasMore = result.hasMore && !onDevice,
+        loading = loading && !onDevice,
+        error = loadError.takeUnless { onDevice },
         onLoadOlder = {
             val oldest = result.entries.firstOrNull()?.id
             if (oldest != null && !loading) scope.launch { loadPage(before = oldest) }

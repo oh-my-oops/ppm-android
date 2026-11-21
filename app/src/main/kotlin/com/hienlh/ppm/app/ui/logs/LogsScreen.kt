@@ -51,6 +51,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.AppTrace
+import androidx.compose.runtime.collectAsState
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.client.logsGithubDuplicates
 import kotlinx.coroutines.CancellationException
@@ -129,6 +131,8 @@ fun LogsAppBody(
     onViewChange: (String) -> Unit = {},
     initialResult: LogQueryResult? = null,
     initialIssues: LogIssuesResult? = null,
+    /** "This device"'s lines: the app's own, kept on the device. */
+    deviceLog: DeviceLogBuffer = AppTrace.deviceLog,
 ) {
     val tokens = LocalPpmTokens.current
     val phone = LocalPpmMobile.current
@@ -188,6 +192,12 @@ fun LogsAppBody(
     }
 
     suspend fun loadLogs(before: String? = null) {
+        // "This device" is read on the device: no page to ask the server for.
+        if (filter.src == DEVICE_LOG_SOURCE) {
+            liveBuffer.cancelPageRead()
+            loading = false
+            return
+        }
         if (before == null) {
             liveBuffer.beginPageRead()
             pausedCount = 0
@@ -378,6 +388,20 @@ fun LogsAppBody(
     }
 
     val likelyBugCount = issuesResult.issues.count { !it.dismissed && it.cls == "bug" }
+
+    // What the stream shows: the server's page, or this device's own lines; either way the
+    // "This device" chip counts them.
+    val deviceVersion by deviceLog.version.collectAsState()
+    val deviceEntries = remember(deviceLog, deviceVersion) { deviceLog.entries() }
+    val onDevice = filter.src == DEVICE_LOG_SOURCE
+    val shown = remember(result, deviceEntries, filter, range, onDevice) {
+        if (onDevice) {
+            deviceLogResult(deviceEntries, filter, range, result.stats)
+        } else {
+            val from = rangeStart(range, System.currentTimeMillis())
+            result.copy(stats = withDeviceStats(result.stats, deviceEntries.filter { it.ts >= from }))
+        }
+    }
 
     Column(
         Modifier
@@ -615,8 +639,8 @@ fun LogsAppBody(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (activeView) {
                 "logs" -> LogsStreamPane(
-                    result = result,
-                    loading = loading,
+                    result = shown,
+                    loading = loading && !onDevice,
                     filter = filter,
                     range = range,
                     utc = utc,
@@ -706,7 +730,7 @@ fun LogsAppBody(
                     draftingAi = draftingAi,
                     onDraftWithAi = {
                         val targetSnips = snippets.ifEmpty {
-                            val rows = foldRepeats(result.entries.takeLast(80))
+                            val rows = foldRepeats(shown.entries.takeLast(80))
                             if (rows.isEmpty()) emptyList() else listOf(ReportSnippet(id = "s-auto", src = filter.src, rows = rows))
                         }
                         draftWithAi(targetSnips, titleField.text.toString())
@@ -839,7 +863,7 @@ private fun LogsStreamPane(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    val allSources = listOf("all" to "All") + LOG_SOURCES.map { it.id to it.label }
+                    val allSources = listOf("all" to "All") + APP_LOG_SOURCES.map { it.id to it.label }
                     for ((srcId, label) in allSources) {
                         val active = filter.src == srcId
                         val st = if (srcId == "all") null else result.stats[srcId]
