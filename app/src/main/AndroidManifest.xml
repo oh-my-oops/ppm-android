@@ -10,6 +10,16 @@
     <!-- Push notifications: requested only when the user turns on the "This device" switch
          in Settings -> Notifications, never on first launch. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The chat's "Add to chat" chip for a photo or screenshot just taken: asked for only when
+         the user taps a chip offering one the app cannot read yet, never on launch. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Android 14+ tells the app a screenshot of it was taken, with no photo access: a normal
+         permission, granted at install. -->
+    <uses-permission android:name="android.permission.DETECT_SCREEN_CAPTURE" />
 
     <!-- The camera and camcorder the paperclip's chooser offers beside Files, as Chrome's does.
          Neither needs the CAMERA permission: the app never declares it, so the camera app asks. -->

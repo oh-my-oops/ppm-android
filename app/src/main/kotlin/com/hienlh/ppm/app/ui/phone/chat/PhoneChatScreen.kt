@@ -210,6 +210,8 @@ fun PhoneChatScreen(
     schedulesChip: @Composable () -> Unit = {},
     /** Floats over the bottom of the transcript, just above the composer: the `/` and `@` pickers. */
     pickerContent: @Composable () -> Unit = {},
+    /** On the right edge over the bottom of the transcript, under the pickers: the "Add to chat" chip. */
+    recentPhotoContent: @Composable () -> Unit = {},
     /** Over the composer, under the transcript: the stopped-turn bar, the MCP sign-in bar, the provider gate line. */
     bannersContent: @Composable () -> Unit = {},
     /** The chat's connection chip, first in the context row while the socket is down. */
@@ -297,6 +299,14 @@ fun PhoneChatScreen(
                             onClick = onScrollToWaitingCard,
                         )
                     }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 12.dp, bottom = 10.dp),
+                ) {
+                    recentPhotoContent()
                 }
 
                 // The `/` and `@` pickers float over the conversation's foot, above the composer.

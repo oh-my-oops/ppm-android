@@ -9,6 +9,8 @@ import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
+import com.hienlh.ppm.app.ui.LocalRecentPhotos
 import com.hienlh.ppm.app.ui.PpmRoot
 
 open class MainActivity : ComponentActivity() {
@@ -20,7 +22,10 @@ open class MainActivity : ComponentActivity() {
         model = createModel(application as PpmApplication)
         shortcuts = KeyboardShortcuts(model)
         enableEdgeToEdge()
-        setContent { PpmRoot(model, beforeIme = shortcuts::beforeIme) }
+        val recentPhotos = (application as PpmApplication).recentPhotos
+        setContent {
+            CompositionLocalProvider(LocalRecentPhotos provides recentPhotos) { PpmRoot(model, beforeIme = shortcuts::beforeIme) }
+        }
         // Recreated after the process went: its link was opened then.
         if (savedInstanceState == null) openLink(intent)
     }
@@ -32,6 +37,7 @@ open class MainActivity : ComponentActivity() {
         model.windowVisible = true
         model.store.refresh()
         model.becameActive()
+        (application as PpmApplication).recentPhotos.start(this)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -40,6 +46,7 @@ open class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        (application as PpmApplication).recentPhotos.stop(this)
         model.windowVisible = false
         super.onStop()
     }

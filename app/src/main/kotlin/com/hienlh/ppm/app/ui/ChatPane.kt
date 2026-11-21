@@ -694,6 +694,21 @@ fun ChatPane(
                     }
                 }
 
+                // A photo or screenshot just taken ("Add to chat"): on the right, 8dp above the context row,
+                // under the popovers and pickers drawn after it.
+                if (contextRowWidthPx > 0) {
+                    Box(
+                        Modifier
+                            .offset { IntOffset(contextRowLeftPx, 0) }
+                            .width(with(density) { contextRowWidthPx.toDp() })
+                            .height(with(density) { contextRowTopPx.coerceAtLeast(0).toDp() })
+                            .padding(end = 4.dp, bottom = 8.dp),
+                        contentAlignment = Alignment.BottomEnd,
+                    ) {
+                        RecentPhotoChipHost(tab.tabId, model.activeTabId, onAttach = { uris -> model.attach(context, tab, uris) })
+                    }
+                }
+
                 // Tablet footer popovers (`FooterPopover`): anchored 4dp (`mb-1`) above `chat-context-row`.
                 FooterPopoverScrim(popoverHost)
                 if (popoverHost.entries.isNotEmpty() && contextRowWidthPx > 0) {

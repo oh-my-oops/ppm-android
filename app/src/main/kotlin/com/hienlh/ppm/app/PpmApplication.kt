@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app
 
 import android.app.Application
+import com.hienlh.ppm.app.recentphoto.RecentPhotos
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.SyntaxHighlighter
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +26,9 @@ class PpmApplication : Application() {
                 }
             }
         }
+
+    /** A picture just taken, offered to the chat on screen: one for every window, so none is offered twice. */
+    val recentPhotos: RecentPhotos by lazy { RecentPhotos.forDevice(this) }
 
     fun releaseWindow(id: String) { windowModels.remove(id)?.disposeWindow(cleanupScope) }
 

@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app.ui.phone
 
 import android.Manifest
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -99,6 +100,7 @@ import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ComposerTurnChips
 import com.hienlh.ppm.app.ui.ComposerTurnChipRow
+import com.hienlh.ppm.app.ui.RecentPhotoChipHost
 import com.hienlh.ppm.app.ui.rememberTurnChips
 import com.hienlh.ppm.state.Effort
 import com.hienlh.ppm.state.ModelNames
@@ -238,7 +240,8 @@ internal fun PhoneChatContent(
         }
     }
 
-    val pickers = rememberPhoneAttachPickers { uris -> chatTab?.let { model.attach(context, it, uris) } }
+    val attachPicked: (List<Uri>) -> Unit = { uris -> chatTab?.let { model.attach(context, it, uris) } }
+    val pickers = rememberPhoneAttachPickers(attachPicked)
 
     // The connection chip (`useReconnectIndicator`): restarted on foreground resume, Retry reloads the chat.
     val reconnect = rememberReconnectIndicator(
@@ -364,6 +367,8 @@ internal fun PhoneChatContent(
                 hasTurnChips = turnChips.isNotEmpty(),
                 turnChips = if (chatTab != null && turnChips.isNotEmpty()) ({ ComposerTurnChipRow(chatTab) }) else null,
                 composerInputTransformation = composerTransformation,
+                // A photo or screenshot just taken, attached as the attach sheet's Photos attaches it.
+                recentPhotoContent = { RecentPhotoChipHost(chatTab?.tabId, chatTab?.tabId, attachPicked) },
                 pickerContent = {
                     if (chatTab != null) {
                         // The `/` and `@` pickers, as the tablet composer has them (`rememberComposerPickers`).
