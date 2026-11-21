@@ -1287,6 +1287,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** `toast()`: [message] in front of the others. */
     fun toast(message: ErrorToastMessage) {
         toasts.add(0, AppToast(++toastCount, message))
+        AppLogLines.toast(message)
     }
 
     /** `toast.dismiss(id)`: [message] goes, if it is still up. */
@@ -1546,6 +1547,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             ApiClient(url, token)
         }
         this.api = api
+        AppLogLines.opened(api)
         slashItems = SlashItemsStore(scope)
         fileIndex = FileIndexStore(api, scope)
         fileMutations = com.hienlh.ppm.state.files.FileMutations(api)
@@ -1621,6 +1623,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         while (true) {
             delay(health.nextDelayMs)
             val back = health.record(checkHealth(api), System.currentTimeMillis())
+            AppLogLines.connection(api, was = connectionLost, now = health.overlay)
             connectionLost = health.overlay
             if (back) {
                 reopenServer()
