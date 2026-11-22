@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- The chat mic: asked for the first time it is pressed. -->
@@ -104,5 +105,25 @@
                 <action android:name="org.unifiedpush.android.connector.TEMP_UNAVAILABLE" />
             </intent-filter>
         </receiver>
+        <!-- FCM, for a server that has a Firebase project of its own. Firebase never starts on its
+             own: there is no google-services.json, the app starts it with the config the server
+             answers (push/AndroidFirebaseGateway.kt), so the init provider is removed. -->
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider"
+            tools:node="remove" />
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+        <meta-data
+            android:name="firebase_analytics_collection_enabled"
+            android:value="false" />
+        <service
+            android:name=".push.PpmFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

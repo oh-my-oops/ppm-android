@@ -70,6 +70,14 @@ dependencies {
     implementation(libs.androidsvg)
     implementation(libs.zxing.core)
     implementation("org.unifiedpush.android:connector:3.3.5")
+    // FCM for a server with a Firebase project of its own. No google-services plugin or json: the
+    // app starts Firebase with the client config the server answers (push/AndroidFirebaseGateway.kt).
+    implementation(platform("com.google.firebase:firebase-bom:35.2.0"))
+    implementation("com.google.firebase:firebase-messaging")
+    // Messaging has these at runtime only; the app asks Play services itself (GoogleApiAvailability).
+    implementation("com.google.android.gms:play-services-base:18.9.0")
+    implementation("com.google.android.gms:play-services-basement:18.9.0")
+    implementation("com.google.android.gms:play-services-tasks:18.4.0")
     implementation(libs.androidx.compose.ui.tooling.preview)
     // Hands the Baseline Profile to Android on an install that is not from Play, where nothing else
     // would: the system compiles it when the device is next idle.

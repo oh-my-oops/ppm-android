@@ -38,6 +38,8 @@ data class PushThisDeviceUi(
     val distributorName: String? = null,
     val savedDeviceId: String? = null,
     val permissionDenied: Boolean = false,
+    /** The server offers Firebase, but this app runs another server's Firebase project. */
+    val firebaseInUseElsewhere: Boolean = false,
 )
 
 /**
@@ -55,7 +57,8 @@ internal fun PushThisDeviceRow(
     val checked = state.checked && enabled
     val subtitle = when {
         !enabled -> "UnifiedPush distributor required (install ntfy)"
-        !state.distributorName.isNullOrBlank() -> "Receive alerts on this device via ${state.distributorName}"
+        !state.distributorName.isNullOrBlank() ->
+            pushViaSubtitle("this device", state.distributorName, state.firebaseInUseElsewhere)
         else -> "Receive alerts on this device when a chat finishes"
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
