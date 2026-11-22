@@ -13,12 +13,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.hienlh.ppm.app.PrefsStore
+import com.hienlh.ppm.app.push.AndroidFirebaseGateway
+import com.hienlh.ppm.app.push.FcmEnrollment
+import com.hienlh.ppm.app.push.FcmFallbackReason
+import com.hienlh.ppm.app.push.FcmPushRegistration
+import com.hienlh.ppm.app.push.FirebaseGateway
 import com.hienlh.ppm.app.push.NotificationChannels
 import com.hienlh.ppm.app.push.PushDeviceManager
+import com.hienlh.ppm.app.push.PushTransport
+import com.hienlh.ppm.app.push.choosePushTransport
 import com.hienlh.ppm.app.ui.phone.settings.areSystemNotificationsEnabled
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.FcmAndroidConfig
 import com.hienlh.ppm.client.KeyValueStore
+import com.hienlh.ppm.client.defaultAndroidPushLabel
+import com.hienlh.ppm.client.notificationsGetFcm
 import com.hienlh.ppm.state.settings.PushDeviceRow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -36,15 +47,29 @@ interface PushThisDeviceRegistrar {
     /** Starts the UnifiedPush registration; `false` when no distributor took it. */
     fun register(instance: String, serverUrl: String?, vapidPublicKey: String?): Boolean
 
-    /** Unregisters from UnifiedPush and removes this device's subscription on the server. */
+    /** Unregisters (UnifiedPush or FCM) and removes this device's subscription on the server. */
     suspend fun unregister(instance: String)
+
+    /** Which way this device would push from [instance]'s server: Firebase or UnifiedPush. */
+    suspend fun transport(instance: String): PushTransport =
+        PushTransport.UnifiedPush(FcmFallbackReason.NOT_CONFIGURED)
+
+    /** Whether [instance]'s server has this device through FCM. */
+    fun enrolledViaFcm(instance: String): Boolean = false
+
+    /** Subscribes this device through FCM; answers the subscription id, throws when it fails. */
+    suspend fun registerFcm(instance: String, serverUrl: String?, config: FcmAndroidConfig): String =
+        throw UnsupportedOperationException("Firebase is not available")
 }
 
 internal class UnifiedPushThisDeviceRegistrar(
     private val context: Context,
     private val prefs: KeyValueStore,
     private val api: ApiClient?,
+    private val firebase: FirebaseGateway = AndroidFirebaseGateway(context),
 ) : PushThisDeviceRegistrar {
+    private val fcm = FcmPushRegistration(prefs, firebase, defaultAndroidPushLabel(Build.MODEL))
+
     override fun distributors(): List<String> = PushDeviceManager.availableDistributors(context)
     override fun isEnabled(instance: String): Boolean = PushDeviceManager.isEnabled(prefs, instance)
     override fun savedDeviceId(instance: String): String? = PushDeviceManager.savedDeviceId(prefs, instance)
@@ -61,12 +86,35 @@ internal class UnifiedPushThisDeviceRegistrar(
     }
 
     override suspend fun unregister(instance: String) {
+        if (FcmEnrollment.isFcm(prefs, instance)) {
+            fcm.unenroll(instance, api)
+            return
+        }
         PushDeviceManager.unregisterFromUnifiedPush(
             context = context,
             store = prefs,
             api = api,
             instance = instance,
         )
+    }
+
+    override suspend fun transport(instance: String): PushTransport {
+        val server = try {
+            api?.notificationsGetFcm()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            null
+        }
+        return choosePushTransport(server, firebase.playServicesAvailable(), firebase.existingProjectId())
+    }
+
+    override fun enrolledViaFcm(instance: String): Boolean = FcmEnrollment.isFcm(prefs, instance)
+
+    override suspend fun registerFcm(instance: String, serverUrl: String?, config: FcmAndroidConfig): String {
+        val client = api ?: throw IllegalStateException("Not connected to a server")
+        NotificationChannels.ensureChannels(context)
+        return fcm.enroll(instance, client, config, serverUrl)
     }
 }
 
@@ -111,6 +159,43 @@ class PushThisDevice internal constructor(
     var permissionDenied by mutableStateOf(false)
         private set
 
+    /** How the server would push to this device, once [resolveTransport] has asked it. */
+    var transport by mutableStateOf<PushTransport?>(null)
+        private set
+
+    /** The server has this device through FCM. */
+    var enrolledViaFcm by mutableStateOf(registrar.enrolledViaFcm(instance))
+        private set
+
+    /** Firebase carries this device's push: enrolled through it, or would be when switched on. */
+    val viaFirebase: Boolean
+        get() = if (enabledOnThisDevice) enrolledViaFcm else transport is PushTransport.Firebase
+
+    /** The switch can be turned on: through Firebase or a UnifiedPush distributor. */
+    val available: Boolean
+        get() = viaFirebase || distributorAvailable
+
+    /** What the "via …" subtitle names: Firebase, or the distributor. */
+    val viaName: String?
+        get() = if (viaFirebase) FIREBASE_NAME else distributorName
+
+    /** The server offers Firebase, but this app already runs another server's Firebase project. */
+    val firebaseInUseElsewhere: Boolean
+        get() = !viaFirebase && (transport as? PushTransport.UnifiedPush)?.reason == FcmFallbackReason.OTHER_PROJECT
+
+    /** Asks the server whether it pushes through Firebase (an older server answers no). */
+    suspend fun resolveTransport(): PushTransport {
+        val next = try {
+            registrar.transport(instance)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            PushTransport.UnifiedPush(FcmFallbackReason.NOT_CONFIGURED)
+        }
+        transport = next
+        return next
+    }
+
     /** Re-reads the device id the server gave this device's subscription. */
     fun refreshSavedDeviceId(): String? = registrar.savedDeviceId(instance).also { savedDeviceId = it }
 
@@ -140,11 +225,35 @@ class PushThisDevice internal constructor(
         callback?.invoke(effective)
     }
 
-    /** Registers this device; answers the status line to show. */
+    /** Registers this device with UnifiedPush; answers the status line to show. */
     fun enable(vapidPublicKey: String?): String {
         val ok = registrar.register(instance, serverUrl, vapidPublicKey)
         enabledOnThisDevice = ok
-        return if (ok) "Push notifications enabled on this device" else "No UnifiedPush distributor available"
+        return if (ok) ENABLED_STATUS else "No UnifiedPush distributor available"
+    }
+
+    /**
+     * Registers this device through Firebase when the server offers it, else (or when Firebase
+     * fails and a distributor is installed) through UnifiedPush; answers the status line to show.
+     */
+    suspend fun switchOn(vapidPublicKey: String?): String {
+        val firebase = (transport ?: resolveTransport()) as? PushTransport.Firebase
+            ?: return enable(vapidPublicKey)
+        return try {
+            savedDeviceId = registrar.registerFcm(instance, serverUrl, firebase.config)
+            enrolledViaFcm = true
+            enabledOnThisDevice = true
+            ENABLED_STATUS
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            if (distributorAvailable) {
+                enable(vapidPublicKey)
+            } else {
+                enabledOnThisDevice = false
+                "Could not register with Firebase: ${e.message ?: "unknown error"}"
+            }
+        }
     }
 
     /** Unregisters this device; answers the status line to show. */
@@ -152,6 +261,7 @@ class PushThisDevice internal constructor(
         enabledOnThisDevice = false
         registrar.unregister(instance)
         savedDeviceId = null
+        enrolledViaFcm = false
         return "Push notifications turned off on this device"
     }
 
@@ -175,16 +285,16 @@ class PushThisDevice internal constructor(
             }
             return
         }
-        if (!distributorAvailable) return
+        if (!available) return
         requestPermission { granted ->
             if (!granted) {
                 permissionDenied = true
                 return@requestPermission
             }
             permissionDenied = false
-            onStatus(enable(vapidPublicKey))
-            if (enabledOnThisDevice) {
-                scope.launch { awaitListed(reloadDevices) }
+            scope.launch {
+                onStatus(switchOn(vapidPublicKey))
+                if (enabledOnThisDevice) awaitListed(reloadDevices)
             }
         }
     }
@@ -203,7 +313,9 @@ class PushThisDevice internal constructor(
         }
     }
 
-    private companion object {
+    internal companion object {
+        const val FIREBASE_NAME = "Firebase"
+        const val ENABLED_STATUS = "Push notifications enabled on this device"
         const val LIST_POLL_ATTEMPTS = 20
         const val LIST_POLL_INTERVAL_MS = 1_000L
     }
@@ -247,4 +359,13 @@ fun rememberPushThisDevice(
         runCatching { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }.isSuccess
     }
     return push
+}
+
+/**
+ * The switch's "via …" line: [viaName] is "Firebase" or the distributor. When the server offers
+ * Firebase but this app runs another server's project, the distributor line says so.
+ */
+fun pushViaSubtitle(target: String, viaName: String, firebaseInUseElsewhere: Boolean = false): String {
+    val via = "Receive alerts on $target via $viaName"
+    return if (firebaseInUseElsewhere) "$via (Firebase is in use by another server)" else via
 }

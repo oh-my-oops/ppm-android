@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app
 
 import android.app.Application
+import com.hienlh.ppm.app.push.AndroidFirebaseGateway
 import com.hienlh.ppm.app.recentphoto.RecentPhotos
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.SyntaxHighlighter
@@ -42,6 +43,8 @@ class PpmApplication : Application() {
         // Once per process; creating another window must not remove live attachment copies.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { clearAttachmentCopies(this@PpmApplication) }
         SyntaxHighlighter.get(this).warm()
+        // Before any FCM message is handled: the init provider is removed, so Firebase starts here.
+        AndroidFirebaseGateway.startSaved(this)
         PpmFonts.warm()
     }
 }

@@ -48,6 +48,8 @@ import com.hienlh.ppm.app.ui.Separator
 import com.hienlh.ppm.app.ui.SettingsPasswordInput
 import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.app.ui.SettingsToggleRow
+import com.hienlh.ppm.app.ui.PushThisDevice
+import com.hienlh.ppm.app.ui.pushViaSubtitle
 import com.hienlh.ppm.app.ui.rememberPushThisDevice
 import com.hienlh.ppm.client.notificationsCancelTelegramConnect
 import com.hienlh.ppm.client.notificationsDeleteNtfy
@@ -159,6 +161,10 @@ fun NotificationsPage(
         reloadAll()
     }
 
+    LaunchedEffect(push) {
+        push.resolveTransport()
+    }
+
     LaunchedEffect(api, telegram.connectActive) {
         val client = api ?: return@LaunchedEffect
         if (!telegram.connectActive) return@LaunchedEffect
@@ -186,8 +192,9 @@ fun NotificationsPage(
             ntfy = ntfy,
             notificationsEnabledOnDevice = deviceNotificationsEnabled,
             notificationPermissionGranted = push.permissionGranted,
-            distributorAvailable = push.distributorAvailable,
-            distributorName = push.distributorName,
+            distributorAvailable = push.available,
+            distributorName = push.viaName,
+            firebaseInUseElsewhere = push.firebaseInUseElsewhere,
             pushEnabledOnThisDevice = push.enabledOnThisDevice,
             statusMessage = statusMessage,
             onOpenSystemNotificationSettings = onOpenSystemNotificationSettings ?: {
@@ -196,7 +203,10 @@ fun NotificationsPage(
             onRequestNotificationPermission = push::requestPermission,
             onTogglePushOnDevice = { enabled ->
                 if (enabled) {
-                    statusMessage = push.enable(pushStatus.publicKey)
+                    scope.launch {
+                        statusMessage = push.switchOn(pushStatus.publicKey)
+                        reloadAll()
+                    }
                 } else {
                     scope.launch {
                         statusMessage = push.disable()
@@ -309,6 +319,7 @@ fun PhoneNotificationsContent(
     notificationPermissionGranted: Boolean = notificationsEnabledOnDevice,
     distributorAvailable: Boolean = true,
     distributorName: String? = null,
+    firebaseInUseElsewhere: Boolean = false,
     pushEnabledOnThisDevice: Boolean? = null,
     statusMessage: String? = null,
     onOpenSystemNotificationSettings: () -> Unit = {},
@@ -459,8 +470,11 @@ fun PhoneNotificationsContent(
                 ) {
                     val pushSubtitle = when {
                         !distributorAvailable -> "UnifiedPush distributor required (install ntfy)"
+                        // Firebase, or the distributor Firebase had to give way to, is named first.
+                        distributorName != null && (distributorName == PushThisDevice.FIREBASE_NAME || firebaseInUseElsewhere) ->
+                            pushViaSubtitle("this phone", distributorName, firebaseInUseElsewhere)
                         pushStatus.devices.isNotEmpty() -> "${pushStatus.devices.size} subscribed device(s)"
-                        !distributorName.isNullOrBlank() -> "Receive alerts on this phone via $distributorName"
+                        !distributorName.isNullOrBlank() -> pushViaSubtitle("this phone", distributorName)
                         else -> "Receive alerts on this phone when a chat finishes"
                     }
                     PushDeviceToggleRow(

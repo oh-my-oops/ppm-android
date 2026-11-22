@@ -328,6 +328,10 @@ internal fun NotificationsSettingsSection(api: ApiClient?, push: PushThisDevice?
         reloadAll()
     }
 
+    LaunchedEffect(push) {
+        push?.resolveTransport()
+    }
+
     LaunchedEffect(api, telegram.connectActive) {
         val client = api ?: return@LaunchedEffect
         if (!telegram.connectActive) return@LaunchedEffect
@@ -346,11 +350,12 @@ internal fun NotificationsSettingsSection(api: ApiClient?, push: PushThisDevice?
         statusMessage = statusMessage,
         thisDevice = push?.let {
             PushThisDeviceUi(
-                checked = it.enabledOnThisDevice && it.distributorAvailable,
-                distributorAvailable = it.distributorAvailable,
-                distributorName = it.distributorName,
+                checked = it.enabledOnThisDevice && it.available,
+                distributorAvailable = it.available,
+                distributorName = it.viaName,
                 savedDeviceId = it.savedDeviceId,
                 permissionDenied = it.permissionDenied,
+                firebaseInUseElsewhere = it.firebaseInUseElsewhere,
             )
         },
         onToggleThisDevice = { wantEnabled ->
