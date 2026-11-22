@@ -6,3 +6,6 @@ local.properties
 .kotlin/
 captures/
 __pycache__/
+
+# Firebase keys for the PPM install (service account = secret). Kept here, never committed.
+/secrets/
