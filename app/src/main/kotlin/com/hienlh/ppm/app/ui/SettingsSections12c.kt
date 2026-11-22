@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +50,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.push.PushDeviceManager
+import com.hienlh.ppm.app.ui.phone.settings.openAppNotificationSettings
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.cloudGetAlias
@@ -284,7 +287,19 @@ private fun FilterChip12c(
 
 @Composable
 internal fun NotificationsSettingsSection(model: AppModel) {
-    val api = model.api
+    val selectedServerId by model.store.selectedId.collectAsState()
+    val servers by model.store.servers.collectAsState()
+    val push = rememberPushThisDevice(
+        api = model.api,
+        instance = PushDeviceManager.normalizeInstance(selectedServerId),
+        serverUrl = servers.firstOrNull { it.id == selectedServerId }?.url,
+    )
+    NotificationsSettingsSection(api = model.api, push = push)
+}
+
+@Composable
+internal fun NotificationsSettingsSection(api: ApiClient?, push: PushThisDevice?) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
 
@@ -294,10 +309,17 @@ internal fun NotificationsSettingsSection(model: AppModel) {
     var ntfy by remember { mutableStateOf(NtfyStatusState()) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
+    suspend fun reloadPush(): List<PushDeviceRow>? {
+        val client = api ?: return null
+        return runCatchingNonCancelled { parsePushStatus(client.notificationsGetPush()) }.getOrNull()
+            ?.also { pushStatus = it }
+            ?.devices
+    }
+
     suspend fun reloadAll() {
         val client = api ?: return
         runCatchingNonCancelled { parseNotificationSettings(client.notificationsGetSettings()) }.getOrNull()?.let { settings = it }
-        runCatchingNonCancelled { parsePushStatus(client.notificationsGetPush()) }.getOrNull()?.let { pushStatus = it }
+        reloadPush()
         runCatchingNonCancelled { parseTelegramNotifyStatus(client.notificationsGetTelegram()) }.getOrNull()?.let { telegram = it }
         runCatchingNonCancelled { parseNtfyStatus(client.notificationsGetNtfy()) }.getOrNull()?.let { ntfy = it }
     }
@@ -322,6 +344,25 @@ internal fun NotificationsSettingsSection(model: AppModel) {
         telegram = telegram,
         ntfy = ntfy,
         statusMessage = statusMessage,
+        thisDevice = push?.let {
+            PushThisDeviceUi(
+                checked = it.enabledOnThisDevice && it.distributorAvailable,
+                distributorAvailable = it.distributorAvailable,
+                distributorName = it.distributorName,
+                savedDeviceId = it.savedDeviceId,
+                permissionDenied = it.permissionDenied,
+            )
+        },
+        onToggleThisDevice = { wantEnabled ->
+            push?.toggle(
+                wantEnabled = wantEnabled,
+                vapidPublicKey = pushStatus.publicKey,
+                scope = scope,
+                onStatus = { statusMessage = it },
+                reloadDevices = { reloadPush() },
+            )
+        },
+        onOpenSystemNotificationSettings = { openAppNotificationSettings(context) },
         onUpdateSettings = { next ->
             settings = next
             val client = api ?: return@NotificationsSettingsContent
@@ -429,6 +470,9 @@ internal fun NotificationsSettingsContent(
     telegram: TelegramNotifyState,
     ntfy: NtfyStatusState,
     statusMessage: String? = null,
+    thisDevice: PushThisDeviceUi? = null,
+    onToggleThisDevice: (Boolean) -> Unit = {},
+    onOpenSystemNotificationSettings: () -> Unit = {},
     onUpdateSettings: (NotificationSettingsState) -> Unit,
     onTestPushDevice: (String) -> Unit,
     onRemovePushDevice: (String, String) -> Unit,
@@ -498,6 +542,14 @@ internal fun NotificationsSettingsContent(
         // Web Push Devices
         IntegrationCard {
             SettingsSectionTitle("Subscribed Push Devices (${pushStatus.devices.size})")
+            if (thisDevice != null) {
+                PushThisDeviceRow(
+                    state = thisDevice,
+                    onCheckedChange = onToggleThisDevice,
+                    onOpenSystemNotificationSettings = onOpenSystemNotificationSettings,
+                )
+                Separator()
+            }
             if (pushStatus.devices.isEmpty()) {
                 BasicText(
                     "No browser push devices registered.",
@@ -511,7 +563,15 @@ internal fun NotificationsSettingsContent(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            BasicText(dev.label, style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                BasicText(dev.label, style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color))
+                                if (thisDevice?.savedDeviceId != null && dev.id == thisDevice.savedDeviceId) {
+                                    ThisDeviceBadge(Modifier.testTag("push-this-device-" + dev.id))
+                                }
+                            }
                             if (!dev.lastError.isNullOrBlank()) {
                                 BasicText(dev.lastError.orEmpty(), style = ppmText(10f).copy(color = tokens.error.color))
                             }
@@ -705,7 +765,13 @@ internal fun NotificationsSettingsContent(
             onDismiss = { pendingRemovePushDevice = null },
             onConfirm = {
                 pendingRemovePushDevice = null
-                onRemovePushDevice(dev.id, dev.endpoint)
+                // This device's own subscription goes the way its switch does, so the
+                // distributor stops delivering too.
+                if (thisDevice?.savedDeviceId != null && dev.id == thisDevice.savedDeviceId) {
+                    onToggleThisDevice(false)
+                } else {
+                    onRemovePushDevice(dev.id, dev.endpoint)
+                }
             },
         )
     }

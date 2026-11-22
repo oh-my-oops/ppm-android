@@ -1,13 +1,9 @@
 package com.hienlh.ppm.app.ui.phone.settings
 
-import android.Manifest
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,13 +43,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.app.PrefsStore
-import com.hienlh.ppm.app.push.NotificationChannels
 import com.hienlh.ppm.app.push.PushDeviceManager
 import com.hienlh.ppm.app.ui.Separator
 import com.hienlh.ppm.app.ui.SettingsPasswordInput
 import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.app.ui.SettingsToggleRow
+import com.hienlh.ppm.app.ui.rememberPushThisDevice
 import com.hienlh.ppm.client.notificationsCancelTelegramConnect
 import com.hienlh.ppm.client.notificationsDeleteNtfy
 import com.hienlh.ppm.client.notificationsGetNtfy
@@ -132,7 +127,13 @@ fun NotificationsPage(
     val servers by model.store.servers.collectAsState()
     val activeServer = servers.firstOrNull { it.id == selectedServerId }
     val pushInstance = PushDeviceManager.normalizeInstance(selectedServerId)
-    val prefs = remember(context) { PrefsStore(context.applicationContext ?: context) }
+    val push = rememberPushThisDevice(
+        api = api,
+        instance = pushInstance,
+        serverUrl = activeServer?.url,
+        notificationsEnabledOverride = notificationsEnabledOverride,
+        distributorAvailableOverride = distributorAvailableOverride,
+    )
 
     var settings by remember { mutableStateOf(NotificationSettingsState()) }
     var pushStatus by remember { mutableStateOf(PushStatusState()) }
@@ -140,33 +141,7 @@ fun NotificationsPage(
     var ntfy by remember { mutableStateOf(NtfyStatusState()) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
-    var permissionGranted by remember(context, notificationsEnabledOverride) {
-        mutableStateOf(
-            notificationsEnabledOverride ?: NotificationChannels.hasNotificationPermission(context),
-        )
-    }
-    var pushEnabledOnThisDevice by remember(pushInstance) {
-        mutableStateOf(PushDeviceManager.isEnabled(prefs, pushInstance))
-    }
-
-    val distributors = remember(context) { PushDeviceManager.availableDistributors(context) }
-    val distributorAvailable = distributorAvailableOverride ?: distributors.isNotEmpty()
-    val distributorName = remember(distributors) {
-        distributors.firstOrNull()?.let(PushDeviceManager::distributorDisplayName)
-    }
-
-    var pendingPermissionCallback by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        val effective = granted && areSystemNotificationsEnabled(context)
-        permissionGranted = effective
-        val callback = pendingPermissionCallback
-        pendingPermissionCallback = null
-        callback?.invoke(effective)
-    }
-
-    val deviceNotificationsEnabled = notificationsEnabledOverride ?: permissionGranted
+    val deviceNotificationsEnabled = notificationsEnabledOverride ?: push.permissionGranted
 
     suspend fun reloadAll() {
         val client = api ?: return
@@ -210,59 +185,21 @@ fun NotificationsPage(
             telegram = telegram,
             ntfy = ntfy,
             notificationsEnabledOnDevice = deviceNotificationsEnabled,
-            notificationPermissionGranted = permissionGranted,
-            distributorAvailable = distributorAvailable,
-            distributorName = distributorName,
-            pushEnabledOnThisDevice = pushEnabledOnThisDevice,
+            notificationPermissionGranted = push.permissionGranted,
+            distributorAvailable = push.distributorAvailable,
+            distributorName = push.distributorName,
+            pushEnabledOnThisDevice = push.enabledOnThisDevice,
             statusMessage = statusMessage,
             onOpenSystemNotificationSettings = onOpenSystemNotificationSettings ?: {
                 openAppNotificationSettings(context)
             },
-            onRequestNotificationPermission = { callback ->
-                if (notificationsEnabledOverride != null) {
-                    callback(notificationsEnabledOverride)
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    !NotificationChannels.isRuntimePermissionGranted(context)
-                ) {
-                    pendingPermissionCallback = callback
-                    runCatching {
-                        permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }.onFailure {
-                        pendingPermissionCallback = null
-                        callback(false)
-                    }
-                } else {
-                    val allowed = NotificationChannels.hasNotificationPermission(context)
-                    permissionGranted = allowed
-                    callback(allowed)
-                }
-            },
+            onRequestNotificationPermission = push::requestPermission,
             onTogglePushOnDevice = { enabled ->
                 if (enabled) {
-                    NotificationChannels.ensureChannels(context)
-                    val ok = PushDeviceManager.registerWithUnifiedPush(
-                        context = context,
-                        store = prefs,
-                        instance = pushInstance,
-                        serverUrl = activeServer?.url,
-                        vapidPublicKey = pushStatus.publicKey,
-                    )
-                    pushEnabledOnThisDevice = ok
-                    if (ok) {
-                        statusMessage = "Push notifications enabled on this device"
-                    } else {
-                        statusMessage = "No UnifiedPush distributor available"
-                    }
+                    statusMessage = push.enable(pushStatus.publicKey)
                 } else {
-                    pushEnabledOnThisDevice = false
                     scope.launch {
-                        PushDeviceManager.unregisterFromUnifiedPush(
-                            context = context,
-                            store = prefs,
-                            api = api,
-                            instance = pushInstance,
-                        )
-                        statusMessage = "Push notifications turned off on this device"
+                        statusMessage = push.disable()
                         reloadAll()
                     }
                 }
@@ -278,7 +215,7 @@ fun NotificationsPage(
             },
             onTestPush = {
                 val client = api ?: return@PhoneNotificationsContent
-                val devId = PushDeviceManager.savedDeviceId(prefs, pushInstance)
+                val devId = push.refreshSavedDeviceId()
                     ?: pushStatus.devices.firstOrNull()?.id
                 scope.launch {
                     runCatching { client.notificationsTestPush(devId) }
