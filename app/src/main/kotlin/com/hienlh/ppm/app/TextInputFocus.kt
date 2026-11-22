@@ -433,3 +433,55 @@ private class TextFocusNode(var state: TextFieldState) : Modifier.Node(), FocusE
         TextInputFocus.release(state)
     }
 }
+
+/**
+ * Reports a `value`-based text field to [TextInputFocus] while it has focus, as [tracksTextFocus] does one
+ * editing a [TextFieldState]: the tap that focuses it keeps the keyboard ([TextInputFocus.asked]), the
+ * shortcuts stand aside, and the page pans it above the keyboard. It is registered the way a native editor
+ * is, with its own bounds. The app hands it to the modules below it through
+ * [com.hienlh.ppm.design.LocalTextFieldFocus]: a chat card's "Other" answer typed into nothing without it.
+ */
+fun Modifier.tracksValueTextFocus(): Modifier = this then ValueTextFocusElement
+
+private data object ValueTextFocusElement : ModifierNodeElement<ValueTextFocusNode>() {
+    override fun create() = ValueTextFocusNode()
+
+    override fun update(node: ValueTextFocusNode) = Unit
+}
+
+private class ValueTextFocusNode : Modifier.Node(), FocusEventModifierNode, PointerInputModifierNode, LayoutAwareModifierNode, CompositionLocalConsumerModifierNode {
+    private var placed: LayoutCoordinates? = null
+    private var focused = false
+
+    override fun onFocusEvent(focusState: FocusState) {
+        if (focusState.isFocused == focused) return
+        focused = focusState.isFocused
+        if (focused) {
+            TextInputFocus.asked()
+            TextInputFocus.takeNative(this, currentValueOf(LocalFocusManager)) { page -> boundsIn(page) }
+        } else {
+            TextInputFocus.releaseNative(this)
+        }
+    }
+
+    private fun boundsIn(page: LayoutCoordinates): Rect? {
+        val field = placed?.takeIf { it.isAttached } ?: return null
+        if (!page.isAttached || field.findRootCoordinates() != page.findRootCoordinates()) return null
+        return page.localBoundingBoxOf(field, clipBounds = false)
+    }
+
+    override fun onPlaced(coordinates: LayoutCoordinates) {
+        placed = coordinates
+    }
+
+    override fun onPointerEvent(pointerEvent: PointerEvent, pass: PointerEventPass, bounds: IntSize) {
+        if (pass == PointerEventPass.Initial && pointerEvent.type == PointerEventType.Press) TextInputFocus.pressed(this)
+    }
+
+    override fun onCancelPointerInput() = Unit
+
+    override fun onDetach() {
+        focused = false
+        TextInputFocus.releaseNative(this)
+    }
+}

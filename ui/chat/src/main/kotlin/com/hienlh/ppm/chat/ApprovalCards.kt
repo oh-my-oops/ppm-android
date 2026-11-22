@@ -732,6 +732,7 @@ private fun OtherRow(
             Modifier
                 .weight(1f)
                 .focusRequester(focusRequester)
+                .cardTextField(focused)
                 .background(tokens.panel.color, fieldShape)
                 .cssBorder((if (focused) tokens.accent else tokens.border).color, fieldShape)
                 .padding(horizontal = 8.dp),

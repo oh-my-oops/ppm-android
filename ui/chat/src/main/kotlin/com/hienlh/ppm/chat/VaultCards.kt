@@ -231,6 +231,7 @@ fun VaultTextField(
         { onChange(it.take(maxLength)) },
         modifier
             .heightIn(min = if (mobile) 44.dp else 32.dp)
+            .cardTextField(focused)
             .semantics { contentDescription = label }
             .background(Color.Transparent, shape)
             .cssBorder(edge.color, shape),

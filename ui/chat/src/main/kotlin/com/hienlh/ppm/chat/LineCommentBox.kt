@@ -182,6 +182,7 @@ internal fun CardTextArea(
         modifier
             .fillMaxWidth()
             .focusRequester(focus)
+            .cardTextField(focused)
             .semantics { contentDescription = label }
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false

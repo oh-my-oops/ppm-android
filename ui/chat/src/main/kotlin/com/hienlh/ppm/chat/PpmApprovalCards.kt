@@ -511,6 +511,7 @@ private fun PasswordField(value: String, onChange: (String) -> Unit, enabled: Bo
         Modifier
             .then(if (mobile) Modifier.fillMaxWidth() else Modifier.widthIn(max = 224.dp).fillMaxWidth())
             .heightIn(min = if (mobile) 44.dp else 32.dp)
+            .cardTextField(focused)
             .semantics { contentDescription = "PPM password" }
             .background(Color.Transparent, shape)
             .cssBorder(edge.color, shape),

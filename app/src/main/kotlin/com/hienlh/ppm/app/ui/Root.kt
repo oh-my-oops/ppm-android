@@ -79,6 +79,7 @@ import com.hienlh.ppm.app.FocusStartAnchor
 import com.hienlh.ppm.app.LightboxRequest
 import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.leavesTextOnTap
+import com.hienlh.ppm.app.tracksValueTextFocus
 import com.hienlh.ppm.app.tasks
 import com.hienlh.ppm.app.ui.extensions.ExtensionOverlays
 import com.hienlh.ppm.app.ui.phone.PhoneShell
@@ -183,6 +184,8 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             LocalSizeClass provides sizeClass,
             LocalRedesign provides true,
             LocalTabScrollStore provides tabScrollStore,
+            // A chat card's "Other" answer or password is a field the app follows like its own (TextInputFocus).
+            com.hienlh.ppm.design.LocalTextFieldFocus provides Modifier.tracksValueTextFocus(),
             // PPM's own approvals are answered over HTTP, and a from-session bubble or turn chip opens its session.
             LocalPpmApprovals provides model.api?.let(::ServerPpmApprovals),
             // An endpoint approval card is headed with the Assistant's own name.
