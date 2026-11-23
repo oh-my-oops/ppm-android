@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui
 
+import com.hienlh.ppm.app.LocalPrefs
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
@@ -680,6 +681,10 @@ internal fun AppearanceExtrasSection(model: AppModel) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        if (LocalSizeClass.current == SizeClass.Phone) {
+            PhoneInterfaceChoice()
+            Separator()
+        }
         // Custom Themes manager
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
@@ -2667,4 +2672,34 @@ internal fun copySensitiveClip(context: Context, label: String, text: String): C
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     cm?.setPrimaryClip(clip)
     return clip
+}
+
+/**
+ * Settings → Appearance → Interface, on the phone only: New is the redesigned phone layout,
+ * Classic the one before it (the web's mobile layout, [ClassicPhoneShell]). Kept on this device.
+ */
+@Composable
+private fun PhoneInterfaceChoice() {
+    val tokens = LocalPpmTokens.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SettingsSectionTitle("Interface")
+        BasicText(
+            "Layout of the app on this phone",
+            style = ppmText(11f).copy(color = tokens.text3.color),
+        )
+        SettingsRadioCard(
+            title = "New",
+            subtitle = "Drawer, tab switcher in the title and action bar at the bottom",
+            selected = LocalPrefs.redesign,
+            testTag = "settings-interface-new",
+            onClick = { LocalPrefs.redesign = true },
+        )
+        SettingsRadioCard(
+            title = "Classic",
+            subtitle = "The earlier layout, like PPM's mobile web: bottom nav and side drawer",
+            selected = !LocalPrefs.redesign,
+            testTag = "settings-interface-classic",
+            onClick = { LocalPrefs.redesign = false },
+        )
+    }
 }

@@ -77,6 +77,7 @@ import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.FocusAnchor
 import com.hienlh.ppm.app.FocusStartAnchor
 import com.hienlh.ppm.app.LightboxRequest
+import com.hienlh.ppm.app.LocalPrefs
 import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.tracksValueTextFocus
@@ -156,6 +157,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
     val toaster = remember { ToasterState() }
     val tabScrollStore = rememberTabScrollStore()
     val context = LocalContext.current
+    remember(context) { LocalPrefs.of(context) }
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -173,6 +175,8 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
         FocusStartAnchor(rootAnchor, parkOnStart = true)
         val sizeClass = SizeClass.of(maxWidth, maxHeight)
         val mobile = sizeClass == SizeClass.Phone
+        // Settings → Appearance → Interface (phone only): Classic is the phone layout from before the redesign.
+        val classicPhone = usesClassicPhoneShell(sizeClass, LocalPrefs.redesign)
         // The layout follows the window, not the device: a rotation, split screen or foldable unfold can cross it.
         SideEffect { model.setWindowWide(sizeClass == SizeClass.Tablet) }
         SystemBarsHiddenOnTablet(sizeClass == SizeClass.Tablet)
@@ -182,7 +186,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             LocalImageViewer provides viewer,
             LocalIconFramework provides model.iconFramework,
             LocalSizeClass provides sizeClass,
-            LocalRedesign provides true,
+            LocalRedesign provides !classicPhone,
             LocalTabScrollStore provides tabScrollStore,
             // A chat card's "Other" answer or password is a field the app follows like its own (TextInputFocus).
             com.hienlh.ppm.design.LocalTextFieldFocus provides Modifier.tracksValueTextFocus(),
@@ -217,7 +221,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                 Box(Modifier.fillMaxSize().then(if (blurred) Modifier.blur(13.dp) else Modifier)) {
                     when {
                         !model.hasServer -> ConnectScreen(model, signIn = false)
-                        sizeClass == SizeClass.Phone -> PhoneShell(model)
+                        sizeClass == SizeClass.Phone -> if (classicPhone) ClassicPhoneShell(model) else PhoneShell(model)
                         else -> TabletShell(model)
                     }
                     model.screenOverlay?.let { overlay ->
@@ -408,6 +412,9 @@ private fun Dialogs(model: AppModel) {
         )
     }
 }
+
+/** The phone shows [ClassicPhoneShell] when Settings → Appearance → Interface is Classic; a tablet always has the new layout. */
+internal fun usesClassicPhoneShell(sizeClass: SizeClass, redesign: Boolean): Boolean = sizeClass == SizeClass.Phone && !redesign
 
 /**
  * The project's avatar (`ProjectAvatar`): its uploaded image, cropped to fill — nothing while it
