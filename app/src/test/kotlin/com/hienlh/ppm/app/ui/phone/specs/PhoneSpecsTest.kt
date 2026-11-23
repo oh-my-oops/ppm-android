@@ -68,7 +68,7 @@ class PhoneSpecsTest {
     private data class Seen(val line: String, val body: String)
 
     /** The spec routes of one spec, `login`, whose state moves as the buttons are pressed. */
-    private inner class SpecServer(var state: String, val designBlocked: String? = null) : Dispatcher() {
+    private inner class SpecServer(var state: String, var designBlocked: String? = null, var drawing: String? = null) : Dispatcher() {
         val seen = CopyOnWriteArrayList<Seen>()
 
         override fun dispatch(request: RecordedRequest): MockResponse {
@@ -83,6 +83,11 @@ class PhoneSpecsTest {
                     """{"message":"Approved requirements.md.","spec":${view()}}"""
                 }
                 method == "POST" && path == "$base/request-changes/requirements" -> view()
+                method == "POST" && path == "$base/approve/drawing" -> {
+                    drawing = "approved"
+                    designBlocked = null
+                    """{"message":"Approved the UI drawing.","spec":${view()}}"""
+                }
                 method == "POST" && path == "$base/run" -> {
                     state = "running"
                     """{"message":"Run all started.","spec":${view()}}"""
@@ -119,12 +124,13 @@ class PhoneSpecsTest {
             } else {
                 "[]"
             }
+            val drawingFields = drawing?.let { """"needsDrawing":true,"drawing":"$it","designSlug":"login-ui",""" } ?: ""
             val run = if (state == "running") """{"active":true,"startedAt":"x","wave":0}""" else "null"
             return """{"slug":"login","title":"Login flow","kind":"feature","workflow":"requirements-first","checks":"standard",
                 "current":"$current","order":["requirements","design","tasks"],
                 "phases":{"requirements":$req,"design":$design,"tasks":$tasks},
                 "waves":{"waves":[["1"],["2"]],"moved":[],"optional":[],"issues":[]},"tasks":$taskList,
-                "suite":null,"run":$run,"runLive":${state == "running"},"sessionId":"chat-1","updatedAt":"2026-11-11T08:00:00.000Z"}"""
+                "suite":null,"run":$run,$drawingFields"runLive":${state == "running"},"sessionId":"chat-1","updatedAt":"2026-11-11T08:00:00.000Z"}"""
         }
     }
 
@@ -179,6 +185,32 @@ class PhoneSpecsTest {
         }
         composeRule.onNodeWithTag("phone-spec-approve").assertExists()
         assertEquals("Login flow", model.specs.openTitle)
+    }
+
+    @Test
+    fun `a UI spec's design offers Open drawing and Approve drawing, and approving the drawing frees Approve design`() {
+        val spec = SpecServer("design", designBlocked = "Approve the UI drawing first (UI: yes).", drawing = "draft")
+        showSpec(model(spec))
+
+        waitForTag("phone-spec-approve-drawing")
+        composeRule.onNodeWithTag("phone-spec-open-drawing").assertExists()
+        assertEquals(0, composeRule.onAllNodesWithTag("phone-spec-approve").fetchSemanticsNodes().size)
+
+        composeRule.onNodeWithTag("phone-spec-approve-drawing").performClick()
+        val approve = waitForRequest(spec, "POST /api/project/ppm/specs/login/approve/drawing")
+        assertEquals("""{"continue":true}""", approve.body)
+        // Approved: the drawing button goes, Open drawing stays, and Design can be approved.
+        waitForTag("phone-spec-approve")
+        assertEquals(0, composeRule.onAllNodesWithTag("phone-spec-approve-drawing").fetchSemanticsNodes().size)
+        composeRule.onNodeWithTag("phone-spec-open-drawing").assertExists()
+    }
+
+    @Test
+    fun `a spec with no drawing offers neither drawing button`() {
+        showSpec(model(SpecServer("design")))
+        waitForTag("phone-spec-approve")
+        assertEquals(0, composeRule.onAllNodesWithTag("phone-spec-open-drawing").fetchSemanticsNodes().size)
+        assertEquals(0, composeRule.onAllNodesWithTag("phone-spec-approve-drawing").fetchSemanticsNodes().size)
     }
 
     @Test

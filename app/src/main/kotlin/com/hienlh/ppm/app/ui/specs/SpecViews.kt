@@ -327,6 +327,7 @@ internal fun SpecDetail(
                         busy,
                         Modifier.weight(1f),
                         onApprove = { phase -> act("approve-$phase", "Not approved") { it.approveSpec(project, slug, phase) } },
+                        onOpenDrawing = { design -> model.openDesignTab(design, design, projectName = project) },
                         onRequestChanges = { phase, note, done ->
                             act("changes-$phase", "Could not send") {
                                 val answer = it.requestSpecChanges(project, slug, phase, note)
@@ -548,6 +549,7 @@ private fun SpecDocumentPane(
     busy: String?,
     modifier: Modifier,
     onApprove: (String) -> Unit,
+    onOpenDrawing: (designSlug: String) -> Unit,
     onRequestChanges: (phase: String, note: String, done: () -> Unit) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -635,7 +637,28 @@ private fun SpecDocumentPane(
             overflow = TextOverflow.Ellipsis,
         )
     }
+    // A `UI: yes` spec's drawing (spec-pane.tsx): Open drawing on Requirements and Design, and Approve
+    // drawing on Design until it is approved, which Design's own approval waits for.
+    val designSlug = view.designSlug?.takeIf { view.needsDrawing }
+    val openDrawing = designSlug != null && (phase == "design" || phase == "requirements")
+    val approveDrawing = designSlug != null && phase == "design" && view.drawing != "approved"
     val buttons: @Composable () -> Unit = {
+        if (openDrawing && designSlug != null) {
+            CompactButton("Open drawing", ProductIcon.Palette, ButtonStyle.GHOST, enabled = true, testTag = "${LocalSpecTag.current}-open-drawing", height = 32.dp) {
+                onOpenDrawing(designSlug)
+            }
+        }
+        if (approveDrawing) {
+            CompactButton(
+                "Approve drawing",
+                if (busy == "approve-drawing") ProductIcon.Loader2 else ProductIcon.Palette,
+                ButtonStyle.OUTLINE,
+                enabled = busy == null,
+                testTag = "${LocalSpecTag.current}-approve-drawing",
+                height = 32.dp,
+                spinning = busy == "approve-drawing",
+            ) { onApprove("drawing") }
+        }
         if (ph.canAct && !noteOpen) {
             CompactButton("Request changes", ProductIcon.Pencil, ButtonStyle.OUTLINE, enabled = busy == null, testTag = "${LocalSpecTag.current}-request-changes", height = 32.dp) {
                 noteOpen = true
@@ -657,7 +680,7 @@ private fun SpecDocumentPane(
         .fillMaxWidth()
         .cssBorder(tokens.borderSoft.color, sides = com.hienlh.ppm.design.CssSides.Top)
         .padding(horizontal = 12.dp, vertical = 10.dp)
-    if (width >= PANE_MD || !ph.canAct) {
+    if (width >= PANE_MD || !(ph.canAct || openDrawing || approveDrawing)) {
         Row(footer, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             status(Modifier.weight(1f))
             buttons()
