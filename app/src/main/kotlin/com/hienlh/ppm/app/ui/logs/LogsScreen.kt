@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui.logs
 
+import com.hienlh.ppm.app.LocalRedesign
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -1065,7 +1066,7 @@ private fun LogsStreamPane(
                             else -> tokens.accent.color
                         }
 
-                        val isPhoneReadOnly = LocalPpmMobile.current
+                        val isPhoneReadOnly = LocalPpmMobile.current && LocalRedesign.current // look-only on the redesigned phone; Classic acts as before
                         Column(
                             Modifier
                                 .fillMaxWidth()

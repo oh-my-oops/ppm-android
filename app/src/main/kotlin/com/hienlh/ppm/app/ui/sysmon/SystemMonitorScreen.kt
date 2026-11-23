@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui.sysmon
 
+import com.hienlh.ppm.app.LocalRedesign
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -142,7 +143,7 @@ fun SystemMonitorBody(
     initialInventory: HardwareInventory? = null,
 ) {
     val tokens = LocalPpmTokens.current
-    val mobile = LocalPpmMobile.current
+    val mobile = (LocalPpmMobile.current && LocalRedesign.current)
     var activeTab by remember(initialTab) { mutableStateOf(initialTab) }
     var selectedPerfDevice by remember { mutableStateOf("cpu") }
     var preferencesOpen by remember { mutableStateOf(false) }
@@ -1167,7 +1168,7 @@ private fun AppsPanel(
                     val members = app.memberPids.mapNotNull { byPid[it] }
                     val isProtected = ProcessTableModel.isGroupProtected(members)
                     val canEnd = !isProtected && members.isNotEmpty()
-                    val isMobileReadOnly = LocalPpmMobile.current
+                    val isMobileReadOnly = (LocalPpmMobile.current && LocalRedesign.current)
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -1552,7 +1553,7 @@ private fun ProcessesPanel(
                                 PerformanceDevices.formatRam(g.ramMB),
                                 style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
                             )
-                            if (!LocalPpmMobile.current) {
+                            if (!(LocalPpmMobile.current && LocalRedesign.current)) {
                                 val groupKillTooltip = if (isProtected) {
                                     "Protected: this app contains a PPM or OS-critical process — cannot be ended as a whole."
                                 } else {
@@ -1640,7 +1641,7 @@ private fun ProcessesPanel(
                                 PerformanceDevices.formatRam(p.ramMB),
                                 style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
                             )
-                            if (!LocalPpmMobile.current) {
+                            if (!(LocalPpmMobile.current && LocalRedesign.current)) {
                                 if (!p.protected) {
                                     Box(
                                         Modifier
@@ -2289,7 +2290,7 @@ private fun ServicesPanel(
                         // Action buttons
                         if (isBusy) {
                             PpmIcon(ProductIcon.Loader2, 14.dp, tokens.text2.color, spinning = true)
-                        } else if (!LocalPpmMobile.current) {
+                        } else if (!(LocalPpmMobile.current && LocalRedesign.current)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 if (svc.running) {
                                     val stopRefused = svc.refused.containsKey("stop")

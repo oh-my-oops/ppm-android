@@ -1,5 +1,7 @@
 package com.hienlh.ppm.app.ui
 
+import com.hienlh.ppm.app.LocalRedesign
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -139,9 +141,11 @@ internal fun SettingsBody(
     var category by rememberSaveable(initialCategory) {
         mutableStateOf(initialCategory ?: SettingsCategory.General)
     }
+    var showClassicList by rememberSaveable(initialCategory) { mutableStateOf(initialCategory == null) }
     val select: (SettingsCategory) -> Unit = {
         category = it
         model.requestedSettingsCategory = null
+        showClassicList = false
         onCategoryChange(it)
     }
     // A link to the retired PPMBot pane lands on the sub-tab it became, once per link.
@@ -151,7 +155,14 @@ internal fun SettingsBody(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val isPhone = SizeClass.of(maxWidth) == SizeClass.Phone
-        if (isPhone) {
+        if (isPhone && !LocalRedesign.current) {
+            // Classic phone layout: the category list covers the pane until one is picked; Back brings it back.
+            BackHandler(enabled = backReturnsToList && !showClassicList) { showClassicList = true }
+            Box(Modifier.fillMaxSize()) {
+                SettingsPane(model, category, split = false, onBack = { showClassicList = true })
+                if (showClassicList) SettingsIndex(minimalMode, select)
+            }
+        } else if (isPhone) {
             val initialPhoneRoute = remember(rawRequestedCategory, initialCategory) {
                 when {
                     !rawRequestedCategory.isNullOrBlank() -> resolvePhoneSettingsRoute(rawRequestedCategory)
@@ -506,6 +517,58 @@ private fun TabletDetailHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+/** `absolute inset-0 bg-background`: "Settings", then a row per category in `p-3 space-y-5`, each group under its heading (`px-1 pb-1`). */
+@Composable
+private fun SettingsIndex(minimalMode: Boolean, onSelect: (SettingsCategory) -> Unit) {
+    val tokens = LocalPpmTokens.current
+    Column(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
+        BasicText(
+            "Settings",
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
+        )
+        Separator()
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            for (group in SettingsGroup.entries) {
+                val cats = group.categories(minimalMode)
+                if (cats.isEmpty()) continue
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    group.label?.let { GroupHeading(it, Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)) }
+                    for (category in cats) {
+                        val shape = RoundedCornerShape(12.dp)
+                        val hover = rememberHover(instant = true)
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(shape)
+                                .pointerHoverIcon(WebCursor.Pointer)
+                                .ppmClickable(
+                                    pressedColor = tokens.panel2.color,
+                                    hoverColor = tokens.panel2.opacity(0.5).color,
+                                    shape = shape,
+                                    source = hover.source,
+                                ) { onSelect(category) }
+                                .padding(horizontal = 10.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Box(
+                                Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(tokens.panel2.mix(tokens.panel, hover.lit.toDouble()).color),
+                                contentAlignment = Alignment.Center,
+                            ) { PpmIcon(category.icon, 16.dp, tokens.text2.color) }
+                            Column(Modifier.weight(1f)) {
+                                BasicText(category.label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                BasicText(category.subtitle, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color)
+                        }
+                    }
+                }
+            }
         }
     }
 }

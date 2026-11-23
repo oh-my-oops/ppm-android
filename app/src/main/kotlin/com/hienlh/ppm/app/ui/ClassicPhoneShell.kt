@@ -801,6 +801,16 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model, onNavigate = onClose)
                 } else if (shown == "ai-resources") {
                     AiResourcesSidebarPanel(model, onNavigate = onClose)
+                } else if (shown == "tasks" || shown == "specs" || shown == "jira") {
+                    // Sections added after this layout, drawn by the tablet sidebar's panels. They take no
+                    // onNavigate, so the drawer closes once one of them opens a tab.
+                    val openedFrom = remember { model.activeTab?.id }
+                    LaunchedEffect(model.activeTab?.id) { if (model.activeTab?.id != openedFrom) onClose() }
+                    when (shown) {
+                        "tasks" -> com.hienlh.ppm.app.ui.tasks.TasksPanel(model)
+                        "specs" -> com.hienlh.ppm.app.ui.tablet.SpecsSidebarPanel(model)
+                        else -> com.hienlh.ppm.app.ui.jira.JiraPanel(model)
+                    }
                 } else if (shown.startsWith("ext:")) {
                     val viewId = shown.removePrefix("ext:")
                     val contribs = model.extensions?.contributions?.collectAsState()?.value
@@ -829,6 +839,9 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     id == "teams" -> ProductIcon.Users
                     id == "tunnels" -> ProductIcon.Globe
                     id == "ai-resources" -> ProductIcon.Sparkles
+                    id == "tasks" -> ProductIcon.ListTodo
+                    id == "specs" -> ProductIcon.ClipboardList
+                    id == "jira" -> ProductIcon.Bug
                     id.startsWith("ext:") -> ProductIcon.Puzzle
                     else -> ProductIcon.BotMessageSquare
                 }
@@ -841,6 +854,9 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     id == "teams" -> "Teams"
                     id == "tunnels" -> "Ports"
                     id == "ai-resources" -> "AI"
+                    id == "tasks" -> "Tasks"
+                    id == "specs" -> "Specs"
+                    id == "jira" -> "Jira"
                     id.startsWith("ext:") -> extViews.firstOrNull { it.id == id.removePrefix("ext:") }?.name ?: id.removePrefix("ext:")
                     else -> "History"
                 }

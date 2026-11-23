@@ -1,5 +1,9 @@
 package com.hienlh.ppm.app.ui
 
+import com.hienlh.ppm.app.LocalRedesign
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import android.content.Context
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -107,5 +111,44 @@ class ClassicPhoneShellTest {
         for (label in listOf("Open menu", "Switch project", "Terminal", "New tab")) {
             assertTrue("missing nav cell $label in $labels", label in labels)
         }
+    }
+
+    @Test
+    fun classicSettingsListsTheCategoriesAndOpensAppearanceWithTheInterfaceChoice() {
+        LocalPrefs.of(context)
+        val model = AppModel(context)
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                CompositionLocalProvider(LocalRedesign provides false, LocalSizeClass provides SizeClass.Phone) {
+                    SettingsBody(model, backReturnsToList = true)
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        // The redesigned phone settings are not shown; the web's category list is.
+        assertEquals(0, composeRule.onAllNodesWithText("THIS PHONE").fetchSemanticsNodes().size)
+        composeRule.onNodeWithText("Appearance").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings-interface-classic").performScrollTo()
+        assertEquals(1, composeRule.onAllNodesWithTag("settings-interface-classic").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun theClassicDrawerNamesTheSectionsAddedAfterIt() {
+        PrefsStore(context).put("onboarding.dismissed", "1")
+        val model = AppModel(context)
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                ClassicPhoneShell(model)
+            }
+        }
+        composeRule.runOnIdle { model.mobileDrawerOpenRequest = "tasks" }
+        composeRule.waitForIdle()
+        val sections = model.sidebarSections
+        assertTrue("tasks" in sections && "specs" in sections)
+        // Every section has its own name: before, Tasks and Specs both read "History".
+        val slots = composeRule.onAllNodes(androidx.compose.ui.test.hasText("History")).fetchSemanticsNodes().size
+        assertTrue("History shown $slots times", slots <= 1)
+        assertTrue(composeRule.onAllNodesWithText("Tasks").fetchSemanticsNodes().isNotEmpty())
     }
 }

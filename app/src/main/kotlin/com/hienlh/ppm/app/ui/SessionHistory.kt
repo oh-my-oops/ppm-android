@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui
 
+import com.hienlh.ppm.app.LocalRedesign
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -122,6 +123,8 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
     }
     val unread = model.unreadSessions()
     val mobile = LocalPpmMobile.current
+    // The day-grouped phone list is the redesign's; the Classic phone layout keeps the web's list.
+    val phoneRedesign = mobile && LocalRedesign.current
     val viewMode = rememberHistoryViewMode(model)
     val project = model.selectedProject
     // The specs whose chats show their progress in the tree; none from a server without the field.
@@ -270,7 +273,7 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                 Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
             )
-            mobile -> {
+            phoneRedesign -> {
                 // The tree is built over the list sorted by activity, so each family sits where its newest member would.
                 val roots = remember(sessions, tree) {
                     if (tree) SessionTree.build(sessions.sortedWith(compareByDescending<SessionInfo> { it.pinned }.thenByDescending { it.lastActive ?: Instant.EPOCH })) else emptyList()

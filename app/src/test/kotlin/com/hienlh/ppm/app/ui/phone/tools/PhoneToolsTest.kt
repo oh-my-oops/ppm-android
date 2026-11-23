@@ -1,5 +1,7 @@
 package com.hienlh.ppm.app.ui.phone.tools
 
+import com.hienlh.ppm.app.LocalRedesign
+import androidx.compose.runtime.CompositionLocalProvider
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -220,19 +222,44 @@ class PhoneToolsTest {
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
-                SystemMonitorBody(
-                    model = model,
-                    initialTab = "processes",
-                    initialSnapshot = snap,
-                    initialServices = sampleServices(),
-                )
+                CompositionLocalProvider(LocalRedesign provides true) {
+                    SystemMonitorBody(
+                        model = model,
+                        initialTab = "processes",
+                        initialSnapshot = snap,
+                        initialServices = sampleServices(),
+                    )
+                }
             }
         }
 
-        // On phone (`mobile = true`), group kill and process kill buttons are hidden
+        // On the redesigned phone (`mobile = true`), group kill and process kill buttons are hidden
         composeRule.onNodeWithTag("proc-group-node-grp").assertIsDisplayed()
         assertEquals(0, composeRule.onAllNodesWithTag("proc-group-kill-node-grp").fetchSemanticsNodes().size)
         assertEquals(0, composeRule.onAllNodesWithTag("sysmon-preferences-trigger").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun systemMonitorBody_classicPhoneLayoutKeepsKillButtonsAndPreferences() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val model = AppModel(context)
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                CompositionLocalProvider(LocalRedesign provides false) {
+                    SystemMonitorBody(
+                        model = model,
+                        initialTab = "processes",
+                        initialSnapshot = sampleSnapshot(),
+                        initialServices = sampleServices(),
+                    )
+                }
+            }
+        }
+
+        // The Classic phone layout (before the redesign) is not look-only.
+        composeRule.onNodeWithTag("proc-group-node-grp").assertIsDisplayed()
+        assertEquals(1, composeRule.onAllNodesWithTag("proc-group-kill-node-grp").fetchSemanticsNodes().size)
+        assertEquals(1, composeRule.onAllNodesWithTag("sysmon-preferences-trigger").fetchSemanticsNodes().size)
     }
 
     @Test
