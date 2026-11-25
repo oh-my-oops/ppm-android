@@ -673,7 +673,7 @@ fun DesignsSidebarPane(
 }
 
 @Composable
-private fun DesignSidebarRow(
+internal fun DesignSidebarRow(
     design: DesignSummary,
     isActive: Boolean,
     onOpen: () -> Unit,
@@ -700,8 +700,11 @@ private fun DesignSidebarRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // The title gives way to the badges: unweighted, a long title took the whole row
+                // and left them a few pixels, where "default" broke into a column of letters.
                 BasicText(
                     design.title,
+                    Modifier.weight(1f, fill = false),
                     style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(
                         color = if (isActive) tokens.accent.color else tokens.text.color,
                     ),
@@ -756,7 +759,7 @@ private fun BadgePill(text: String, tone: Rgba) {
             .padding(horizontal = 5.dp, vertical = 1.dp),
         contentAlignment = Alignment.Center,
     ) {
-        BasicText(text, style = ppmText(9f, FontWeight.SemiBold, lineHeight = 12f).copy(color = tone.color))
+        BasicText(text, style = ppmText(9f, FontWeight.SemiBold, lineHeight = 12f).copy(color = tone.color), maxLines = 1, softWrap = false)
     }
 }
 
