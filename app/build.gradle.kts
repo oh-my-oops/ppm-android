@@ -47,6 +47,13 @@ android {
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
+    lint {
+        // A false alarm that stopped every release build once Firebase came in (11-22): Play
+        // services and viewpager2 ask for fragment 1.1.0, which resolves to 1.5.4, and
+        // registerForActivityResult needs 1.3.0. The app then went to devices as a debuggable
+        // build, several times slower, and the tablet hit an ANR drawing a chat (11-23).
+        disable += "InvalidFragmentVersionForActivityResult"
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
