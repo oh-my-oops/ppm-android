@@ -30,3 +30,7 @@ A release build is signed only when these Gradle properties are set (`~/.gradle/
 - `baselineprofile`, `microbenchmark` — startup profile and decode benchmarks.
 
 `CLAUDE.md` holds the rules the code relies on. The generators in `scripts/` (design tokens, file icons, test fixtures) read the web app's sources and expect a PPM checkout at `../../` (the layout this code was developed in); their output is committed, so the build does not need them.
+
+## License
+
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) — see `LICENSE`. You may share and adapt it with credit, not for commercial purposes, and anything you build from it must be shared under the same licence. Components vendored under `ui/*/vendor` keep their own licences (`licenses/`). PPM itself, the server this app talks to, is a separate project under its own licence.
